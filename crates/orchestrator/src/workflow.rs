@@ -129,6 +129,14 @@ impl WorkflowDefinition {
             .get(&phase)
             .and_then(|&idx| self.phases.get(idx))
     }
+
+    pub fn phases(&self) -> &[PhaseNode] {
+        &self.phases
+    }
+
+    pub fn transitions(&self) -> &[TransitionSpec] {
+        &self.transitions
+    }
 }
 
 pub trait ExecutionEngine: Send + Sync {

@@ -2,6 +2,7 @@
 
 pub mod artifact;
 pub mod finding;
+pub mod graph;
 pub mod journal;
 pub mod run;
 pub mod store;
