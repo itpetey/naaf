@@ -1,0 +1,1 @@
+//! OpenSpec artifact schemas.

@@ -1,0 +1,1 @@
+//! Common request/response types.
