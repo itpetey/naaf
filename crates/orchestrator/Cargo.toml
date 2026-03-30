@@ -14,3 +14,4 @@ petgraph.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
+model.workspace = true

@@ -1,8 +1,11 @@
 //! Workflow graph definition and execution.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+
+use model::ModelProvider;
 
 use crate::artifact::ArtifactKind;
 use crate::run::Phase;
@@ -166,6 +169,23 @@ pub enum EngineError {
     #[error("Worker execution failed: {0}")]
     WorkerFailed(String),
 
+    #[error("Model provider error: {0}")]
+    ModelError(#[from] model::ProviderError),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+pub struct ModelClient {
+    provider: Arc<dyn ModelProvider>,
+}
+
+impl ModelClient {
+    pub fn new(provider: Arc<dyn ModelProvider>) -> Self {
+        Self { provider }
+    }
+
+    pub fn provider(&self) -> Arc<dyn ModelProvider> {
+        Arc::clone(&self.provider)
+    }
 }
