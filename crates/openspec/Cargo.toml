@@ -1,10 +1,11 @@
 [package]
-name = "openspec"
+name = "naaf-openspec"
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
 license.workspace = true
 
 [dependencies]
-thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true

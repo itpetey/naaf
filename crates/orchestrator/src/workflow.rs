@@ -2,14 +2,13 @@
 
 use std::sync::Arc;
 
+use naaf_model::{GenerationRequest, Message, ModelProvider, ProviderError};
+use naaf_openspec::workers::WorkerSpec;
+use naaf_openspec::{TransitionSpec, WorkflowDefinition, all_worker_specs, decode};
 use serde::{Deserialize, Serialize};
-
-use model::{GenerationRequest, Message, ModelProvider};
 
 use crate::artifact::{Artifact, ArtifactId, ArtifactKind};
 use crate::run::Phase;
-use openspec::decode;
-use openspec::workers::WorkerSpec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PhaseNode {
@@ -48,10 +47,10 @@ pub trait ExecutionEngine: Send + Sync {
     fn execute_transition(
         &self,
         run: &mut crate::run::Run,
-        spec: &openspec::TransitionSpec,
-    ) -> Result<crate::artifact::Artifact, EngineError>;
+        spec: &TransitionSpec,
+    ) -> impl std::future::Future<Output = Result<crate::artifact::Artifact, EngineError>> + Send;
 
-    fn can_execute(&self, run: &crate::run::Run, spec: &openspec::TransitionSpec) -> bool;
+    fn can_execute(&self, run: &crate::run::Run, spec: &TransitionSpec) -> bool;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -72,7 +71,7 @@ pub enum EngineError {
     WorkerFailed(String),
 
     #[error("Model provider error: {0}")]
-    ModelError(#[from] model::ProviderError),
+    ModelError(#[from] ProviderError),
 
     #[error("Failed to parse worker output: {0}")]
     ParseError(String),
@@ -87,27 +86,27 @@ pub enum EngineError {
     Journal(#[from] crate::journal::JournalError),
 }
 
-pub struct ModelClient {
-    provider: Arc<dyn ModelProvider>,
+pub struct ModelClient<P: ModelProvider> {
+    provider: Arc<P>,
 }
 
-impl ModelClient {
-    pub fn new(provider: Arc<dyn ModelProvider>) -> Self {
+impl<P: ModelProvider> ModelClient<P> {
+    pub fn new(provider: Arc<P>) -> Self {
         Self { provider }
     }
 
-    pub fn provider(&self) -> Arc<dyn ModelProvider> {
+    pub fn provider(&self) -> Arc<P> {
         Arc::clone(&self.provider)
     }
 }
 
-pub struct WorkerExecutor {
-    provider: Arc<dyn ModelProvider>,
+pub struct WorkerExecutor<P: ModelProvider> {
+    provider: Arc<P>,
     model: String,
 }
 
-impl WorkerExecutor {
-    pub fn new(provider: Arc<dyn ModelProvider>, model: String) -> Self {
+impl<P: ModelProvider> WorkerExecutor<P> {
+    pub fn new(provider: Arc<P>, model: String) -> Self {
         Self { provider, model }
     }
 
@@ -123,7 +122,7 @@ impl WorkerExecutor {
         prompt
     }
 
-    pub fn execute(
+    pub async fn execute(
         &self,
         spec: &WorkerSpec,
         artifacts: &[(&Artifact, &[u8])],
@@ -135,21 +134,22 @@ impl WorkerExecutor {
         let response = self
             .provider
             .generate(request)
+            .await
             .map_err(EngineError::ModelError)?;
 
         Ok(response.content)
     }
 }
 
-pub struct DefaultExecutionEngine {
-    executor: WorkerExecutor,
+pub struct DefaultExecutionEngine<P: ModelProvider> {
+    executor: WorkerExecutor<P>,
     store: crate::store::ArtifactStore,
     journal: crate::journal::Journal,
 }
 
-impl DefaultExecutionEngine {
+impl<P: ModelProvider> DefaultExecutionEngine<P> {
     pub fn new(
-        provider: Arc<dyn ModelProvider>,
+        provider: Arc<P>,
         model: String,
         store: crate::store::ArtifactStore,
         journal: crate::journal::Journal,
@@ -161,7 +161,7 @@ impl DefaultExecutionEngine {
         }
     }
 
-    pub fn executor(&self) -> &WorkerExecutor {
+    pub fn executor(&self) -> &WorkerExecutor<P> {
         &self.executor
     }
 
@@ -174,50 +174,55 @@ impl DefaultExecutionEngine {
     }
 }
 
-impl ExecutionEngine for DefaultExecutionEngine {
-    fn execute_transition(
+impl<P: ModelProvider + Sync> ExecutionEngine for DefaultExecutionEngine<P> {
+    async fn execute_transition(
         &self,
         run: &mut crate::run::Run,
-        spec: &openspec::TransitionSpec,
+        spec: &TransitionSpec,
     ) -> Result<crate::artifact::Artifact, EngineError> {
         self.execute_transition_with_retry(run, spec, spec.retry_limit)
+            .await
     }
 
-    fn can_execute(&self, run: &crate::run::Run, spec: &openspec::TransitionSpec) -> bool {
+    fn can_execute(&self, run: &crate::run::Run, spec: &TransitionSpec) -> bool {
         run.phase == spec.from_phase
     }
 }
 
-impl DefaultExecutionEngine {
-    fn execute_transition_with_retry(
+impl<P: ModelProvider + Sync> DefaultExecutionEngine<P> {
+    async fn execute_transition_with_retry(
         &self,
         run: &mut crate::run::Run,
-        spec: &openspec::TransitionSpec,
-        remaining_retries: u32,
+        spec: &TransitionSpec,
+        initial_retries: u32,
     ) -> Result<crate::artifact::Artifact, EngineError> {
-        match self.execute_transition_once(run, spec) {
-            Ok(artifact) => Ok(artifact),
-            Err(e) => {
-                if remaining_retries > 0 {
-                    tracing::warn!(
-                        "Transition {} failed, {} retries remaining: {}",
-                        spec.name,
-                        remaining_retries,
-                        e
-                    );
-                    self.execute_transition_with_retry(run, spec, remaining_retries - 1)
-                } else {
-                    Err(e)
+        let mut remaining_retries = initial_retries;
+        loop {
+            match self.execute_transition_once(run, spec).await {
+                Ok(artifact) => return Ok(artifact),
+                Err(e) => {
+                    if remaining_retries > 0 {
+                        tracing::warn!(
+                            "Transition {} failed, {} retries remaining: {}",
+                            spec.name,
+                            remaining_retries,
+                            e
+                        );
+                        remaining_retries -= 1;
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
                 }
             }
         }
     }
 
     #[tracing::instrument(skip(self, run, spec), fields(run_id = %run.id, from_phase = ?run.phase, to_phase = ?spec.to_phase, transition_name = %spec.name))]
-    fn execute_transition_once(
+    async fn execute_transition_once(
         &self,
         run: &mut crate::run::Run,
-        spec: &openspec::TransitionSpec,
+        spec: &TransitionSpec,
     ) -> Result<crate::artifact::Artifact, EngineError> {
         let artifacts: Vec<(Artifact, Vec<u8>)> = self.load_required_artifacts(run, spec)?;
 
@@ -228,7 +233,7 @@ impl DefaultExecutionEngine {
             .map(|(artifact, content)| (artifact, content.as_slice()))
             .collect();
 
-        let output = self.executor.execute(&worker_spec, &artifact_refs)?;
+        let output = self.executor.execute(&worker_spec, &artifact_refs).await?;
 
         let content = self.decode_output(&spec.produces, &output)?;
 
@@ -255,7 +260,7 @@ impl DefaultExecutionEngine {
     fn load_required_artifacts(
         &self,
         run: &crate::run::Run,
-        spec: &openspec::TransitionSpec,
+        spec: &TransitionSpec,
     ) -> Result<Vec<(Artifact, Vec<u8>)>, EngineError> {
         let refs = self.store.list(run.id)?;
 
@@ -276,7 +281,7 @@ impl DefaultExecutionEngine {
     }
 
     fn find_worker_spec(&self, worker_id: &str) -> Result<WorkerSpec, EngineError> {
-        for spec in openspec::all_worker_specs() {
+        for spec in all_worker_specs() {
             if spec.id.name() == worker_id {
                 return Ok(spec);
             }
@@ -307,9 +312,9 @@ impl DefaultExecutionEngine {
 }
 
 #[tracing::instrument(skip(engine, workflow, run), fields(run_id = %run.id, initial_phase = ?run.phase))]
-pub fn run_workflow(
-    engine: &DefaultExecutionEngine,
-    workflow: &openspec::WorkflowDefinition,
+pub async fn run_workflow<P: ModelProvider + Sync>(
+    engine: &DefaultExecutionEngine<P>,
+    workflow: &WorkflowDefinition,
     run: &mut crate::run::Run,
 ) -> Result<crate::run::Outcome, EngineError> {
     let mut current_phase = run.phase;
@@ -332,7 +337,7 @@ pub fn run_workflow(
             return Ok(run.outcome.clone());
         }
 
-        match engine.execute_transition(run, spec) {
+        match engine.execute_transition(run, spec).await {
             Ok(_) => {
                 current_phase = run.phase;
             }
@@ -367,24 +372,28 @@ pub fn run_workflow(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openspec::workers::{WorkerId, WorkerSpec};
+    use naaf_model::{GenerationResponse, ProviderCapabilities, Usage};
+    use naaf_openspec::{
+        ArtifactKind,
+        workers::{WorkerId, WorkerSpec},
+    };
 
-    #[test]
-    fn test_render_prompt_with_single_artifact() {
+    #[tokio::test]
+    async fn test_render_prompt_with_single_artifact() {
         let provider = Arc::new(MockProvider::new());
         let executor = WorkerExecutor::new(provider, "test-model".to_string());
 
         let spec = WorkerSpec {
             id: WorkerId::RequestNormalizer,
-            consumes: vec![openspec::ArtifactKind::UserPrompt],
-            produces: openspec::ArtifactKind::NormalizedSpec,
+            consumes: vec![ArtifactKind::UserPrompt],
+            produces: ArtifactKind::NormalizedSpec,
             prompt_template: "Input: {user_prompt}\nOutput:",
             success_criteria: vec![],
         };
 
         let artifact = Artifact::new(
             crate::run::RunId::new(),
-            openspec::ArtifactKind::UserPrompt,
+            ArtifactKind::UserPrompt,
             vec![],
             std::path::PathBuf::from("test.bin"),
         );
@@ -395,25 +404,22 @@ mod tests {
         assert!(prompt.contains("Build a login system"));
     }
 
-    #[test]
-    fn test_render_prompt_with_multiple_artifacts() {
+    #[tokio::test]
+    async fn test_render_prompt_with_multiple_artifacts() {
         let provider = Arc::new(MockProvider::new());
         let executor = WorkerExecutor::new(provider, "test-model".to_string());
 
         let spec = WorkerSpec {
             id: WorkerId::ProposalSkeletonBuilder,
-            consumes: vec![
-                openspec::ArtifactKind::NormalizedSpec,
-                openspec::ArtifactKind::ScopeReport,
-            ],
-            produces: openspec::ArtifactKind::ProposalSkeleton,
+            consumes: vec![ArtifactKind::NormalizedSpec, ArtifactKind::ScopeReport],
+            produces: ArtifactKind::ProposalSkeleton,
             prompt_template: "Spec: {normalized_spec}\nScope: {scope_report}\nBuild proposal:",
             success_criteria: vec![],
         };
 
         let artifact1 = Artifact::new(
             crate::run::RunId::new(),
-            openspec::ArtifactKind::NormalizedSpec,
+            ArtifactKind::NormalizedSpec,
             vec![],
             std::path::PathBuf::from("spec.bin"),
         );
@@ -421,7 +427,7 @@ mod tests {
 
         let artifact2 = Artifact::new(
             crate::run::RunId::new(),
-            openspec::ArtifactKind::ScopeReport,
+            ArtifactKind::ScopeReport,
             vec![],
             std::path::PathBuf::from("scope.bin"),
         );
@@ -443,14 +449,14 @@ mod tests {
     }
 
     impl ModelProvider for MockProvider {
-        fn generate(
+        async fn generate(
             &self,
-            _request: model::types::GenerationRequest,
-        ) -> std::result::Result<model::types::GenerationResponse, model::ProviderError> {
-            Ok(model::types::GenerationResponse {
+            _request: GenerationRequest,
+        ) -> std::result::Result<GenerationResponse, ProviderError> {
+            Ok(GenerationResponse {
                 content: "mock response".to_string(),
                 model: "test".to_string(),
-                usage: model::types::Usage {
+                usage: Usage {
                     prompt_tokens: 10,
                     completion_tokens: 20,
                     total_tokens: 30,
@@ -459,8 +465,8 @@ mod tests {
             })
         }
 
-        fn capabilities(&self) -> model::types::ProviderCapabilities {
-            model::types::ProviderCapabilities::new(false, 1000)
+        async fn capabilities(&self) -> ProviderCapabilities {
+            ProviderCapabilities::new(false, 1000)
         }
     }
 }

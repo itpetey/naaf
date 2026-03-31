@@ -1,7 +1,8 @@
 [package]
-name = "tui"
+name = "naaf-tui"
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
 license.workspace = true
 
 [[bin]]
@@ -9,4 +10,4 @@ name = "naaf-tui"
 path = "src/main.rs"
 
 [dependencies]
-tracing-subscriber = "0.3"
+tracing-subscriber = { workspace = true, features = ["fmt"] }

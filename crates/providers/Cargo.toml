@@ -1,0 +1,20 @@
+[package]
+name = "naaf-providers"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+naaf-model = { path = "../model" }
+reqwest = { workspace = true, features = ["json"] }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+httpmock.workspace = true
+tokio.workspace = true
+
+[features]
+default = ["openai"]
+openai = []

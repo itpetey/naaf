@@ -2,11 +2,11 @@
 
 use std::env;
 
-use model::{
+use naaf_model::{
     GenerationRequest, GenerationResponse, Message, ModelProvider, ProviderCapabilities,
-    ProviderError, Result,
+    ProviderError, Result, Usage,
 };
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -120,7 +120,7 @@ impl OpenAiProvider {
 }
 
 impl ModelProvider for OpenAiProvider {
-    fn generate(&self, request: GenerationRequest) -> Result<GenerationResponse> {
+    async fn generate(&self, request: GenerationRequest) -> Result<GenerationResponse> {
         let openai_request = OpenAiRequest {
             model: request.model.clone(),
             messages: request.messages.clone(),
@@ -135,11 +135,13 @@ impl ModelProvider for OpenAiProvider {
             .header("Content-Type", "application/json")
             .json(&openai_request)
             .send()
+            .await
             .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
 
         let status = response.status();
         let body = response
             .text()
+            .await
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
         if !status.is_success() {
@@ -158,7 +160,7 @@ impl ModelProvider for OpenAiProvider {
         Ok(GenerationResponse {
             content: choice.message.content,
             model: openai_response.model,
-            usage: model::Usage {
+            usage: Usage {
                 prompt_tokens: openai_response.usage.prompt_tokens,
                 completion_tokens: openai_response.usage.completion_tokens,
                 total_tokens: openai_response.usage.total_tokens,
@@ -167,7 +169,7 @@ impl ModelProvider for OpenAiProvider {
         })
     }
 
-    fn capabilities(&self) -> ProviderCapabilities {
+    async fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities::new(false, 128_000).with_models(vec![
             "gpt-4".to_string(),
             "gpt-4-turbo".to_string(),
@@ -202,8 +204,8 @@ mod integration {
     use super::*;
     use httpmock::MockServer;
 
-    #[test]
-    fn test_successful_generation_call() {
+    #[tokio::test]
+    async fn test_successful_generation_call() {
         let server = MockServer::start();
 
         let mock_response = serde_json::json!({
@@ -240,7 +242,7 @@ mod integration {
 
         let request = GenerationRequest::new("gpt-4".to_string(), vec![Message::user("Hello")]);
 
-        let result = provider.generate(request);
+        let result = provider.generate(request).await;
 
         assert!(result.is_ok());
         let response = result.unwrap();
@@ -252,8 +254,8 @@ mod integration {
         _mock.assert();
     }
 
-    #[test]
-    fn test_api_error_mapping() {
+    #[tokio::test]
+    async fn test_api_error_mapping() {
         let server = MockServer::start();
 
         let error_response = serde_json::json!({
@@ -280,7 +282,7 @@ mod integration {
 
         let request = GenerationRequest::new("gpt-4".to_string(), vec![Message::user("Hello")]);
 
-        let result = provider.generate(request);
+        let result = provider.generate(request).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();

@@ -4,9 +4,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use chrono::Utc;
+use naaf_openspec::workers::{
+    consistency_reviewer_spec, findings_aggregator_spec, readiness_evaluator_spec,
+    remediation_planner_spec, risk_reviewer_spec, targeted_remediator_spec,
+};
 use serde::{Deserialize, Serialize};
 
-use model::ModelProvider;
+use naaf_model::{ModelProvider, ProviderError};
 
 use crate::artifact::{Artifact, ArtifactId, ArtifactKind};
 use crate::finding::{Finding, FindingId, FindingStatus, Severity};
@@ -28,7 +32,7 @@ pub enum RemediationError {
     WorkerFailed(String),
 
     #[error("Model provider error: {0}")]
-    ModelError(#[from] model::ProviderError),
+    ModelError(#[from] ProviderError),
 
     #[error("Engine error: {0}")]
     Engine(#[from] crate::workflow::EngineError),
@@ -100,16 +104,16 @@ struct ReadinessDecision {
     reasons: Vec<String>,
 }
 
-pub struct RemediationEngine {
-    executor: Arc<WorkerExecutor>,
+pub struct RemediationEngine<P: ModelProvider> {
+    executor: Arc<WorkerExecutor<P>>,
     artifact_store: ArtifactStore,
     finding_store: FindingStore,
     journal: crate::journal::Journal,
 }
 
-impl RemediationEngine {
+impl<P: ModelProvider + Sync> RemediationEngine<P> {
     pub fn new(
-        provider: Arc<dyn ModelProvider>,
+        provider: Arc<P>,
         model: String,
         artifact_store: ArtifactStore,
         finding_store: FindingStore,
@@ -129,35 +133,44 @@ impl RemediationEngine {
         let proposal = self.load_latest_proposal(run.id)?;
         let content = self.load_artifact_content(&proposal)?;
 
-        let risk_spec = openspec::workers::risk_reviewer_spec();
-        let consistency_spec = openspec::workers::consistency_reviewer_spec();
+        let risk_spec = risk_reviewer_spec();
+        let consistency_spec = consistency_reviewer_spec();
 
         let executor = Arc::clone(&self.executor);
         let proposal_clone = proposal.clone();
         let content_clone = content.clone();
+        let risk_spec_clone = risk_spec.clone();
 
-        let risk_handle = tokio::task::spawn_blocking(move || {
-            let content_bytes = content_clone.as_bytes();
-            executor.execute(&risk_spec, &[(&proposal_clone, content_bytes)])
-        });
-
-        let executor = Arc::clone(&self.executor);
+        let executor2 = Arc::clone(&self.executor);
         let proposal_clone2 = proposal.clone();
         let content_clone2 = content.clone();
+        let consistency_spec_clone = consistency_spec.clone();
 
-        let consistency_handle = tokio::task::spawn_blocking(move || {
+        let risk_future = async move {
+            let content_bytes = content_clone.as_bytes();
+            executor
+                .execute(&risk_spec_clone, &[(&proposal_clone, content_bytes)])
+                .await
+        };
+
+        let consistency_future = async move {
             let content_bytes = content_clone2.as_bytes();
-            executor.execute(&consistency_spec, &[(&proposal_clone2, content_bytes)])
-        });
+            executor2
+                .execute(
+                    &consistency_spec_clone,
+                    &[(&proposal_clone2, content_bytes)],
+                )
+                .await
+        };
 
-        let (risk_result, consistency_result) =
-            tokio::try_join!(risk_handle, consistency_handle)
-                .map_err(|e| RemediationError::Parallel(e.to_string()))?;
+        let (risk_result, consistency_result) = tokio::join!(risk_future, consistency_future);
 
         let risk_findings = risk_result?;
         let consistency_findings = consistency_result?;
 
-        let aggregated = self.aggregate_findings(run, &risk_findings, &consistency_findings)?;
+        let aggregated = self
+            .aggregate_findings(run, &risk_findings, &consistency_findings)
+            .await?;
 
         let findings = self.persist_findings(run, &aggregated)?;
 
@@ -196,13 +209,13 @@ impl RemediationEngine {
         String::from_utf8(content).map_err(|e| RemediationError::Utf8Error(e.to_string()))
     }
 
-    fn aggregate_findings(
+    async fn aggregate_findings(
         &self,
         run: &mut Run,
         risk_findings: &str,
         consistency_findings: &str,
     ) -> RemediationResult<AggregatedFindings> {
-        let spec = openspec::workers::findings_aggregator_spec();
+        let spec = findings_aggregator_spec();
 
         let risk_artifact = Artifact::new(
             run.id,
@@ -217,13 +230,16 @@ impl RemediationEngine {
             std::path::PathBuf::from("consistency_findings.json"),
         );
 
-        let output = self.executor.execute(
-            &spec,
-            &[
-                (&risk_artifact, risk_findings.as_bytes()),
-                (&consistency_artifact, consistency_findings.as_bytes()),
-            ],
-        )?;
+        let output = self
+            .executor
+            .execute(
+                &spec,
+                &[
+                    (&risk_artifact, risk_findings.as_bytes()),
+                    (&consistency_artifact, consistency_findings.as_bytes()),
+                ],
+            )
+            .await?;
 
         let parsed: AggregatedFindings = serde_json::from_str(&output)
             .map_err(|e| RemediationError::ParseError(e.to_string()))?;
@@ -291,7 +307,7 @@ impl RemediationEngine {
         let proposal = self.load_latest_proposal(run.id)?;
         let findings_artifact = self.create_findings_artifact(run, findings, &[proposal.id])?;
 
-        let plan_output = self.execute_remediation_planner(&findings_artifact)?;
+        let plan_output = self.execute_remediation_planner(&findings_artifact).await?;
 
         if plan_output.should_escalate {
             return Ok(RemediationCycleOutcome::Escalate {
@@ -299,7 +315,9 @@ impl RemediationEngine {
             });
         }
 
-        let patch_artifact = self.execute_targeted_remediator(run, &proposal, &plan_output)?;
+        let patch_artifact = self
+            .execute_targeted_remediator(run, &proposal, &plan_output)
+            .await?;
 
         self.apply_patch(run, &proposal, &patch_artifact)?;
 
@@ -345,15 +363,16 @@ impl RemediationEngine {
         Ok(artifact)
     }
 
-    fn execute_remediation_planner(
+    async fn execute_remediation_planner(
         &self,
         findings_artifact: &Artifact,
     ) -> RemediationResult<RemediationPlanOutput> {
-        let spec = openspec::workers::remediation_planner_spec();
+        let spec = remediation_planner_spec();
         let content = self.load_artifact_content(findings_artifact)?;
         let output = self
             .executor
-            .execute(&spec, &[(findings_artifact, content.as_bytes())])?;
+            .execute(&spec, &[(findings_artifact, content.as_bytes())])
+            .await?;
 
         let parsed: RemediationPlanOutput = serde_json::from_str(&output)
             .map_err(|e| RemediationError::ParseError(e.to_string()))?;
@@ -361,13 +380,13 @@ impl RemediationEngine {
         Ok(parsed)
     }
 
-    fn execute_targeted_remediator(
+    async fn execute_targeted_remediator(
         &self,
         run: &mut Run,
         proposal: &Artifact,
         plan: &RemediationPlanOutput,
     ) -> RemediationResult<Artifact> {
-        let spec = openspec::workers::targeted_remediator_spec();
+        let spec = targeted_remediator_spec();
 
         let proposal_content = self.load_artifact_content(proposal)?;
 
@@ -382,13 +401,16 @@ impl RemediationEngine {
         self.artifact_store
             .save(&plan_artifact, plan_json.as_bytes())?;
 
-        let output = self.executor.execute(
-            &spec,
-            &[
-                (proposal, proposal_content.as_bytes()),
-                (&plan_artifact, plan_json.as_bytes()),
-            ],
-        )?;
+        let output = self
+            .executor
+            .execute(
+                &spec,
+                &[
+                    (proposal, proposal_content.as_bytes()),
+                    (&plan_artifact, plan_json.as_bytes()),
+                ],
+            )
+            .await?;
 
         let patch_artifact = Artifact::new(
             run.id,
@@ -490,7 +512,7 @@ impl RemediationEngine {
         patch_artifact: &Artifact,
         findings: &FindingSet,
     ) -> RemediationResult<ReadinessDecision> {
-        let spec = openspec::workers::readiness_evaluator_spec();
+        let spec = readiness_evaluator_spec();
 
         let proposal_content = self.load_artifact_content(proposal)?;
         let patch_content = self.artifact_store.load(patch_artifact.id, run.id)?.1;
@@ -510,26 +532,18 @@ impl RemediationEngine {
             run.worktree.clone(),
         );
 
-        let executor = Arc::clone(&self.executor);
-        let proposal_clone = proposal.clone();
-        let patch_clone = patch_artifact.clone();
-        let proposal_content_clone = proposal_content.clone();
-        let patch_content_clone = patch_content.clone();
-        let findings_json_clone = findings_json.clone();
-
-        let output = tokio::task::spawn_blocking(move || {
-            executor.execute(
+        let output = self
+            .executor
+            .execute(
                 &spec,
                 &[
-                    (&proposal_artifact, proposal_content_clone.as_bytes()),
-                    (&proposal_clone, proposal_content.as_bytes()),
-                    (&patch_clone, &patch_content_clone),
-                    (&findings_input_artifact, findings_json_clone.as_bytes()),
+                    (&proposal_artifact, proposal_content.as_bytes()),
+                    (proposal, proposal_content.as_bytes()),
+                    (patch_artifact, &patch_content),
+                    (&findings_input_artifact, findings_json.as_bytes()),
                 ],
             )
-        })
-        .await
-        .map_err(|e| RemediationError::Parallel(e.to_string()))??;
+            .await?;
 
         let parsed: ReadinessDecision = serde_json::from_str(&output)
             .map_err(|e| RemediationError::ParseError(e.to_string()))?;
@@ -620,7 +634,10 @@ pub enum RemediationCycleOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::sync::Arc;
+
+    use naaf_model::{GenerationRequest, GenerationResponse, ProviderCapabilities, Usage};
     use tempfile::TempDir;
 
     struct MockProvider;
@@ -632,14 +649,14 @@ mod tests {
     }
 
     impl ModelProvider for MockProvider {
-        fn generate(
+        async fn generate(
             &self,
-            _request: model::types::GenerationRequest,
-        ) -> std::result::Result<model::types::GenerationResponse, model::ProviderError> {
-            Ok(model::types::GenerationResponse {
+            _request: GenerationRequest,
+        ) -> std::result::Result<GenerationResponse, ProviderError> {
+            Ok(GenerationResponse {
                 content: r#"{"decision": "accepted", "reasons": [], "next_steps": []}"#.to_string(),
                 model: "test".to_string(),
-                usage: model::types::Usage {
+                usage: Usage {
                     prompt_tokens: 10,
                     completion_tokens: 20,
                     total_tokens: 30,
@@ -648,12 +665,12 @@ mod tests {
             })
         }
 
-        fn capabilities(&self) -> model::types::ProviderCapabilities {
-            model::types::ProviderCapabilities::new(false, 1000)
+        async fn capabilities(&self) -> ProviderCapabilities {
+            ProviderCapabilities::new(false, 1000)
         }
     }
 
-    fn setup_engine() -> (RemediationEngine, TempDir, TempDir) {
+    fn setup_engine() -> (RemediationEngine<MockProvider>, TempDir, TempDir) {
         let artifact_dir = TempDir::new().unwrap();
         let finding_dir = TempDir::new().unwrap();
         let journal_dir = TempDir::new().unwrap();

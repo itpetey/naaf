@@ -1,9 +1,10 @@
 [package]
-name = "model"
+name = "naaf-model"
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
 license.workspace = true
 
 [dependencies]
-serde.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

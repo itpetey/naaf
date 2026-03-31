@@ -1,18 +1,19 @@
 [package]
-name = "orchestrator"
+name = "naaf-orchestrator"
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
 license.workspace = true
 
 [dependencies]
-thiserror.workspace = true
+chrono = { workspace = true, features = ["now", "serde"] }
+naaf-model.workspace = true
+naaf-openspec.workspace = true
+petgraph.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
-petgraph.workspace = true
-uuid.workspace = true
-chrono.workspace = true
 tempfile.workspace = true
-tokio.workspace = true
-model.workspace = true
-openspec.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros"] }
+tracing = { workspace = true, features = ["attributes", "std"] }
+uuid = { workspace = true, features = ["serde", "v4"] }

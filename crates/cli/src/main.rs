@@ -7,21 +7,19 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use model::ModelProvider;
-use provider_openai::client::OpenAiProvider;
-
-use openspec::openspec_happy_path;
-use orchestrator::artifact::{Artifact, ArtifactId, ArtifactKind};
-use orchestrator::journal::Journal;
-use orchestrator::run::{Outcome, Run, RunId, TaskId};
-use orchestrator::store::ArtifactStore;
-use orchestrator::workflow::{DefaultExecutionEngine, run_workflow};
+use naaf_openspec::{Phase, openspec_happy_path};
+use naaf_orchestrator::{
+    artifact::{Artifact, ArtifactId, ArtifactKind},
+    journal::{Event, Journal},
+    run::{Outcome, Run, RunId, TaskId, TerminalReason},
+    store::ArtifactStore,
+    workflow::{DefaultExecutionEngine, run_workflow},
+};
+use naaf_providers::openai::OpenAiProvider;
 
 const RUNS_DIR: &str = ".runs";
 
 #[derive(Parser, Debug)]
-#[command(name = "naaf")]
-#[command(about = "OpenSpec Orchestrator CLI", long_about = None)]
 struct Args {
     #[command(subcommand)]
     command: Command,
@@ -62,12 +60,13 @@ enum Command {
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
         Command::Run { prompt } => {
-            run(prompt)?;
+            run(prompt).await?;
         }
         Command::List => {
             list_runs()?;
@@ -86,9 +85,9 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run(prompt: String) -> Result<()> {
+async fn run(prompt: String) -> Result<()> {
     let provider = match OpenAiProvider::from_env() {
-        Ok(p) => Arc::new(p) as Arc<dyn ModelProvider>,
+        Ok(p) => Arc::new(p),
         Err(e) => {
             eprintln!("Error: Failed to initialize OpenAI provider");
             eprintln!("{}", e);
@@ -98,7 +97,7 @@ fn run(prompt: String) -> Result<()> {
         }
     };
 
-    let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4".to_string());
+    let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5".to_string());
 
     let runs_dir = PathBuf::from(RUNS_DIR);
     std::fs::create_dir_all(&runs_dir)?;
@@ -129,7 +128,7 @@ fn run(prompt: String) -> Result<()> {
 
     let mut run = Run::new(task_id, worktree);
 
-    let outcome = run_workflow(&engine, &workflow, &mut run)?;
+    let outcome = run_workflow(&engine, &workflow, &mut run).await?;
 
     match &outcome {
         Outcome::Done => {
@@ -137,13 +136,13 @@ fn run(prompt: String) -> Result<()> {
         }
         Outcome::Failed(reason) => {
             println!("\nOutcome: FAILED");
-            if let orchestrator::run::TerminalReason::Failed { message } = reason {
+            if let TerminalReason::Failed { message } = reason {
                 println!("Reason: {}", message);
             }
         }
         Outcome::Escalated(reason) => {
             println!("\nOutcome: ESCALATED");
-            if let orchestrator::run::TerminalReason::Escalated { message } = reason {
+            if let TerminalReason::Escalated { message } = reason {
                 println!("Reason: {}", message);
             }
         }
@@ -206,7 +205,6 @@ fn list_runs() -> Result<()> {
 
             if let Ok(events) = journal.for_run(run_uuid) {
                 for event in events.flatten() {
-                    use orchestrator::journal::Event;
                     match &event {
                         Event::RunCreated { timestamp, .. } => {
                             last_timestamp = Some(*timestamp);
@@ -215,7 +213,7 @@ fn list_runs() -> Result<()> {
                             run_id: _,
                             timestamp,
                         } => {
-                            last_phase = format!("{:?}", orchestrator::run::Phase::default());
+                            last_phase = format!("{:?}", Phase::default());
                             last_timestamp = Some(*timestamp);
                         }
                         Event::TransitionExecuted {
@@ -287,13 +285,12 @@ fn inspect_run(run_id: &str) -> Result<()> {
 
     if let Ok(events) = journal.for_run(run_uuid) {
         for event in events.flatten() {
-            use orchestrator::journal::Event;
             match &event {
                 Event::RunStarted {
                     timestamp: _,
                     run_id: _,
                 } => {
-                    phase = format!("{:?}", orchestrator::run::Phase::default());
+                    phase = format!("{:?}", Phase::default());
                 }
                 Event::TransitionExecuted {
                     to_phase,
@@ -410,7 +407,6 @@ fn journal(run_id: &str, filter: Option<&str>) -> Result<()> {
     let filter_types: Option<Vec<&str>> = filter.map(|f| f.split(',').map(|s| s.trim()).collect());
 
     for event in events {
-        use orchestrator::journal::Event;
         let timestamp = match &event {
             Event::TaskCreated { timestamp, .. } => timestamp,
             Event::RunCreated { timestamp, .. } => timestamp,

@@ -33,6 +33,9 @@ impl Error for ProviderError {}
 pub type Result<T> = std::result::Result<T, ProviderError>;
 
 pub trait ModelProvider: Send + Sync {
-    fn generate(&self, request: GenerationRequest) -> Result<GenerationResponse>;
-    fn capabilities(&self) -> ProviderCapabilities;
+    fn generate(
+        &self,
+        request: GenerationRequest,
+    ) -> impl Future<Output = Result<GenerationResponse>> + Send;
+    fn capabilities(&self) -> impl Future<Output = ProviderCapabilities> + Send;
 }
