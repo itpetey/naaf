@@ -13,5 +13,6 @@ petgraph.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
+tokio.workspace = true
 model.workspace = true
 openspec.workspace = true

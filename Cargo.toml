@@ -23,6 +23,7 @@ petgraph = "0.8"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 model = { path = "crates/model" }
 openspec = { path = "crates/openspec" }

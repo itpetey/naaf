@@ -6,7 +6,7 @@ use std::fmt;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FindingId(pub Uuid);
 
 impl FindingId {

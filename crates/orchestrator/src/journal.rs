@@ -46,6 +46,11 @@ pub enum Event {
         timestamp: DateTime<Utc>,
     },
 
+    ReviewStarted {
+        run_id: RunId,
+        timestamp: DateTime<Utc>,
+    },
+
     TransitionExecuted {
         run_id: RunId,
         from_phase: Phase,
@@ -101,6 +106,7 @@ impl Event {
             Event::TaskCreated { .. } => None,
             Event::RunCreated { run_id, .. } => Some(*run_id),
             Event::RunStarted { run_id, .. } => Some(*run_id),
+            Event::ReviewStarted { run_id, .. } => Some(*run_id),
             Event::TransitionExecuted { run_id, .. } => Some(*run_id),
             Event::ArtifactCreated { run_id, .. } => Some(*run_id),
             Event::FindingCreated { run_id, .. } => Some(*run_id),

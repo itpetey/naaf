@@ -16,4 +16,4 @@ pub use decode::{DecodeError, Result as DecodeResult};
 pub use kind::ArtifactKind;
 pub use phase::Phase;
 pub use workers::{WorkerId, WorkerSpec, all_worker_specs};
-pub use workflow::{TransitionSpec, WorkflowDefinition, openspec_happy_path};
+pub use workflow::{TransitionSpec, WorkflowDefinition, openspec_happy_path, review_workflow};

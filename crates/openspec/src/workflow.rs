@@ -191,6 +191,54 @@ pub fn openspec_happy_path() -> WorkflowDefinition {
     ))
 }
 
+pub fn review_workflow() -> WorkflowDefinition {
+    WorkflowDefinition::new(
+        "openspec-review".to_string(),
+        "OpenSpec Review Workflow".to_string(),
+        "Workflow with review and remediation loop".to_string(),
+    )
+    .with_phase(PhaseNode::consumes(
+        Phase::Proposed,
+        ArtifactKind::UserPrompt,
+    ))
+    .with_phase(PhaseNode::produces(
+        Phase::Normalized,
+        ArtifactKind::NormalizedSpec,
+    ))
+    .with_phase(PhaseNode::produces(
+        Phase::Scoped,
+        ArtifactKind::ScopeReport,
+    ))
+    .with_phase(PhaseNode::produces(
+        Phase::Planned,
+        ArtifactKind::ProposalSkeleton,
+    ))
+    .with_transition(TransitionSpec::new(
+        "normalize".to_string(),
+        Phase::Proposed,
+        Phase::Normalized,
+        vec![ArtifactKind::UserPrompt],
+        ArtifactKind::NormalizedSpec,
+        WorkerId::RequestNormalizer.name().to_string(),
+    ))
+    .with_transition(TransitionSpec::new(
+        "scope".to_string(),
+        Phase::Normalized,
+        Phase::Scoped,
+        vec![ArtifactKind::NormalizedSpec],
+        ArtifactKind::ScopeReport,
+        WorkerId::ScopeAnalyst.name().to_string(),
+    ))
+    .with_transition(TransitionSpec::new(
+        "plan".to_string(),
+        Phase::Scoped,
+        Phase::Planned,
+        vec![ArtifactKind::NormalizedSpec, ArtifactKind::ScopeReport],
+        ArtifactKind::ProposalSkeleton,
+        WorkerId::ProposalSkeletonBuilder.name().to_string(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
