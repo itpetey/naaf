@@ -19,6 +19,7 @@ use naaf_orchestrator::{
 const RUNS_DIR: &str = ".runs";
 
 #[derive(Parser, Debug)]
+#[command(name = "naaf", about = "NAAF - Not Another AI Framework CLI", version)]
 struct Args {
     #[command(subcommand)]
     command: Command,
@@ -26,27 +27,42 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Command {
+    #[command(about = "Run a workflow with a prompt")]
     Run {
+        #[arg(help = "The prompt to process")]
         prompt: String,
-        #[arg(short, long, value_enum, default_value = "openai")]
+        #[arg(
+            short,
+            long,
+            value_enum,
+            default_value = "openai",
+            help = "Model provider"
+        )]
         provider: ProviderChoice,
-        #[arg(short, long)]
+        #[arg(short, long, help = "Model identifier")]
         model: Option<String>,
     },
+    #[command(about = "List all runs")]
     List,
+    #[command(about = "Inspect a run")]
     Inspect {
+        #[arg(help = "Run ID to inspect")]
         run_id: String,
     },
+    #[command(about = "View artifacts from a run")]
     Artifacts {
+        #[arg(help = "Run ID to view artifacts for")]
         run_id: String,
-        #[arg(short, long)]
+        #[arg(short, long, help = "Artifact ID to view")]
         view: Option<String>,
-        #[arg(short, long)]
+        #[arg(short, long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "View journal events for a run")]
     Journal {
+        #[arg(help = "Run ID to view journal for")]
         run_id: String,
-        #[arg(short, long)]
+        #[arg(short, long, help = "Comma-separated event types to filter")]
         filter: Option<String>,
     },
 }

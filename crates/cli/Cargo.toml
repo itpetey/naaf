@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 chrono = { workspace = true }
-clap = { workspace = true, features = ["derive", "std"] }
+clap = { workspace = true, features = ["derive", "help", "std"] }
 naaf-model = { path = "../model" }
 naaf-openspec = { path = "../openspec" }
 naaf-orchestrator = { path = "../orchestrator" }

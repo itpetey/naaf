@@ -102,7 +102,6 @@ mod tests {
 #[cfg(test)]
 mod integration {
     use super::*;
-    use crate::auth::Auth;
     use naaf_model::{GenerationRequest, Message, ModelProvider};
 
     #[tokio::test]
