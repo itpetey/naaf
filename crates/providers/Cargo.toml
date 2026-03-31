@@ -16,5 +16,6 @@ httpmock.workspace = true
 tokio.workspace = true
 
 [features]
-default = ["openai"]
+default = ["openai", "opencode-go"]
 openai = []
+opencode-go = []

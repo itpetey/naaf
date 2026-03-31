@@ -1,12 +1,12 @@
 //! CLI entry point.
 
-use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+use naaf_model::ModelProvider;
 use naaf_openspec::{Phase, openspec_happy_path};
 use naaf_orchestrator::{
     artifact::{Artifact, ArtifactId, ArtifactKind},
@@ -15,7 +15,6 @@ use naaf_orchestrator::{
     store::ArtifactStore,
     workflow::{DefaultExecutionEngine, run_workflow},
 };
-use naaf_providers::openai::OpenAiProvider;
 
 const RUNS_DIR: &str = ".runs";
 
@@ -27,37 +26,35 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Command {
-    /// Execute workflow from a user prompt
     Run {
-        /// The prompt to execute
         prompt: String,
+        #[arg(short, long, value_enum, default_value = "openai")]
+        provider: ProviderChoice,
+        #[arg(short, long)]
+        model: Option<String>,
     },
-    /// List all runs
     List,
-    /// Show run details
     Inspect {
-        /// The run ID to inspect
         run_id: String,
     },
-    /// List and view artifacts for a run
     Artifacts {
-        /// The run ID to list artifacts for
         run_id: String,
-        /// View artifact content
         #[arg(short, long)]
         view: Option<String>,
-        /// Output as JSON
         #[arg(short, long)]
         json: bool,
     },
-    /// Display journal events for a run
     Journal {
-        /// The run ID to show journal for
         run_id: String,
-        /// Filter by event type
         #[arg(short, long)]
         filter: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ProviderChoice {
+    Openai,
+    OpencodeGo,
 }
 
 #[tokio::main]
@@ -65,8 +62,12 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
-        Command::Run { prompt } => {
-            run(prompt).await?;
+        Command::Run {
+            prompt,
+            provider,
+            model,
+        } => {
+            run(prompt, provider, model).await?;
         }
         Command::List => {
             list_runs()?;
@@ -85,20 +86,60 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run(prompt: String) -> Result<()> {
-    let provider = match OpenAiProvider::from_env() {
-        Ok(p) => Arc::new(p),
-        Err(e) => {
-            eprintln!("Error: Failed to initialize OpenAI provider");
-            eprintln!("{}", e);
-            eprintln!("\nPlease set the OPENAI_API_KEY environment variable:");
-            eprintln!("  export OPENAI_API_KEY=your-api-key");
-            std::process::exit(1);
+async fn run(prompt: String, provider_choice: ProviderChoice, model: Option<String>) -> Result<()> {
+    match provider_choice {
+        ProviderChoice::Openai => {
+            let api_key = std::env::var("OPENAI_API_KEY").context(
+                "OPENAI_API_KEY environment variable not set.\n\
+                 Set it with: export OPENAI_API_KEY=your-api-key",
+            )?;
+            let model = model.unwrap_or_else(|| "gpt-5".to_string());
+            let provider = naaf_providers::openai::OpenAiModel::gpt5(api_key);
+            execute_workflow(prompt, Arc::new(provider), model).await
         }
-    };
+        ProviderChoice::OpencodeGo => {
+            let api_key = std::env::var("OPENCODE_GO_API_KEY").context(
+                "OPENCODE_GO_API_KEY environment variable not set.\n\
+                 Set it with: export OPENCODE_GO_API_KEY=your-api-key",
+            )?;
+            let model_input = model.unwrap_or_else(|| "glm-5".to_string());
+            let model_str = model_input.clone();
+            match model_input.to_lowercase().as_str() {
+                "glm-5" | "glm5" => {
+                    let provider = naaf_providers::opencode_go::OpenCodeGoModel::glm5(api_key);
+                    execute_workflow(prompt, Arc::new(provider), model_str).await
+                }
+                "kimi-k2.5" | "kimi-k25" | "kimik25" => {
+                    let provider = naaf_providers::opencode_go::OpenCodeGoModel::kimik25(api_key);
+                    execute_workflow(prompt, Arc::new(provider), model_str).await
+                }
+                "minimax-m2.5" | "minimaxm25" => {
+                    let provider =
+                        naaf_providers::opencode_go::OpenCodeGoModel::minimaxm25(api_key);
+                    execute_workflow(prompt, Arc::new(provider), model_str).await
+                }
+                "minimax-m2.7" | "minimaxm27" => {
+                    let provider =
+                        naaf_providers::opencode_go::OpenCodeGoModel::minimaxm27(api_key);
+                    execute_workflow(prompt, Arc::new(provider), model_str).await
+                }
+                _ => {
+                    anyhow::bail!(
+                        "Unknown OpenCode Go model: {}\n\
+                         Available models: glm-5, kimi-k2.5, minimax-m2.5, minimax-m2.7",
+                        model_input
+                    )
+                }
+            }
+        }
+    }
+}
 
-    let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5".to_string());
-
+async fn execute_workflow<P: ModelProvider + Sync + 'static>(
+    prompt: String,
+    provider: Arc<P>,
+    model: String,
+) -> Result<()> {
     let runs_dir = PathBuf::from(RUNS_DIR);
     std::fs::create_dir_all(&runs_dir)?;
 
