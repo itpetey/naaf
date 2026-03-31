@@ -383,4 +383,46 @@ mod tests {
         let run_event = run_created(run_id, task_id);
         assert_eq!(run_event.run_id(), Some(run_id));
     }
+
+    #[test]
+    fn test_transition_executed_json_format() {
+        let run_id = RunId::new();
+        let artifact_id = crate::artifact::ArtifactId::new();
+
+        let event = transition_executed(
+            run_id,
+            Phase::Proposed,
+            Phase::Normalized,
+            "request_normalizer",
+            Some(artifact_id),
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+
+        assert!(json.contains(r#""type":"transition_executed""#));
+        assert!(json.contains(&format!(r#""run_id":"{}""#, run_id)));
+        assert!(json.contains(r#""from_phase":"Proposed"#));
+        assert!(json.contains(r#""to_phase":"Normalized"#));
+        assert!(json.contains(r#""worker_id":"request_normalizer""#));
+        assert!(json.contains(&format!(r#""artifact_id":"{}""#, artifact_id)));
+
+        let decoded: Event = serde_json::from_str(&json).unwrap();
+        match decoded {
+            Event::TransitionExecuted {
+                run_id: decoded_run_id,
+                from_phase,
+                to_phase,
+                worker_id,
+                artifact_id: decoded_artifact_id,
+                ..
+            } => {
+                assert_eq!(decoded_run_id, run_id);
+                assert_eq!(from_phase, Phase::Proposed);
+                assert_eq!(to_phase, Phase::Normalized);
+                assert_eq!(worker_id, "request_normalizer");
+                assert_eq!(decoded_artifact_id, Some(artifact_id));
+            }
+            _ => panic!("Expected TransitionExecuted event"),
+        }
+    }
 }

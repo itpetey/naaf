@@ -733,8 +733,7 @@ mod tests {
     #[test]
     fn test_no_proposal_error() {
         let result: RemediationResult<()> = Err(RemediationError::NoProposal);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RemediationError::NoProposal));
+        assert!(matches!(result, Err(RemediationError::NoProposal)));
     }
 
     #[test]

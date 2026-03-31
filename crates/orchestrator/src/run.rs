@@ -97,6 +97,7 @@ pub struct Run {
 }
 
 impl Run {
+    #[tracing::instrument(skip_all)]
     pub fn new(task_id: TaskId, worktree: PathBuf) -> Self {
         let now = Utc::now();
         Self {

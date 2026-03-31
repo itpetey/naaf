@@ -213,6 +213,7 @@ impl DefaultExecutionEngine {
         }
     }
 
+    #[tracing::instrument(skip(self, run, spec), fields(run_id = %run.id, from_phase = ?run.phase, to_phase = ?spec.to_phase, transition_name = %spec.name))]
     fn execute_transition_once(
         &self,
         run: &mut crate::run::Run,
@@ -250,9 +251,7 @@ impl DefaultExecutionEngine {
 
         Ok(artifact)
     }
-}
 
-impl DefaultExecutionEngine {
     fn load_required_artifacts(
         &self,
         run: &crate::run::Run,
@@ -307,6 +306,7 @@ impl DefaultExecutionEngine {
     }
 }
 
+#[tracing::instrument(skip(engine, workflow, run), fields(run_id = %run.id, initial_phase = ?run.phase))]
 pub fn run_workflow(
     engine: &DefaultExecutionEngine,
     workflow: &openspec::WorkflowDefinition,
@@ -324,6 +324,11 @@ pub fn run_workflow(
         let spec = &transitions[0];
 
         if !engine.can_execute(run, spec) {
+            tracing::warn!(
+                from_phase = ?current_phase,
+                transition_name = %spec.name,
+                "Cannot execute transition - skipping"
+            );
             return Ok(run.outcome.clone());
         }
 
@@ -332,6 +337,13 @@ pub fn run_workflow(
                 current_phase = run.phase;
             }
             Err(e) => {
+                tracing::error!(
+                    from_phase = ?spec.from_phase,
+                    to_phase = ?spec.to_phase,
+                    transition_name = %spec.name,
+                    error = %e,
+                    "Transition failed"
+                );
                 run.fail(crate::run::TerminalReason::Failed {
                     message: format!("Transition {} failed: {}", spec.name, e),
                 });
@@ -342,6 +354,11 @@ pub fn run_workflow(
 
     if workflow.is_terminal_phase(run.phase) {
         run.complete();
+        tracing::info!(
+            outcome = "done",
+            final_phase = ?run.phase,
+            "Workflow completed successfully"
+        );
     }
 
     Ok(run.outcome.clone())
