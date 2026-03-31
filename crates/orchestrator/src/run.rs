@@ -51,6 +51,9 @@ impl std::fmt::Display for TaskId {
 pub enum Phase {
     #[default]
     Proposed,
+    Normalized,
+    Scoped,
+    Planned,
     ReadyForPlanning,
     ReadyForImplementation,
     ReadyForValidation,
@@ -64,6 +67,9 @@ impl std::fmt::Display for Phase {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Phase::Proposed => write!(f, "Proposed"),
+            Phase::Normalized => write!(f, "Normalized"),
+            Phase::Scoped => write!(f, "Scoped"),
+            Phase::Planned => write!(f, "Planned"),
             Phase::ReadyForPlanning => write!(f, "ReadyForPlanning"),
             Phase::ReadyForImplementation => write!(f, "ReadyForImplementation"),
             Phase::ReadyForValidation => write!(f, "ReadyForValidation"),
