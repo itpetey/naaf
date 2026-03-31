@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+pub use openspec::ArtifactKind;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ArtifactId(pub Uuid);
 
@@ -23,39 +25,6 @@ impl Default for ArtifactId {
 impl std::fmt::Display for ArtifactId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ArtifactKind {
-    UserPrompt,
-    NormalizedSpec,
-    ScopeReport,
-    ProposalSkeleton,
-    AcceptanceCriteriaSet,
-    TaskPlan,
-    CandidatePatch,
-    ValidationResults,
-    ReviewFindings,
-    RemediationPlan,
-    DeliveryBundle,
-}
-
-impl ArtifactKind {
-    pub fn name(&self) -> &'static str {
-        match self {
-            ArtifactKind::UserPrompt => "user_prompt",
-            ArtifactKind::NormalizedSpec => "normalized_spec",
-            ArtifactKind::ScopeReport => "scope_report",
-            ArtifactKind::ProposalSkeleton => "proposal_skeleton",
-            ArtifactKind::AcceptanceCriteriaSet => "acceptance_criteria_set",
-            ArtifactKind::TaskPlan => "task_plan",
-            ArtifactKind::CandidatePatch => "candidate_patch",
-            ArtifactKind::ValidationResults => "validation_results",
-            ArtifactKind::ReviewFindings => "review_findings",
-            ArtifactKind::RemediationPlan => "remediation_plan",
-            ArtifactKind::DeliveryBundle => "delivery_bundle",
-        }
     }
 }
 

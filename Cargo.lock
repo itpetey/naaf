@@ -1089,7 +1089,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "model",
- "orchestrator",
  "serde",
  "serde_json",
  "thiserror",
@@ -1147,6 +1146,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "model",
+ "openspec",
  "petgraph",
  "serde",
  "serde_json",

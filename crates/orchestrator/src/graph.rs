@@ -5,9 +5,7 @@ use std::collections::{HashMap, HashSet};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Dfs;
 
-use crate::artifact::ArtifactKind;
-use crate::run::Phase;
-use crate::workflow::{TransitionSpec, WorkflowDefinition};
+use openspec::{ArtifactKind, Phase, TransitionSpec, WorkflowDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationError {
@@ -182,7 +180,7 @@ fn validate_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflow::{PhaseNode, TransitionSpec};
+    use openspec::workflow::PhaseNode;
 
     fn create_test_workflow() -> WorkflowDefinition {
         WorkflowDefinition::new(

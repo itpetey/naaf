@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use orchestrator::artifact::ArtifactKind;
+use crate::kind::ArtifactKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WorkerId {

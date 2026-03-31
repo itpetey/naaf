@@ -15,3 +15,4 @@ uuid.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
 model.workspace = true
+openspec.workspace = true
