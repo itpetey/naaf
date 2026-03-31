@@ -128,7 +128,7 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
     }
 
     pub async fn execute_review_transitions(&self, run: &mut Run) -> RemediationResult<FindingSet> {
-        self.record_review_started(run)?;
+        self.record_review_started()?;
 
         let proposal = self.load_latest_proposal(run.id)?;
         let content = self.load_artifact_content(&proposal)?;
@@ -174,14 +174,13 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
 
         let findings = self.persist_findings(run, &aggregated)?;
 
-        self.record_finding_created_events(run, &findings)?;
+        self.record_finding_created_events(&findings)?;
 
         Ok(FindingSet { findings })
     }
 
-    fn record_review_started(&self, run: &Run) -> RemediationResult<()> {
+    fn record_review_started(&self) -> RemediationResult<()> {
         let event = Event::ReviewStarted {
-            run_id: run.id,
             timestamp: Utc::now(),
         };
         self.journal.append(&event)?;
@@ -277,14 +276,9 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
         Ok(findings)
     }
 
-    fn record_finding_created_events(
-        &self,
-        run: &Run,
-        findings: &[Finding],
-    ) -> RemediationResult<()> {
+    fn record_finding_created_events(&self, findings: &[Finding]) -> RemediationResult<()> {
         for finding in findings {
             let event = Event::FindingCreated {
-                run_id: run.id,
                 finding_id: finding.id,
                 severity: finding.severity,
                 category: finding.category.clone(),
@@ -323,7 +317,7 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
 
         self.update_finding_statuses(run, findings)?;
 
-        self.record_finding_resolved_events(run, findings)?;
+        self.record_finding_resolved_events(findings)?;
 
         let decision = self
             .execute_readiness_evaluator(run, &proposal, &patch_artifact, findings)
@@ -479,14 +473,9 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
         Ok(())
     }
 
-    fn record_finding_resolved_events(
-        &self,
-        run: &Run,
-        findings: &FindingSet,
-    ) -> RemediationResult<()> {
+    fn record_finding_resolved_events(&self, findings: &FindingSet) -> RemediationResult<()> {
         for finding in &findings.findings {
             let event = Event::FindingResolved {
-                run_id: run.id,
                 finding_id: finding.id,
                 timestamp: Utc::now(),
             };
@@ -495,9 +484,8 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
         Ok(())
     }
 
-    fn record_run_escalated(&self, run: &Run, reason: &str) -> RemediationResult<()> {
+    fn record_run_escalated(&self, reason: &str) -> RemediationResult<()> {
         let event = Event::RunEscalated {
-            run_id: run.id,
             reason: reason.to_string(),
             timestamp: Utc::now(),
         };
@@ -571,7 +559,7 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
                     run.fail(TerminalReason::Escalated {
                         message: reason.clone(),
                     });
-                    self.record_run_escalated(run, &reason)?;
+                    self.record_run_escalated(&reason)?;
                     return Ok(run.outcome.clone());
                 }
             }
@@ -584,7 +572,7 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
                 run.fail(TerminalReason::Escalated {
                     message: reason.clone(),
                 });
-                self.record_run_escalated(run, &reason)?;
+                self.record_run_escalated(&reason)?;
                 return Ok(run.outcome.clone());
             }
 
@@ -601,7 +589,7 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
                     run.fail(TerminalReason::Escalated {
                         message: reason.clone(),
                     });
-                    self.record_run_escalated(run, &reason)?;
+                    self.record_run_escalated(&reason)?;
                     return Ok(run.outcome.clone());
                 }
                 RemediationCycleOutcome::Reject { reason } => {
@@ -614,7 +602,7 @@ impl<P: ModelProvider + Sync> RemediationEngine<P> {
                         run.fail(TerminalReason::Escalated {
                             message: reason.clone(),
                         });
-                        self.record_run_escalated(run, &reason)?;
+                        self.record_run_escalated(&reason)?;
                         return Ok(run.outcome.clone());
                     }
                 }

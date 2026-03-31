@@ -52,7 +52,7 @@ impl ApiSpec for OpenAiChatCompletions {
             .ok_or_else(|| ProviderError::InvalidRequest("No choices in response".into()))?;
 
         Ok(GenerationResponse {
-            content: choice.message.content,
+            content: choice.message.content.unwrap_or_default(),
             model: response.model,
             usage: Usage {
                 prompt_tokens: response.usage.prompt_tokens,
@@ -110,7 +110,7 @@ struct Choice {
 struct ResponseMessage {
     #[allow(dead_code)]
     role: String,
-    content: String,
+    content: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +160,14 @@ mod tests {
         assert_eq!(response.model, "gpt-4");
         assert_eq!(response.finish_reason, "stop");
         assert_eq!(response.usage.total_tokens, 15);
+    }
+
+    #[test]
+    fn test_parse_response_null_content() {
+        let spec = OpenAiChatCompletions::new("gpt-4");
+        let body = r#"{"id":"chatcmpl-123","model":"gpt-4","choices":[{"message":{"role":"assistant","content":null},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#;
+        let response = spec.parse_response(body).unwrap();
+        assert_eq!(response.content, "");
     }
 
     #[test]

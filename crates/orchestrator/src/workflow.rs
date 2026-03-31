@@ -246,7 +246,6 @@ impl<P: ModelProvider + Sync> DefaultExecutionEngine<P> {
         run.transition_to(spec.to_phase);
 
         let event = crate::journal::transition_executed(
-            run.id,
             spec.from_phase,
             spec.to_phase,
             &spec.worker_id,
@@ -352,6 +351,10 @@ pub async fn run_workflow<P: ModelProvider + Sync>(
                 run.fail(crate::run::TerminalReason::Failed {
                     message: format!("Transition {} failed: {}", spec.name, e),
                 });
+                let event = crate::journal::run_failed(&format!("Transition {} failed: {}", spec.name, e));
+                if let Err(journal_err) = engine.journal().append(&event) {
+                    tracing::error!("Failed to write failed event to journal: {}", journal_err);
+                }
                 return Ok(run.outcome.clone());
             }
         }
@@ -364,6 +367,10 @@ pub async fn run_workflow<P: ModelProvider + Sync>(
             final_phase = ?run.phase,
             "Workflow completed successfully"
         );
+        let event = crate::journal::run_completed();
+        if let Err(journal_err) = engine.journal().append(&event) {
+            tracing::error!("Failed to write completed event to journal: {}", journal_err);
+        }
     }
 
     Ok(run.outcome.clone())

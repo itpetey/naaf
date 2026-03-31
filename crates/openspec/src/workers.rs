@@ -98,82 +98,129 @@ Rules:
 - Preserve the original intent faithfully.
 - Prefer concise, concrete language.
 
+User Request:
+{user_prompt}
+
 Output:
 Return valid JSON only using the required schema."#;
 
 pub const SCOPE_ANALYST_PROMPT: &str = r#"You are a scope analyst.
 
-Input:
-- A normalized specification draft.
-
 Task:
+Analyze the normalized specification and extract scope information.
+
+Input:
+{normalized_spec}
+
 Extract:
-- in_scope_items
-- out_of_scope_items
-- dependencies
-- rollout_assumptions
-- risk_multipliers
-- inferred_scope_items
+- in_scope_items: What IS included in this request
+- out_of_scope_items: What is explicitly NOT included
+- dependencies: External systems or services this depends on
+- rollout_assumptions: Assumptions about deployment environment
+- risk_multipliers: Factors that could increase scope
+- inferred_scope_items: Items inferred from context but not explicit
 
 Rules:
 - Separate explicit scope from inferred scope.
 - Mark any inference as inferred.
 - Do not propose solutions yet.
+- Base findings only on the input specification.
 
 Output:
-Return a markdown table followed by a short numbered risk list."#;
+Return valid JSON only using this schema:
+{
+  "in_scope_items": ["item1", "item2"],
+  "out_of_scope_items": ["item1"],
+  "dependencies": ["dep1"],
+  "rollout_assumptions": ["assumption1"],
+  "risk_multipliers": ["multiplier1"],
+  "inferred_scope_items": ["inferred1"]
+}"#;
 
 pub const SKELETON_BUILDER_PROMPT: &str = r#"You are a proposal structurer.
 
-Input:
-- A normalized specification draft
-- Scope analysis
-
 Task:
-Produce an OpenSpec proposal skeleton with these sections:
-- Title
-- Summary
-- Motivation
-- Goals
-- Non-Goals
-- Proposed Design
-- Alternatives Considered
-- Risks
-- Rollout Plan
-- Open Questions
-- Acceptance Criteria
+Produce an OpenSpec proposal skeleton from the normalized specification and scope analysis.
+
+Normalized Specification:
+{normalized_spec}
+
+Scope Analysis:
+{scope_report}
+
+Produce a proposal with these sections:
+- Title: A clear, concise title
+- Summary: One-line description
+- Motivation: Why this change is needed
+- Goals: Array of strings describing objectives
+- Non-Goals: Array of strings describing what is NOT included
+- Proposed Design: Detailed design description
+- Alternatives Considered: Other approaches evaluated
+- Risks: Potential issues and mitigations
+- Rollout Plan: How to deploy this change
+- Open Questions: Array of unresolved questions
+- Acceptance Criteria: Array of acceptance criteria
+- Todo Markers: Array of TODO items (use TODO(reason) format)
 
 Rules:
 - Use placeholders only where evidence is missing.
 - Mark every placeholder with TODO(<reason>).
 - Do not fabricate operational details.
+- Base content on the input specification and scope.
 
 Output:
-Return markdown only."#;
+Return valid JSON only using this schema:
+{
+  "title": "string",
+  "summary": "string",
+  "motivation": "string",
+  "goals": ["goal1", "goal2"],
+  "non_goals": ["non-goal1"],
+  "proposed_design": "string",
+  "alternatives_considered": "string",
+  "risks": "string",
+  "rollout_plan": "string",
+  "open_questions": ["question1"],
+  "acceptance_criteria": ["criteria1"],
+  "todo_markers": ["TODO(reason)"]
+}"#;
 
 pub const ACCEPTANCE_CRITERIA_PROMPT: &str = r#"You are an acceptance criteria author.
 
-Input:
-- Proposal skeleton
-- Normalized request
-
 Task:
+Write acceptance criteria for the proposal that are observable, testable, and traceable.
+
+Normalized Specification:
+{normalized_spec}
+
+Proposal Skeleton:
+{proposal_skeleton}
+
 Write acceptance criteria that are:
-- observable
-- testable
-- implementation-agnostic where possible
-- traceable back to stated goals
+- Observable: Can be verified by inspection or testing
+- Testable: Can be validated with concrete tests
+- Implementation-agnostic: Don't assume specific implementations
+- Traceable: Connect back to stated goals
 
 Rules:
-- Each criterion must be atomic.
+- Each criterion must be atomic (one thing).
 - Avoid vague terms like "fast", "robust", "user-friendly", or "works well".
-- Where measurable thresholds are unknown, create an explicit placeholder question instead of guessing.
+- Where measurable thresholds are unknown, create explicit placeholders.
+- Criteria should verify the solution meets its goals.
 
-Output format:
-- AC-1: ...
-- AC-2: ...
-- Gaps:
-  - ..."#;
+Output:
+Return valid JSON only using this schema:
+{
+  "criteria": [
+    {
+      "id": "AC-1",
+      "statement": "The system must...",
+      "traceability": ["Goal-1"],
+      "measurability": "measurable"
+    }
+  ],
+  "gaps": ["Any unaddressed requirements"]
+}"#;
 
 pub const REQUEST_NORMALIZER_CRITERIA: &[&str] = &[
     "Raw request is rewritten into concrete problem language.",
@@ -201,17 +248,19 @@ pub const ACCEPTANCE_CRITERIA_AUTHOR_CRITERIA: &[&str] = &[
 
 pub const RISK_REVIEWER_PROMPT: &str = r#"You are a risk reviewer for OpenSpec proposals.
 
-Input:
-- A proposal skeleton or draft
-
 Task:
-Identify and document structured risk findings. For each risk, provide:
-- A unique ID (e.g., "RISK-1")
-- Category (e.g., "security", "complexity", "dependency", "operational")
-- Severity (Low, Medium, High)
-- Evidence: specific quotes or observations from the proposal
-- Impacted section: which part of the proposal is affected
-- Mitigation: brief suggestion for addressing the risk
+Identify and document structured risk findings from the proposal.
+
+Proposal:
+{proposal_skeleton}
+
+For each risk, provide:
+- id: A unique ID (e.g., "RISK-1")
+- category: One of "security", "complexity", "dependency", "operational", "performance", "other"
+- severity: One of "Low", "Medium", "High"
+- evidence: Array of specific quotes or observations from the proposal
+- impacted_section: Which part of the proposal is affected
+- mitigation: Brief suggestion for addressing the risk
 
 Rules:
 - Base findings only on evidence in the proposal.
@@ -220,15 +269,27 @@ Rules:
 - Rate severity honestly - don't minimize significant risks.
 
 Output:
-Return a JSON array of risk findings."#;
+Return valid JSON only using this schema:
+[
+  {
+    "id": "RISK-1",
+    "category": "security",
+    "severity": "High",
+    "evidence": ["Quote from proposal"],
+    "impacted_section": "Proposed Design",
+    "mitigation": "Suggested fix"
+  }
+]"#;
 
 pub const CONSISTENCY_REVIEWER_PROMPT: &str = r#"You are a consistency reviewer for OpenSpec proposals.
 
-Input:
-- A proposal skeleton or draft
-
 Task:
-Identify and document consistency findings. Look for:
+Identify and document consistency findings from the proposal.
+
+Proposal:
+{proposal_skeleton}
+
+Look for:
 - Contradictions within the proposal
 - Omissions (missing necessary sections or details)
 - Gaps between stated goals and proposed design
@@ -236,47 +297,71 @@ Identify and document consistency findings. Look for:
 - Missing acceptance criteria for critical goals
 
 For each finding, provide:
-- A unique ID (e.g., "CONSIST-1")
-- Category (e.g., "contradiction", "omission", "gap", "inconsistency")
-- Severity (Low, Medium, High)
-- Quoted evidence: exact text demonstrating the issue
-- Impacted sections: which parts are affected
+- id: A unique ID (e.g., "CONSIST-1")
+- category: One of "contradiction", "omission", "gap", "inconsistency"
+- severity: One of "Low", "Medium", "High"
+- quoted_evidence: Array of exact text demonstrating the issue
+- impacted_sections: Array of section names affected
 
 Rules:
 - Quote exact text to support each finding.
 - Distinguish between minor typos and substantive inconsistencies.
 - Flag missing critical elements clearly.
+- Do not invent issues not in the text.
 
 Output:
-Return a JSON array of consistency findings."#;
+Return valid JSON only using this schema:
+[
+  {
+    "id": "CONSIST-1",
+    "category": "gap",
+    "severity": "Medium",
+    "quoted_evidence": ["Quote from proposal"],
+    "impacted_sections": ["Goals", "Proposed Design"]
+  }
+]"#;
 
 pub const FINDINGS_AGGREGATOR_PROMPT: &str = r#"You are a findings aggregator for OpenSpec proposals.
 
-Input:
-- Risk findings from RiskReviewer
-- Consistency findings from ConsistencyReviewer
-
 Task:
-Merge and prioritize all findings into a unified FindingSet:
+Merge and prioritize all findings into a unified FindingSet.
+
+Risk Findings:
+{risk_findings}
+
+Consistency Findings:
+{consistency_findings}
+
+Merge and prioritize:
 1. Combine all findings into a single list
 2. Detect and remove duplicates (findings that identify the same issue)
 3. Sort by priority: High severity first, then Medium, then Low
 4. For same-severity, maintain original order
 
+Rules:
+- Preserve all unique findings.
+- Remove only true duplicates.
+- Priority order is critical for remediation.
+
 Output:
-Return a JSON object with:
-- risk_findings: all unique risk findings
-- consistency_findings: all unique consistency findings
-- prioritized_order: array of finding IDs in priority order"#;
+Return valid JSON only using this schema:
+{
+  "risk_findings": [...],
+  "consistency_findings": [...],
+  "prioritized_order": ["RISK-1", "CONSIST-2", ...]
+}"#;
 
 pub const REMEDIATION_PLANNER_PROMPT: &str = r#"You are a remediation planner for OpenSpec proposals.
 
-Input:
-- A prioritized FindingSet
-- Current attempt count
-
 Task:
-Select the next finding or finding cluster to address:
+Select the next finding or finding cluster to address.
+
+Prioritized Findings:
+{finding_set}
+
+Current Attempt Count: {attempt_count}
+
+Select the next finding or cluster:
 1. Select the highest-priority finding not yet addressed
 2. If multiple findings impact the same section, cluster them together
 3. Maximum scope: same section only
@@ -288,20 +373,25 @@ Rules:
 - Escalate if the same finding has been attempted too many times.
 
 Output:
-Return a JSON object with:
-- selected_finding_id: ID of the finding to address
-- cluster_ids: array of related finding IDs (can be empty)
-- should_escalate: boolean
-- reason: brief explanation"#;
+Return valid JSON only using this schema:
+{
+  "selected_finding_id": "RISK-1",
+  "cluster_ids": [],
+  "should_escalate": false,
+  "reason": "Brief explanation"
+}"#;
 
 pub const TARGETED_REMEDIATOR_PROMPT: &str = r#"You are a targeted remediator for OpenSpec proposals.
 
-Input:
-- Current proposal
-- Selected finding ID to address
-
 Task:
-Generate a minimal, focused patch for the selected finding:
+Generate a minimal, focused patch for the selected finding.
+
+Current Proposal:
+{proposal_skeleton}
+
+Selected Finding ID: {selected_finding_id}
+
+Generate a minimal patch:
 1. Identify the exact section(s) that need modification
 2. Generate replacement text that addresses the finding
 3. Provide clear rationale connecting the change to the finding
@@ -310,24 +400,34 @@ Rules:
 - Keep edits narrow and focused.
 - Do not make unrelated changes.
 - Preserve existing content where possible.
-- The rationale must explicitly reference the finding being addressed.
+- The rationale must explicitly reference the finding.
 
 Output:
-Return a JSON object with:
-- target_sections: array of section names to modify
-- replacement_text: the new text for those sections
-- rationale: explanation of why this change addresses the finding"#;
+Return valid JSON only using this schema:
+{
+  "target_sections": ["Proposed Design"],
+  "replacement_text": "The new text...",
+  "rationale": "This addresses RISK-1 by..."
+}"#;
 
 pub const READINESS_EVALUATOR_PROMPT: &str = r#"You are a readiness evaluator for OpenSpec proposals.
 
-Input:
-- Original proposal
-- Current proposal state
-- Applied patches history
-- Remaining findings
-
 Task:
-Evaluate whether the proposal is ready for acceptance:
+Evaluate whether the proposal is ready for acceptance.
+
+Original Proposal:
+{original_proposal}
+
+Current Proposal:
+{current_proposal}
+
+Applied Patches:
+{applied_patches}
+
+Remaining Findings:
+{remaining_findings}
+
+Evaluate readiness:
 - ACCEPT: All critical findings addressed, remaining findings are minor
 - ESCALATE: Significant issues remain that require human intervention
 - REJECT: Proposal has fundamental problems that cannot be resolved through remediation
@@ -343,10 +443,12 @@ Rules:
 - Document reasons for decision clearly.
 
 Output:
-Return a JSON object with:
-- decision: "accepted" | "escalated" | "rejected"
-- reasons: array of justification strings
-- next_steps: array of suggested actions"#;
+Return valid JSON only using this schema:
+{
+  "decision": "accepted",
+  "reasons": ["All critical findings resolved"],
+  "next_steps": ["Proceed to implementation"]
+}"#;
 
 pub const RISK_REVIEWER_CRITERIA: &[&str] = &[
     "Findings are grounded in proposal evidence.",

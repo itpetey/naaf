@@ -2,7 +2,7 @@
 
 use super::Auth;
 
-const OPENCODE_BASE_URL: &str = "https://opencode.ai/zen/go";
+const OPENCODE_BASE_URL: &str = "https://opencode.ai/zen";
 
 /// Authentication configuration for OpenCode Go's API.
 pub struct OpenCodeAuth {

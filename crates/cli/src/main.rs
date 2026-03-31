@@ -160,15 +160,17 @@ async fn execute_workflow<P: ModelProvider + Sync + 'static>(
     std::fs::create_dir_all(&runs_dir)?;
 
     let task_id = TaskId::new();
-    let run_id = RunId::new();
-    let worktree = runs_dir.join(run_id.0.to_string());
-    std::fs::create_dir_all(&worktree)?;
+    let mut run = Run::new(task_id, PathBuf::new());
 
-    let store = ArtifactStore::new(&runs_dir)?;
-    let journal = Journal::new(&runs_dir)?;
+    let worktree = runs_dir.join(run.id.0.to_string());
+    std::fs::create_dir_all(&worktree)?;
+    run.worktree = worktree.clone();
+
+    let store = ArtifactStore::new(&worktree)?;
+    let journal = Journal::new(&worktree)?;
 
     let user_prompt_artifact = Artifact::new(
-        run_id,
+        run.id,
         ArtifactKind::UserPrompt,
         vec![],
         worktree.join("user_prompt.bin"),
@@ -176,14 +178,12 @@ async fn execute_workflow<P: ModelProvider + Sync + 'static>(
     store.save(&user_prompt_artifact, prompt.as_bytes())?;
 
     println!("Running workflow...");
-    println!("Run ID: {}", run_id);
+    println!("Run ID: {}", run.id);
     println!("Model: {}", model);
 
     let engine = DefaultExecutionEngine::new(provider, model, store, journal);
 
     let workflow = openspec_happy_path();
-
-    let mut run = Run::new(task_id, worktree);
 
     let outcome = run_workflow(&engine, &workflow, &mut run).await?;
 
@@ -247,8 +247,7 @@ fn list_runs() -> Result<()> {
         let run_id_str = entry.file_name().to_string_lossy().into_owned();
         let run_dir = entry.path();
 
-        let (phase, outcome, timestamp) = if let Ok(run_uuid) = run_id_str.parse::<uuid::Uuid>() {
-            let run_uuid = RunId(run_uuid);
+        let (phase, outcome, timestamp) = if run_id_str.parse::<uuid::Uuid>().is_ok() {
             let journal = match Journal::new(&run_dir) {
                 Ok(j) => j,
                 Err(_) => {
@@ -260,49 +259,39 @@ fn list_runs() -> Result<()> {
             let mut last_outcome = "unknown".to_string();
             let mut last_timestamp: Option<DateTime<Utc>> = None;
 
-            if let Ok(events) = journal.for_run(run_uuid) {
-                for event in events.flatten() {
-                    match &event {
-                        Event::RunCreated { timestamp, .. } => {
-                            last_timestamp = Some(*timestamp);
-                        }
-                        Event::RunStarted {
-                            run_id: _,
-                            timestamp,
-                        } => {
-                            last_phase = format!("{:?}", Phase::default());
-                            last_timestamp = Some(*timestamp);
-                        }
-                        Event::TransitionExecuted {
-                            to_phase,
-                            timestamp,
-                            ..
-                        } => {
-                            last_phase = format!("{:?}", to_phase);
-                            last_timestamp = Some(*timestamp);
-                        }
-                        Event::RunCompleted { timestamp, .. } => {
-                            last_outcome = "done".to_string();
-                            last_timestamp = Some(*timestamp);
-                        }
-                        Event::RunFailed {
-                            reason: _,
-                            timestamp,
-                            ..
-                        } => {
-                            last_outcome = "failed".to_string();
-                            last_timestamp = Some(*timestamp);
-                        }
-                        Event::RunEscalated {
-                            reason: _,
-                            timestamp,
-                            ..
-                        } => {
-                            last_outcome = "escalated".to_string();
-                            last_timestamp = Some(*timestamp);
-                        }
-                        _ => {}
+            for event in journal.iter()?.flatten() {
+                match &event {
+                    Event::RunStarted { timestamp } => {
+                        last_phase = format!("{:?}", Phase::default());
+                        last_timestamp = Some(*timestamp);
                     }
+                    Event::TransitionExecuted {
+                        to_phase,
+                        timestamp,
+                        ..
+                    } => {
+                        last_phase = format!("{:?}", to_phase);
+                        last_timestamp = Some(*timestamp);
+                    }
+                    Event::RunCompleted { timestamp } => {
+                        last_outcome = "done".to_string();
+                        last_timestamp = Some(*timestamp);
+                    }
+                    Event::RunFailed {
+                        reason: _,
+                        timestamp,
+                    } => {
+                        last_outcome = "failed".to_string();
+                        last_timestamp = Some(*timestamp);
+                    }
+                    Event::RunEscalated {
+                        reason: _,
+                        timestamp,
+                    } => {
+                        last_outcome = "escalated".to_string();
+                        last_timestamp = Some(*timestamp);
+                    }
+                    _ => {}
                 }
             }
             (last_phase, last_outcome, last_timestamp)
@@ -325,7 +314,7 @@ fn list_runs() -> Result<()> {
 
 fn inspect_run(run_id: &str) -> Result<()> {
     let run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
-    let run_uuid = RunId(run_uuid);
+    let _run_uuid = RunId(run_uuid);
     let run_dir = PathBuf::from(RUNS_DIR).join(run_id);
     if !run_dir.exists() {
         eprintln!("Run not found: {}", run_id);
@@ -340,36 +329,24 @@ fn inspect_run(run_id: &str) -> Result<()> {
     let mut phase = "unknown".to_string();
     let mut outcome = "unknown".to_string();
 
-    if let Ok(events) = journal.for_run(run_uuid) {
-        for event in events.flatten() {
-            match &event {
-                Event::RunStarted {
-                    timestamp: _,
-                    run_id: _,
-                } => {
-                    phase = format!("{:?}", Phase::default());
-                }
-                Event::TransitionExecuted {
-                    to_phase,
-                    from_phase: _,
-                    run_id: _,
-                    timestamp: _,
-                    worker_id: _,
-                    artifact_id: _,
-                } => {
-                    phase = format!("{:?}", to_phase);
-                }
-                Event::RunCompleted { .. } => {
-                    outcome = "done".to_string();
-                }
-                Event::RunFailed { .. } => {
-                    outcome = "failed".to_string();
-                }
-                Event::RunEscalated { .. } => {
-                    outcome = "escalated".to_string();
-                }
-                _ => {}
+    for event in journal.iter()?.flatten() {
+        match &event {
+            Event::RunStarted { .. } => {
+                phase = format!("{:?}", Phase::default());
             }
+            Event::TransitionExecuted { to_phase, .. } => {
+                phase = format!("{:?}", to_phase);
+            }
+            Event::RunCompleted { .. } => {
+                outcome = "done".to_string();
+            }
+            Event::RunFailed { .. } => {
+                outcome = "failed".to_string();
+            }
+            Event::RunEscalated { .. } => {
+                outcome = "escalated".to_string();
+            }
+            _ => {}
         }
     }
 
@@ -381,15 +358,15 @@ fn inspect_run(run_id: &str) -> Result<()> {
 
 fn artifacts(run_id: &str, view_artifact: Option<&str>, json: bool) -> Result<()> {
     let run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
-    let run_uuid = RunId(run_uuid);
-    let run_dir = PathBuf::from(RUNS_DIR).join(run_id);
+    let run_id = RunId(run_uuid);
+    let run_dir = PathBuf::from(RUNS_DIR).join(run_id.0.to_string());
     if !run_dir.exists() {
-        eprintln!("Run not found: {}", run_id);
+        eprintln!("Run not found: {}", run_id.0);
         std::process::exit(1);
     }
 
     let store = ArtifactStore::new(&run_dir)?;
-    let metadata = store.list_metadata(run_uuid)?;
+    let metadata = store.list_metadata(run_id)?;
 
     if metadata.is_empty() {
         println!("No artifacts found");
@@ -414,7 +391,7 @@ fn artifacts(run_id: &str, view_artifact: Option<&str>, json: bool) -> Result<()
     if let Some(artifact_id_str) = view_artifact {
         if let Ok(id) = artifact_id_str.parse::<uuid::Uuid>() {
             let artifact_id = ArtifactId(id);
-            match store.load(artifact_id, run_uuid) {
+            match store.load(artifact_id, run_id) {
                 Ok((_artifact, content)) => {
                     println!("{}", String::from_utf8_lossy(&content));
                 }
@@ -445,7 +422,7 @@ fn artifacts(run_id: &str, view_artifact: Option<&str>, json: bool) -> Result<()
 
 fn journal(run_id: &str, filter: Option<&str>) -> Result<()> {
     let run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
-    let run_uuid = RunId(run_uuid);
+    let _run_uuid = RunId(run_uuid);
     let run_dir = PathBuf::from(RUNS_DIR).join(run_id);
     if !run_dir.exists() {
         eprintln!("Run not found: {}", run_id);
@@ -454,7 +431,7 @@ fn journal(run_id: &str, filter: Option<&str>) -> Result<()> {
 
     let journal = Journal::new(&run_dir)?;
 
-    let events: Vec<_> = journal.for_run(run_uuid)?.filter_map(|e| e.ok()).collect();
+    let events: Vec<_> = journal.iter()?.filter_map(|e| e.ok()).collect();
 
     if events.is_empty() {
         println!("No journal events found");
@@ -465,21 +442,17 @@ fn journal(run_id: &str, filter: Option<&str>) -> Result<()> {
 
     for event in events {
         let timestamp = match &event {
-            Event::TaskCreated { timestamp, .. } => timestamp,
-            Event::RunCreated { timestamp, .. } => timestamp,
-            Event::RunStarted { timestamp, .. } => timestamp,
-            Event::ReviewStarted { timestamp, .. } => timestamp,
+            Event::RunStarted { timestamp } => timestamp,
+            Event::ReviewStarted { timestamp } => timestamp,
             Event::TransitionExecuted { timestamp, .. } => timestamp,
             Event::ArtifactCreated { timestamp, .. } => timestamp,
             Event::FindingCreated { timestamp, .. } => timestamp,
             Event::FindingResolved { timestamp, .. } => timestamp,
-            Event::RunCompleted { timestamp, .. } => timestamp,
+            Event::RunCompleted { timestamp } => timestamp,
             Event::RunFailed { timestamp, .. } => timestamp,
             Event::RunEscalated { timestamp, .. } => timestamp,
         };
         let event_type = match &event {
-            Event::TaskCreated { .. } => "task_created",
-            Event::RunCreated { .. } => "run_created",
             Event::RunStarted { .. } => "run_started",
             Event::ReviewStarted { .. } => "review_started",
             Event::TransitionExecuted { .. } => "transition_executed",

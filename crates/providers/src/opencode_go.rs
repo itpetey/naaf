@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn test_provider_method_glm5() {
         let provider = OpenCodeGoModel::glm5("test-key");
-        assert_eq!(provider.auth().base_url(), "https://opencode.ai/zen/go");
+        assert_eq!(provider.auth().base_url(), "https://opencode.ai/zen");
         assert_eq!(provider.api().model(), "glm-5");
     }
 

@@ -55,21 +55,19 @@ pub struct FindingStore {
 
 impl ArtifactStore {
     pub fn new(root: impl Into<PathBuf>) -> StoreResult<Self> {
-        let root = root.into();
-        fs::create_dir_all(root.join(ARTIFACTS_DIR))?;
-        Ok(Self { root })
+        Ok(Self { root: root.into() })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    fn run_dir(&self, run_id: RunId) -> PathBuf {
-        self.root.join(ARTIFACTS_DIR).join(run_id.0.to_string())
+    fn artifacts_dir(&self, _run_id: RunId) -> PathBuf {
+        self.root.join(ARTIFACTS_DIR)
     }
 
     pub fn save(&self, artifact: &Artifact, content: &[u8]) -> StoreResult<()> {
-        let run_dir = self.run_dir(artifact.run_id);
+        let run_dir = self.artifacts_dir(artifact.run_id);
         fs::create_dir_all(&run_dir)?;
 
         let content_filename = format!("{}.bin", artifact.id.0);
@@ -95,7 +93,7 @@ impl ArtifactStore {
     }
 
     pub fn load(&self, id: ArtifactId, run_id: RunId) -> StoreResult<(Artifact, Vec<u8>)> {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.artifacts_dir(run_id);
 
         let metadata_path = run_dir.join(format!("{}.json", id.0));
         let file = BufReader::new(File::open(&metadata_path)?);
@@ -123,7 +121,7 @@ impl ArtifactStore {
     }
 
     pub fn list(&self, run_id: RunId) -> StoreResult<Vec<ArtifactRef>> {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.artifacts_dir(run_id);
         if !run_dir.exists() {
             return Ok(Vec::new());
         }
@@ -142,7 +140,7 @@ impl ArtifactStore {
     }
 
     pub fn list_metadata(&self, run_id: RunId) -> StoreResult<Vec<ArtifactMetadata>> {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.artifacts_dir(run_id);
         if !run_dir.exists() {
             return Ok(Vec::new());
         }
@@ -162,7 +160,7 @@ impl ArtifactStore {
     }
 
     pub fn exists(&self, id: ArtifactId, run_id: RunId) -> bool {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.artifacts_dir(run_id);
         if !run_dir.exists() {
             return false;
         }
@@ -171,7 +169,7 @@ impl ArtifactStore {
     }
 
     pub fn delete_run(&self, run_id: RunId) -> StoreResult<()> {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.artifacts_dir(run_id);
         if run_dir.exists() {
             fs::remove_dir_all(run_dir)?;
         }
@@ -181,21 +179,19 @@ impl ArtifactStore {
 
 impl FindingStore {
     pub fn new(root: impl Into<PathBuf>) -> StoreResult<Self> {
-        let root = root.into();
-        fs::create_dir_all(root.join(FINDINGS_DIR))?;
-        Ok(Self { root })
+        Ok(Self { root: root.into() })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    fn run_dir(&self, run_id: RunId) -> PathBuf {
-        self.root.join(FINDINGS_DIR).join(run_id.0.to_string())
+    fn findings_dir(&self, _run_id: RunId) -> PathBuf {
+        self.root.join(FINDINGS_DIR)
     }
 
     pub fn save(&self, finding: &crate::finding::Finding) -> StoreResult<()> {
-        let run_dir = self.run_dir(finding.run_id);
+        let run_dir = self.findings_dir(finding.run_id);
         fs::create_dir_all(&run_dir)?;
 
         let finding_path = run_dir.join(format!("{}.json", finding.id.0));
@@ -206,7 +202,7 @@ impl FindingStore {
     }
 
     pub fn load(&self, id: FindingId, run_id: RunId) -> StoreResult<crate::finding::Finding> {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.findings_dir(run_id);
         let finding_path = run_dir.join(format!("{}.json", id.0));
 
         let file = BufReader::new(File::open(&finding_path)?);
@@ -220,7 +216,7 @@ impl FindingStore {
     }
 
     pub fn list(&self, run_id: RunId) -> StoreResult<Vec<crate::finding::Finding>> {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.findings_dir(run_id);
         if !run_dir.exists() {
             return Ok(Vec::new());
         }
@@ -264,7 +260,7 @@ impl FindingStore {
     }
 
     pub fn delete(&self, id: FindingId, run_id: RunId) -> StoreResult<()> {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.findings_dir(run_id);
         let finding_path = run_dir.join(format!("{}.json", id.0));
 
         if !finding_path.exists() {
@@ -276,7 +272,7 @@ impl FindingStore {
     }
 
     pub fn delete_run(&self, run_id: RunId) -> StoreResult<()> {
-        let run_dir = self.run_dir(run_id);
+        let run_dir = self.findings_dir(run_id);
         if run_dir.exists() {
             fs::remove_dir_all(run_dir)?;
         }

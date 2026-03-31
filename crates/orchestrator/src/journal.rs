@@ -8,7 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::run::{Phase, RunId, TaskId};
+use crate::artifact::ArtifactId;
+use crate::run::Phase;
 
 const JOURNAL_FILE: &str = "journal.jsonl";
 
@@ -19,9 +20,6 @@ pub enum JournalError {
 
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-
-    #[error("Run not found: {0:?}")]
-    RunNotFound(RunId),
 }
 
 pub type JournalResult<T> = Result<T, JournalError>;
@@ -29,47 +27,30 @@ pub type JournalResult<T> = Result<T, JournalError>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    TaskCreated {
-        task_id: TaskId,
-        prompt: String,
-        timestamp: DateTime<Utc>,
-    },
-
-    RunCreated {
-        run_id: RunId,
-        task_id: TaskId,
-        timestamp: DateTime<Utc>,
-    },
-
     RunStarted {
-        run_id: RunId,
         timestamp: DateTime<Utc>,
     },
 
     ReviewStarted {
-        run_id: RunId,
         timestamp: DateTime<Utc>,
     },
 
     TransitionExecuted {
-        run_id: RunId,
         from_phase: Phase,
         to_phase: Phase,
         worker_id: String,
-        artifact_id: Option<crate::artifact::ArtifactId>,
+        artifact_id: Option<ArtifactId>,
         timestamp: DateTime<Utc>,
     },
 
     ArtifactCreated {
-        run_id: RunId,
-        artifact_id: crate::artifact::ArtifactId,
+        artifact_id: ArtifactId,
         kind: crate::artifact::ArtifactKind,
-        parent_ids: Vec<crate::artifact::ArtifactId>,
+        parent_ids: Vec<ArtifactId>,
         timestamp: DateTime<Utc>,
     },
 
     FindingCreated {
-        run_id: RunId,
         finding_id: crate::finding::FindingId,
         severity: crate::finding::Severity,
         category: String,
@@ -77,45 +58,23 @@ pub enum Event {
     },
 
     FindingResolved {
-        run_id: RunId,
         finding_id: crate::finding::FindingId,
         timestamp: DateTime<Utc>,
     },
 
     RunCompleted {
-        run_id: RunId,
         timestamp: DateTime<Utc>,
     },
 
     RunFailed {
-        run_id: RunId,
         reason: String,
         timestamp: DateTime<Utc>,
     },
 
     RunEscalated {
-        run_id: RunId,
         reason: String,
         timestamp: DateTime<Utc>,
     },
-}
-
-impl Event {
-    pub fn run_id(&self) -> Option<RunId> {
-        match self {
-            Event::TaskCreated { .. } => None,
-            Event::RunCreated { run_id, .. } => Some(*run_id),
-            Event::RunStarted { run_id, .. } => Some(*run_id),
-            Event::ReviewStarted { run_id, .. } => Some(*run_id),
-            Event::TransitionExecuted { run_id, .. } => Some(*run_id),
-            Event::ArtifactCreated { run_id, .. } => Some(*run_id),
-            Event::FindingCreated { run_id, .. } => Some(*run_id),
-            Event::FindingResolved { run_id, .. } => Some(*run_id),
-            Event::RunCompleted { run_id, .. } => Some(*run_id),
-            Event::RunFailed { run_id, .. } => Some(*run_id),
-            Event::RunEscalated { run_id, .. } => Some(*run_id),
-        }
-    }
 }
 
 pub struct Journal {
@@ -123,15 +82,11 @@ pub struct Journal {
 }
 
 impl Journal {
-    pub fn new(root: impl Into<PathBuf>) -> JournalResult<Self> {
-        let root = root.into();
-        fs::create_dir_all(&root)?;
-        let path = root.join(JOURNAL_FILE);
+    pub fn new(run_dir: impl Into<PathBuf>) -> JournalResult<Self> {
+        let run_dir = run_dir.into();
+        fs::create_dir_all(&run_dir)?;
+        let path = run_dir.join(JOURNAL_FILE);
         Ok(Self { path })
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.path
     }
 
     pub fn path(&self) -> &Path {
@@ -153,24 +108,17 @@ impl Journal {
     }
 
     pub fn iter(&self) -> JournalResult<JournalIter> {
+        if !self.path.exists() {
+            return Ok(JournalIter::empty());
+        }
         let file = File::open(&self.path)?;
         let reader = BufReader::new(file);
-        Ok(JournalIter {
-            reader,
-            current: None,
-        })
+        Ok(JournalIter::from_reader(reader))
     }
 
-    pub fn for_run(&self, run_id: RunId) -> JournalResult<RunJournalIter> {
-        Ok(RunJournalIter {
-            inner: self.iter()?,
-            run_id,
-        })
-    }
-
-    pub fn latest_for_run(&self, run_id: RunId) -> JournalResult<Option<Event>> {
+    pub fn latest(&self) -> JournalResult<Option<Event>> {
         let mut latest: Option<Event> = None;
-        for event in self.for_run(run_id)? {
+        for event in self.iter()? {
             latest = Some(event?);
         }
         Ok(latest)
@@ -178,16 +126,33 @@ impl Journal {
 }
 
 pub struct JournalIter {
-    reader: BufReader<File>,
+    reader: Option<BufReader<File>>,
     current: Option<Event>,
+}
+
+impl JournalIter {
+    fn from_reader(reader: BufReader<File>) -> Self {
+        Self {
+            reader: Some(reader),
+            current: None,
+        }
+    }
+
+    fn empty() -> Self {
+        Self {
+            reader: None,
+            current: None,
+        }
+    }
 }
 
 impl Iterator for JournalIter {
     type Item = JournalResult<Event>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        let reader = self.reader.as_mut()?;
         let mut line = String::new();
-        match self.reader.read_line(&mut line) {
+        match reader.read_line(&mut line) {
             Ok(0) => None,
             Ok(_) => {
                 let event: Event = match serde_json::from_str(&line) {
@@ -202,58 +167,25 @@ impl Iterator for JournalIter {
     }
 }
 
-pub struct RunJournalIter {
-    inner: JournalIter,
-    run_id: RunId,
-}
-
-impl Iterator for RunJournalIter {
-    type Item = JournalResult<Event>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let event = self.inner.next()?;
-            match event {
-                Ok(e) if e.run_id() == Some(self.run_id) => return Some(Ok(e)),
-                Ok(_) => continue,
-                Err(e) => return Some(Err(e)),
-            }
-        }
-    }
-}
-
-pub fn task_created(task_id: TaskId, prompt: &str) -> Event {
-    Event::TaskCreated {
-        task_id,
-        prompt: prompt.to_string(),
-        timestamp: Utc::now(),
-    }
-}
-
-pub fn run_created(run_id: RunId, task_id: TaskId) -> Event {
-    Event::RunCreated {
-        run_id,
-        task_id,
-        timestamp: Utc::now(),
-    }
-}
-
-pub fn run_started(run_id: RunId) -> Event {
+pub fn run_started() -> Event {
     Event::RunStarted {
-        run_id,
+        timestamp: Utc::now(),
+    }
+}
+
+pub fn review_started() -> Event {
+    Event::ReviewStarted {
         timestamp: Utc::now(),
     }
 }
 
 pub fn transition_executed(
-    run_id: RunId,
     from_phase: Phase,
     to_phase: Phase,
     worker_id: &str,
-    artifact_id: Option<crate::artifact::ArtifactId>,
+    artifact_id: Option<ArtifactId>,
 ) -> Event {
     Event::TransitionExecuted {
-        run_id,
         from_phase,
         to_phase,
         worker_id: worker_id.to_string(),
@@ -263,13 +195,11 @@ pub fn transition_executed(
 }
 
 pub fn artifact_created(
-    run_id: RunId,
-    artifact_id: crate::artifact::ArtifactId,
+    artifact_id: ArtifactId,
     kind: crate::artifact::ArtifactKind,
-    parent_ids: Vec<crate::artifact::ArtifactId>,
+    parent_ids: Vec<ArtifactId>,
 ) -> Event {
     Event::ArtifactCreated {
-        run_id,
         artifact_id,
         kind,
         parent_ids,
@@ -278,13 +208,11 @@ pub fn artifact_created(
 }
 
 pub fn finding_created(
-    run_id: RunId,
     finding_id: crate::finding::FindingId,
     severity: crate::finding::Severity,
     category: &str,
 ) -> Event {
     Event::FindingCreated {
-        run_id,
         finding_id,
         severity,
         category: category.to_string(),
@@ -292,32 +220,28 @@ pub fn finding_created(
     }
 }
 
-pub fn finding_resolved(run_id: RunId, finding_id: crate::finding::FindingId) -> Event {
+pub fn finding_resolved(finding_id: crate::finding::FindingId) -> Event {
     Event::FindingResolved {
-        run_id,
         finding_id,
         timestamp: Utc::now(),
     }
 }
 
-pub fn run_completed(run_id: RunId) -> Event {
+pub fn run_completed() -> Event {
     Event::RunCompleted {
-        run_id,
         timestamp: Utc::now(),
     }
 }
 
-pub fn run_failed(run_id: RunId, reason: &str) -> Event {
+pub fn run_failed(reason: &str) -> Event {
     Event::RunFailed {
-        run_id,
         reason: reason.to_string(),
         timestamp: Utc::now(),
     }
 }
 
-pub fn run_escalated(run_id: RunId, reason: &str) -> Event {
+pub fn run_escalated(reason: &str) -> Event {
     Event::RunEscalated {
-        run_id,
         reason: reason.to_string(),
         timestamp: Utc::now(),
     }
@@ -328,18 +252,16 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::artifact::ArtifactKind;
 
     #[test]
     fn test_append_and_iter() {
         let temp = TempDir::new().unwrap();
         let journal = Journal::new(temp.path()).unwrap();
 
-        let task_id = TaskId::new();
-        let run_id = RunId::new();
-
-        let event1 = task_created(task_id, "test prompt");
-        let event2 = run_created(run_id, task_id);
-        let event3 = run_started(run_id);
+        let event1 = run_started();
+        let event2 = review_started();
+        let event3 = run_completed();
 
         journal.append(&event1).unwrap();
         journal.append(&event2).unwrap();
@@ -350,47 +272,22 @@ mod tests {
     }
 
     #[test]
-    fn test_for_run_filter() {
+    fn test_latest() {
         let temp = TempDir::new().unwrap();
         let journal = Journal::new(temp.path()).unwrap();
 
-        let task_id = TaskId::new();
-        let run_id1 = RunId::new();
-        let run_id2 = RunId::new();
+        journal.append(&run_started()).unwrap();
+        journal.append(&run_completed()).unwrap();
 
-        journal.append(&task_created(task_id, "prompt")).unwrap();
-        journal.append(&run_created(run_id1, task_id)).unwrap();
-        journal.append(&run_started(run_id1)).unwrap();
-        journal.append(&run_created(run_id2, task_id)).unwrap();
-        journal.append(&run_started(run_id2)).unwrap();
-
-        let run1_events: Vec<_> = journal
-            .for_run(run_id1)
-            .unwrap()
-            .map(|e| e.unwrap())
-            .collect();
-        assert_eq!(run1_events.len(), 2);
-    }
-
-    #[test]
-    fn test_event_run_id() {
-        let task_id = TaskId::new();
-        let run_id = RunId::new();
-
-        let task_event = task_created(task_id, "prompt");
-        assert_eq!(task_event.run_id(), None);
-
-        let run_event = run_created(run_id, task_id);
-        assert_eq!(run_event.run_id(), Some(run_id));
+        let latest = journal.latest().unwrap().unwrap();
+        assert!(matches!(latest, Event::RunCompleted { .. }));
     }
 
     #[test]
     fn test_transition_executed_json_format() {
-        let run_id = RunId::new();
-        let artifact_id = crate::artifact::ArtifactId::new();
+        let artifact_id = ArtifactId::new();
 
         let event = transition_executed(
-            run_id,
             Phase::Proposed,
             Phase::Normalized,
             "request_normalizer",
@@ -400,7 +297,6 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
 
         assert!(json.contains(r#""type":"transition_executed""#));
-        assert!(json.contains(&format!(r#""run_id":"{}""#, run_id)));
         assert!(json.contains(r#""from_phase":"Proposed"#));
         assert!(json.contains(r#""to_phase":"Normalized"#));
         assert!(json.contains(r#""worker_id":"request_normalizer""#));
@@ -409,20 +305,40 @@ mod tests {
         let decoded: Event = serde_json::from_str(&json).unwrap();
         match decoded {
             Event::TransitionExecuted {
-                run_id: decoded_run_id,
                 from_phase,
                 to_phase,
                 worker_id,
                 artifact_id: decoded_artifact_id,
                 ..
             } => {
-                assert_eq!(decoded_run_id, run_id);
                 assert_eq!(from_phase, Phase::Proposed);
                 assert_eq!(to_phase, Phase::Normalized);
                 assert_eq!(worker_id, "request_normalizer");
                 assert_eq!(decoded_artifact_id, Some(artifact_id));
             }
             _ => panic!("Expected TransitionExecuted event"),
+        }
+    }
+
+    #[test]
+    fn test_artifact_created() {
+        let artifact_id = ArtifactId::new();
+        let event = artifact_created(artifact_id, ArtifactKind::UserPrompt, vec![]);
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""type":"artifact_created""#));
+
+        let decoded: Event = serde_json::from_str(&json).unwrap();
+        match decoded {
+            Event::ArtifactCreated {
+                kind,
+                artifact_id: decoded_id,
+                ..
+            } => {
+                assert_eq!(kind, ArtifactKind::UserPrompt);
+                assert_eq!(decoded_id, artifact_id);
+            }
+            _ => panic!("Expected ArtifactCreated event"),
         }
     }
 }
