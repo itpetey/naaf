@@ -6,13 +6,9 @@ license.workspace = true
 
 [dependencies]
 model = { path = "../model" }
-anyhow.workspace = true
-thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
 
 [dev-dependencies]
 httpmock = "0.8"

@@ -9,12 +9,4 @@ name = "naaf-tui"
 path = "src/main.rs"
 
 [dependencies]
-orchestrator = { path = "../orchestrator" }
-openspec = { path = "../openspec" }
-anyhow.workspace = true
-thiserror.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-tracing.workspace = true
 tracing-subscriber = "0.3"
-crossterm = "0.3"
