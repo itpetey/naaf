@@ -141,6 +141,26 @@ impl ArtifactStore {
         Ok(artifacts)
     }
 
+    pub fn list_metadata(&self, run_id: RunId) -> StoreResult<Vec<ArtifactMetadata>> {
+        let run_dir = self.run_dir(run_id);
+        if !run_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut artifacts = Vec::new();
+        for entry in fs::read_dir(&run_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                let file = BufReader::new(File::open(&path)?);
+                let metadata: ArtifactMetadata = serde_json::from_reader(file)?;
+                artifacts.push(metadata);
+            }
+        }
+        artifacts.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        Ok(artifacts)
+    }
+
     pub fn exists(&self, id: ArtifactId, run_id: RunId) -> bool {
         let run_dir = self.run_dir(run_id);
         if !run_dir.exists() {
