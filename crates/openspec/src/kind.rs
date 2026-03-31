@@ -13,6 +13,9 @@ pub enum ArtifactKind {
     CandidatePatch,
     ValidationResults,
     ReviewFindings,
+    RiskFindings,
+    ConsistencyFindings,
+    CurrentProposal,
     RemediationPlan,
     DeliveryBundle,
 }
@@ -29,6 +32,9 @@ impl ArtifactKind {
             ArtifactKind::CandidatePatch => "candidate_patch",
             ArtifactKind::ValidationResults => "validation_results",
             ArtifactKind::ReviewFindings => "review_findings",
+            ArtifactKind::RiskFindings => "risk_findings",
+            ArtifactKind::ConsistencyFindings => "consistency_findings",
+            ArtifactKind::CurrentProposal => "current_proposal",
             ArtifactKind::RemediationPlan => "remediation_plan",
             ArtifactKind::DeliveryBundle => "delivery_bundle",
         }

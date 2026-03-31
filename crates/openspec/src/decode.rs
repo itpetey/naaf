@@ -2,7 +2,10 @@
 
 use thiserror::Error;
 
-use crate::artifacts::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
+use crate::artifacts::{
+    AcceptanceCriteriaSet, ConsistencyFinding, FindingSet, NormalizedSpec, ProposalSkeleton,
+    ReadinessDecision, RemediationPlan, RiskFinding, ScopeReport, SectionPatch,
+};
 
 #[derive(Debug, Error)]
 pub enum DecodeError {
@@ -40,6 +43,42 @@ pub fn decode_acceptance_criteria(text: &str) -> Result<AcceptanceCriteriaSet> {
     let json = extract_json(text)?;
     let criteria: AcceptanceCriteriaSet = serde_json::from_str(&json)?;
     Ok(criteria)
+}
+
+pub fn decode_risk_findings(text: &str) -> Result<Vec<RiskFinding>> {
+    let json = extract_json(text)?;
+    let findings: Vec<RiskFinding> = serde_json::from_str(&json)?;
+    Ok(findings)
+}
+
+pub fn decode_consistency_findings(text: &str) -> Result<Vec<ConsistencyFinding>> {
+    let json = extract_json(text)?;
+    let findings: Vec<ConsistencyFinding> = serde_json::from_str(&json)?;
+    Ok(findings)
+}
+
+pub fn decode_finding_set(text: &str) -> Result<FindingSet> {
+    let json = extract_json(text)?;
+    let finding_set: FindingSet = serde_json::from_str(&json)?;
+    Ok(finding_set)
+}
+
+pub fn decode_remediation_plan(text: &str) -> Result<RemediationPlan> {
+    let json = extract_json(text)?;
+    let plan: RemediationPlan = serde_json::from_str(&json)?;
+    Ok(plan)
+}
+
+pub fn decode_section_patch(text: &str) -> Result<SectionPatch> {
+    let json = extract_json(text)?;
+    let patch: SectionPatch = serde_json::from_str(&json)?;
+    Ok(patch)
+}
+
+pub fn decode_readiness_decision(text: &str) -> Result<ReadinessDecision> {
+    let json = extract_json(text)?;
+    let decision: ReadinessDecision = serde_json::from_str(&json)?;
+    Ok(decision)
 }
 
 fn extract_json(text: &str) -> Result<String> {

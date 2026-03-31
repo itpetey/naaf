@@ -8,7 +8,9 @@ pub mod workers;
 pub mod workflow;
 
 pub use artifacts::{
-    AcceptanceCriteriaSet, Criterion, NormalizedSpec, ProposalSkeleton, ScopeReport,
+    AcceptanceCriteriaSet, ConsistencyFinding, Criterion, Finding, FindingSet, FindingSeverity,
+    NormalizedSpec, ProposalSkeleton, ReadinessDecision, RemediationPlan, RiskFinding, ScopeReport,
+    SectionPatch,
 };
 pub use decode::{DecodeError, Result as DecodeResult};
 pub use kind::ArtifactKind;
