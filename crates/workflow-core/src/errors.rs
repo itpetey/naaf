@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::events::EventError;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
@@ -12,6 +14,9 @@ pub enum Error {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Event error: {0}")]
+    Event(#[from] EventError),
 }
 
 #[derive(Debug, Error)]

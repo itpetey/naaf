@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 use workflow_schema::state::RunId;
 
-use crate::events::EventSink;
+use crate::events::TraceSink;
 
 pub type StepBudget = u32;
 pub type BranchBudget = u32;
@@ -110,12 +111,19 @@ pub struct ExecCtx<S: Services> {
     pub run_id: RunId,
     pub budget: BudgetImpl,
     pub services: S,
-    pub trace: Box<dyn EventSink>,
+    pub trace: Box<dyn TraceSink>,
     pub cancel: CancellationToken,
     pub start_time: Instant,
     pub step_count: u32,
     pub branch_count: u32,
     pub total_tokens: u64,
+    event_sequence: AtomicU64,
+}
+
+impl<S: Services> crate::events::TraceSink for ExecCtx<S> {
+    fn emit(&self, event: crate::events::ExecutionEvent) -> crate::events::EventResult {
+        self.trace.emit(event)
+    }
 }
 
 impl<S: Services> ExecCtx<S> {
@@ -124,13 +132,18 @@ impl<S: Services> ExecCtx<S> {
             run_id,
             budget: BudgetImpl::new(),
             services,
-            trace: Box::new(crate::events::NullEventSink),
+            trace: Box::new(crate::events::NoOpTraceSink),
             cancel: CancellationToken::new(),
             start_time: Instant::now(),
             step_count: 0,
             branch_count: 0,
             total_tokens: 0,
+            event_sequence: AtomicU64::new(0),
         }
+    }
+
+    pub fn next_sequence_number(&self) -> u64 {
+        self.event_sequence.fetch_add(1, Ordering::SeqCst)
     }
 
     pub fn with_budget(mut self, budget: BudgetState) -> Self {
@@ -138,7 +151,7 @@ impl<S: Services> ExecCtx<S> {
         self
     }
 
-    pub fn with_trace(mut self, trace: Box<dyn EventSink>) -> Self {
+    pub fn with_trace(mut self, trace: Box<dyn TraceSink>) -> Self {
         self.trace = trace;
         self
     }

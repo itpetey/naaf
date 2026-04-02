@@ -11,5 +11,7 @@ pub mod steps;
 
 pub use builder::WorkflowBuilder;
 pub use errors::{Error, StepError, ValidationError};
-pub use events::EventSink;
+pub use events::{
+    AsyncTraceSink, EventError, EventResult, EventStore, FilesystemEventStore, TraceSink,
+};
 pub use graph::{CompiledWorkflow, EdgeType, GraphEdge, GraphNode};
