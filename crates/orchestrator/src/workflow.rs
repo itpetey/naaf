@@ -351,7 +351,8 @@ pub async fn run_workflow<P: ModelProvider + Sync>(
                 run.fail(crate::run::TerminalReason::Failed {
                     message: format!("Transition {} failed: {}", spec.name, e),
                 });
-                let event = crate::journal::run_failed(&format!("Transition {} failed: {}", spec.name, e));
+                let event =
+                    crate::journal::run_failed(&format!("Transition {} failed: {}", spec.name, e));
                 if let Err(journal_err) = engine.journal().append(&event) {
                     tracing::error!("Failed to write failed event to journal: {}", journal_err);
                 }
@@ -369,7 +370,10 @@ pub async fn run_workflow<P: ModelProvider + Sync>(
         );
         let event = crate::journal::run_completed();
         if let Err(journal_err) = engine.journal().append(&event) {
-            tracing::error!("Failed to write completed event to journal: {}", journal_err);
+            tracing::error!(
+                "Failed to write completed event to journal: {}",
+                journal_err
+            );
         }
     }
 
