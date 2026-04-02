@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::events::EventError;
+use workflow_schema::adapters::AdapterError;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -80,5 +81,11 @@ impl ValidationError {
 
     pub fn state(reason: impl Into<String>) -> Self {
         Self::State(reason.into())
+    }
+}
+
+impl From<AdapterError> for StepError {
+    fn from(err: AdapterError) -> Self {
+        Self::execution(err.to_string())
     }
 }
