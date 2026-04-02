@@ -18,6 +18,9 @@ pub enum Error {
 
     #[error("Event error: {0}")]
     Event(#[from] EventError),
+
+    #[error("Persistence error: {0}")]
+    Persistence(String),
 }
 
 #[derive(Debug, Error)]

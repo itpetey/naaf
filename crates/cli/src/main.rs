@@ -1,20 +1,20 @@
 //! CLI entry point.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
-use clap::{Parser, ValueEnum};
-use naaf_model::ModelProvider;
-use naaf_openspec::{Phase, openspec_happy_path};
-use naaf_orchestrator::{
-    artifact::{Artifact, ArtifactId, ArtifactKind},
-    journal::{Event, Journal},
-    run::{Outcome, Run, RunId, TaskId, TerminalReason},
-    store::ArtifactStore,
-    workflow::{DefaultExecutionEngine, run_workflow},
-};
+use clap::Parser;
+use tokio_util::sync::CancellationToken;
+use workflow_builtins::draft_request_workflow;
+use workflow_core::budget::{DummyServices, ExecCtx};
+use workflow_core::events::ExecutionEvent;
+use workflow_core::executor::Executor;
+use workflow_core::state_store::StateStore;
+use workflow_schema::artifacts::{ArtifactKey, ArtifactValue};
+use workflow_schema::execution_status::ExecutionStatus;
+use workflow_schema::lineage::Lineage;
+use workflow_schema::state::{RunId, StateEnvelope, StateId};
+use workflow_schema::state_kind::StateKind;
 
 const RUNS_DIR: &str = ".runs";
 
@@ -27,50 +27,32 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Command {
-    #[command(about = "Run a workflow with a prompt")]
+    #[command(about = "Run a workflow with input")]
     Run {
-        #[arg(help = "The prompt to process")]
-        prompt: String,
-        #[arg(
-            short,
-            long,
-            value_enum,
-            default_value = "openai",
-            help = "Model provider"
-        )]
-        provider: ProviderChoice,
-        #[arg(short, long, help = "Model identifier")]
-        model: Option<String>,
+        #[arg(help = "Workflow to run")]
+        workflow: String,
+        #[arg(help = "Input text for the workflow")]
+        input: String,
     },
     #[command(about = "List all runs")]
     List,
-    #[command(about = "Inspect a run")]
+    #[command(about = "Show execution trace for a run")]
+    Trace {
+        #[arg(help = "Run ID to trace")]
+        run_id: String,
+    },
+    #[command(about = "Inspect final state of a run")]
     Inspect {
         #[arg(help = "Run ID to inspect")]
         run_id: String,
     },
-    #[command(about = "View artifacts from a run")]
-    Artifacts {
-        #[arg(help = "Run ID to view artifacts for")]
+    #[command(about = "Replay a run with the same input")]
+    Replay {
+        #[arg(help = "Run ID to replay")]
         run_id: String,
-        #[arg(short, long, help = "Artifact ID to view")]
-        view: Option<String>,
-        #[arg(short, long, help = "Output as JSON")]
-        json: bool,
     },
-    #[command(about = "View journal events for a run")]
-    Journal {
-        #[arg(help = "Run ID to view journal for")]
-        run_id: String,
-        #[arg(short, long, help = "Comma-separated event types to filter")]
-        filter: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum ProviderChoice {
-    Openai,
-    OpencodeGo,
+    #[command(about = "List available workflows")]
+    Workflows,
 }
 
 #[tokio::main]
@@ -78,137 +60,104 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
-        Command::Run {
-            prompt,
-            provider,
-            model,
-        } => {
-            run(prompt, provider, model).await?;
+        Command::Run { workflow, input } => {
+            run(&workflow, input).await?;
         }
         Command::List => {
             list_runs()?;
         }
+        Command::Trace { run_id } => {
+            trace_run(&run_id)?;
+        }
         Command::Inspect { run_id } => {
             inspect_run(&run_id)?;
         }
-        Command::Artifacts { run_id, view, json } => {
-            artifacts(&run_id, view.as_deref(), json)?;
+        Command::Replay { run_id } => {
+            replay_run(&run_id).await?;
         }
-        Command::Journal { run_id, filter } => {
-            journal(&run_id, filter.as_deref())?;
+        Command::Workflows => {
+            list_workflows()?;
         }
     }
 
     Ok(())
 }
 
-async fn run(prompt: String, provider_choice: ProviderChoice, model: Option<String>) -> Result<()> {
-    match provider_choice {
-        ProviderChoice::Openai => {
-            let api_key = std::env::var("OPENAI_API_KEY").context(
-                "OPENAI_API_KEY environment variable not set.\n\
-                 Set it with: export OPENAI_API_KEY=your-api-key",
-            )?;
-            let model = model.unwrap_or_else(|| "gpt-5".to_string());
-            let provider = naaf_providers::openai::OpenAiModel::gpt5(api_key);
-            execute_workflow(prompt, Arc::new(provider), model).await
-        }
-        ProviderChoice::OpencodeGo => {
-            let api_key = std::env::var("OPENCODE_GO_API_KEY").context(
-                "OPENCODE_GO_API_KEY environment variable not set.\n\
-                 Set it with: export OPENCODE_GO_API_KEY=your-api-key",
-            )?;
-            let model_input = model.unwrap_or_else(|| "glm-5".to_string());
-            let model_str = model_input.clone();
-            match model_input.to_lowercase().as_str() {
-                "glm-5" | "glm5" => {
-                    let provider = naaf_providers::opencode_go::OpenCodeGoModel::glm5(api_key);
-                    execute_workflow(prompt, Arc::new(provider), model_str).await
-                }
-                "kimi-k2.5" | "kimi-k25" | "kimik25" => {
-                    let provider = naaf_providers::opencode_go::OpenCodeGoModel::kimik25(api_key);
-                    execute_workflow(prompt, Arc::new(provider), model_str).await
-                }
-                "minimax-m2.5" | "minimaxm25" => {
-                    let provider =
-                        naaf_providers::opencode_go::OpenCodeGoModel::minimaxm25(api_key);
-                    execute_workflow(prompt, Arc::new(provider), model_str).await
-                }
-                "minimax-m2.7" | "minimaxm27" => {
-                    let provider =
-                        naaf_providers::opencode_go::OpenCodeGoModel::minimaxm27(api_key);
-                    execute_workflow(prompt, Arc::new(provider), model_str).await
-                }
-                _ => {
-                    anyhow::bail!(
-                        "Unknown OpenCode Go model: {}\n\
-                         Available models: glm-5, kimi-k2.5, minimax-m2.5, minimax-m2.7",
-                        model_input
-                    )
-                }
-            }
-        }
-    }
-}
-
-async fn execute_workflow<P: ModelProvider + Sync + 'static>(
-    prompt: String,
-    provider: Arc<P>,
-    model: String,
-) -> Result<()> {
+async fn run(workflow_name: &str, input: String) -> Result<()> {
     let runs_dir = PathBuf::from(RUNS_DIR);
     std::fs::create_dir_all(&runs_dir)?;
 
-    let task_id = TaskId::new();
-    let mut run = Run::new(task_id, PathBuf::new());
+    let run_id = RunId::new();
+    let run_dir = runs_dir.join(run_id.to_string());
+    std::fs::create_dir_all(&run_dir)?;
 
-    let worktree = runs_dir.join(run.id.0.to_string());
-    std::fs::create_dir_all(&worktree)?;
-    run.worktree = worktree.clone();
+    let event_file = run_dir.join("events.log");
+    let event_sink = workflow_core::events::FilesystemEventStore::new(&event_file)?;
 
-    let store = ArtifactStore::new(&worktree)?;
-    let journal = Journal::new(&worktree)?;
+    println!("Running workflow: {}", workflow_name);
+    println!("Run ID: {}", run_id);
+    println!("Input: {}", input);
 
-    let user_prompt_artifact = Artifact::new(
-        run.id,
-        ArtifactKind::UserPrompt,
-        vec![],
-        worktree.join("user_prompt.bin"),
+    let workflow = match workflow_name {
+        "draft-request" => draft_request_workflow()?,
+        _ => anyhow::bail!(
+            "Unknown workflow: {}. Available: draft-request",
+            workflow_name
+        ),
+    };
+
+    let executor = Executor::new(workflow)?;
+
+    let mut state = StateEnvelope::new(
+        StateId::new(),
+        run_id,
+        StateKind::Proposed,
+        Lineage::new(None, None, ExecutionStatus::Pending),
     );
-    store.save(&user_prompt_artifact, prompt.as_bytes())?;
+    state
+        .artifacts
+        .insert(ArtifactKey::new("input"), ArtifactValue::text(&input));
 
-    println!("Running workflow...");
-    println!("Run ID: {}", run.id);
-    println!("Model: {}", model);
+    let mut ctx = ExecCtx::new(run_id, DummyServices)
+        .with_trace(Box::new(event_sink))
+        .with_cancel(CancellationToken::new());
 
-    let engine = DefaultExecutionEngine::new(provider, model, store, journal);
+    println!("\nExecuting...");
 
-    let workflow = openspec_happy_path();
+    match executor.execute(&mut ctx, state).await {
+        Ok(final_state) => {
+            if let Err(e) = StateStore::save(&final_state, &run_dir) {
+                eprintln!("Warning: Failed to persist state: {}", e);
+            }
 
-    let outcome = run_workflow(&engine, &workflow, &mut run).await?;
+            println!("\n✓ Workflow completed successfully");
+            println!("\nFinal state kind: {:?}", final_state.kind);
 
-    match &outcome {
-        Outcome::Done => {
-            println!("\nOutcome: SUCCESS");
-        }
-        Outcome::Failed(reason) => {
-            println!("\nOutcome: FAILED");
-            if let TerminalReason::Failed { message } = reason {
-                println!("Reason: {}", message);
+            if let Some(response) = final_state.artifacts.get(&ArtifactKey::new("response"))
+                && let Some(text) = response.as_text()
+            {
+                println!("Response: {}", text);
+            }
+
+            if let Some(acceptance) = final_state.artifacts.get(&ArtifactKey::new("acceptance"))
+                && let Some(json) = acceptance.as_json()
+            {
+                println!("Acceptance: {}", serde_json::to_string_pretty(json)?);
+            }
+
+            if let Some(escalation) = final_state.artifacts.get(&ArtifactKey::new("escalation"))
+                && let Some(json) = escalation.as_json()
+            {
+                println!("\nEscalation:");
+                println!("{}", serde_json::to_string_pretty(json)?);
             }
         }
-        Outcome::Escalated(reason) => {
-            println!("\nOutcome: ESCALATED");
-            if let TerminalReason::Escalated { message } = reason {
-                println!("Reason: {}", message);
-            }
-        }
-        Outcome::InProgress => {
-            println!("\nOutcome: IN PROGRESS");
+        Err(e) => {
+            println!("\n✗ Workflow failed: {}", e);
         }
     }
 
-    println!("\nArtifacts saved to: {}/{}", RUNS_DIR, run.id);
+    println!("\nRun directory: {}", run_dir.display());
 
     Ok(())
 }
@@ -238,240 +187,341 @@ fn list_runs() -> Result<()> {
     }
 
     println!(
-        "{:<38} {:<15} {:<12} TIMESTAMP",
-        "RUN ID", "PHASE", "OUTCOME"
+        "{:<38} {:<15} {:<12} STARTED",
+        "RUN ID", "STATE KIND", "STATUS"
     );
-    println!("{}", "-".repeat(80));
+    println!("{}", "-".repeat(90));
 
     for entry in runs {
         let run_id_str = entry.file_name().to_string_lossy().into_owned();
         let run_dir = entry.path();
 
-        let (phase, outcome, timestamp) = if run_id_str.parse::<uuid::Uuid>().is_ok() {
-            let journal = match Journal::new(&run_dir) {
-                Ok(j) => j,
-                Err(_) => {
-                    continue;
-                }
-            };
-
-            let mut last_phase = "unknown".to_string();
-            let mut last_outcome = "unknown".to_string();
-            let mut last_timestamp: Option<DateTime<Utc>> = None;
-
-            for event in journal.iter()?.flatten() {
-                match &event {
-                    Event::RunStarted { timestamp } => {
-                        last_phase = format!("{:?}", Phase::default());
-                        last_timestamp = Some(*timestamp);
-                    }
-                    Event::TransitionExecuted {
-                        to_phase,
-                        timestamp,
-                        ..
-                    } => {
-                        last_phase = format!("{:?}", to_phase);
-                        last_timestamp = Some(*timestamp);
-                    }
-                    Event::RunCompleted { timestamp } => {
-                        last_outcome = "done".to_string();
-                        last_timestamp = Some(*timestamp);
-                    }
-                    Event::RunFailed {
-                        reason: _,
-                        timestamp,
-                    } => {
-                        last_outcome = "failed".to_string();
-                        last_timestamp = Some(*timestamp);
-                    }
-                    Event::RunEscalated {
-                        reason: _,
-                        timestamp,
-                    } => {
-                        last_outcome = "escalated".to_string();
-                        last_timestamp = Some(*timestamp);
-                    }
-                    _ => {}
-                }
-            }
-            (last_phase, last_outcome, last_timestamp)
-        } else {
+        if run_id_str.parse::<uuid::Uuid>().is_err() {
             continue;
+        }
+
+        let event_file = run_dir.join("events.log");
+        if !event_file.exists() {
+            continue;
+        }
+
+        let events = workflow_core::events::FilesystemEventStore::read_events(&event_file)?;
+
+        let first_event = events.first();
+        let last_event = events.last();
+
+        let state_kind = events
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                ExecutionEvent::StepEntered { step_name, .. } => Some(step_name.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let status = match last_event {
+            Some(ExecutionEvent::RunTerminated { .. }) => "done",
+            Some(ExecutionEvent::RunFailed { .. }) => "failed",
+            _ => "running",
         };
 
-        let timestamp_str = timestamp
-            .map(|t: DateTime<Utc>| t.format("%Y-%m-%d %H:%M:%S").to_string())
+        let started = first_event.and_then(|e| match e {
+            ExecutionEvent::RunStarted { timestamp, .. } => Some(timestamp),
+            _ => None,
+        });
+
+        let started_str = started
+            .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_else(|| "-".to_string());
 
         println!(
             "{:<38} {:<15} {:<12} {}",
-            run_id_str, phase, outcome, timestamp_str
+            run_id_str, state_kind, status, started_str
         );
     }
+
+    Ok(())
+}
+
+fn trace_run(run_id: &str) -> Result<()> {
+    let _run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
+
+    let run_dir = PathBuf::from(RUNS_DIR).join(run_id);
+    if !run_dir.exists() {
+        anyhow::bail!("Run not found: {}", run_id);
+    }
+
+    let event_file = run_dir.join("events.log");
+    if !event_file.exists() {
+        anyhow::bail!("No events found for run: {}", run_id);
+    }
+
+    let events = workflow_core::events::FilesystemEventStore::read_events(&event_file)?;
+
+    if events.is_empty() {
+        println!("No events in run");
+        return Ok(());
+    }
+
+    println!("Run: {}", run_id);
+    println!("{}\n", "=".repeat(90));
+
+    let mut step_count = 0;
+    let mut prompt_count = 0;
+    let mut provider_call_count = 0;
+
+    for event in &events {
+        match event {
+            ExecutionEvent::RunStarted { timestamp, .. } => {
+                println!("{}  Run started", timestamp.format("%Y-%m-%d %H:%M:%S"));
+            }
+            ExecutionEvent::StepEntered {
+                timestamp,
+                step_name,
+                ..
+            } => {
+                step_count += 1;
+                println!(
+                    "{}  → Entered step: {}",
+                    timestamp.format("%Y-%m-%d %H:%M:%S"),
+                    step_name
+                );
+            }
+            ExecutionEvent::PromptRendered { timestamp, .. } => {
+                prompt_count += 1;
+                println!(
+                    "{}    Prompt rendered",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::ProviderCalled { timestamp, .. } => {
+                provider_call_count += 1;
+                println!(
+                    "{}    Provider called",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::ProviderResponded { timestamp, .. } => {
+                println!(
+                    "{}    Provider responded",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::ArtifactsParsed { timestamp, .. } => {
+                println!(
+                    "{}    Artifacts parsed",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::ValidatorPassed { timestamp, .. } => {
+                println!(
+                    "{}    ✓ Validator passed",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::ValidatorFailed { timestamp, .. } => {
+                println!(
+                    "{}    ✗ Validator failed",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::RouteSelected { timestamp, .. } => {
+                println!(
+                    "{}    Route selected",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::BranchStarted { timestamp, .. } => {
+                println!(
+                    "{}    Branch started",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::BranchCompleted { timestamp, .. } => {
+                println!(
+                    "{}    Branch completed",
+                    timestamp.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ExecutionEvent::JoinReduced { timestamp, .. } => {
+                println!("{}    Join reduced", timestamp.format("%Y-%m-%d %H:%M:%S"));
+            }
+            ExecutionEvent::RunTerminated { timestamp, .. } => {
+                println!("{}  Run completed", timestamp.format("%Y-%m-%d %H:%M:%S"));
+            }
+            ExecutionEvent::RunFailed {
+                timestamp, error, ..
+            } => {
+                println!(
+                    "{}  Run failed: {}",
+                    timestamp.format("%Y-%m-%d %H:%M:%S"),
+                    error
+                );
+            }
+        }
+    }
+
+    println!("\n{}", "=".repeat(90));
+    println!("Summary:");
+    println!("  Steps executed: {}", step_count);
+    println!("  Prompts rendered: {}", prompt_count);
+    println!("  Provider calls: {}", provider_call_count);
 
     Ok(())
 }
 
 fn inspect_run(run_id: &str) -> Result<()> {
-    let run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
-    let _run_uuid = RunId(run_uuid);
+    let _run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
+
     let run_dir = PathBuf::from(RUNS_DIR).join(run_id);
     if !run_dir.exists() {
-        eprintln!("Run not found: {}", run_id);
-        std::process::exit(1);
+        anyhow::bail!("Run not found: {}", run_id);
     }
+
+    let event_file = run_dir.join("events.log");
+    if !event_file.exists() {
+        anyhow::bail!("No events found for run: {}", run_id);
+    }
+
+    let events = workflow_core::events::FilesystemEventStore::read_events(&event_file)?;
 
     println!("Run: {}", run_id);
     println!("Directory: {}", run_dir.display());
+    println!();
 
-    let journal = Journal::new(&run_dir)?;
+    let started = events.first().and_then(|e| match e {
+        ExecutionEvent::RunStarted { timestamp, .. } => Some(*timestamp),
+        _ => None,
+    });
 
-    let mut phase = "unknown".to_string();
-    let mut outcome = "unknown".to_string();
+    let terminated = events.iter().rev().find_map(|e| match e {
+        ExecutionEvent::RunTerminated { timestamp, .. } => Some(*timestamp),
+        _ => None,
+    });
 
-    for event in journal.iter()?.flatten() {
-        match &event {
-            Event::RunStarted { .. } => {
-                phase = format!("{:?}", Phase::default());
+    let failed = events.iter().rev().find_map(|e| match e {
+        ExecutionEvent::RunFailed {
+            timestamp, error, ..
+        } => Some((*timestamp, error.clone())),
+        _ => None,
+    });
+
+    if let Some(start) = started {
+        println!("Started: {}", start.format("%Y-%m-%d %H:%M:%S"));
+    }
+
+    match StateStore::load(&run_dir) {
+        Ok(state) => {
+            println!("State kind: {:?}", state.kind);
+            println!();
+
+            if let Some(start) = started
+                && let Some(end) = terminated
+            {
+                let duration = end.signed_duration_since(start);
+                println!("Duration: {:?}", duration);
             }
-            Event::TransitionExecuted { to_phase, .. } => {
-                phase = format!("{:?}", to_phase);
+
+            let status = if terminated.is_some() {
+                "✓ Completed"
+            } else if failed.is_some() {
+                "✗ Failed"
+            } else {
+                "Running"
+            };
+            println!("Status: {}", status);
+
+            println!();
+            println!("─ Artifacts ─────────────────────────────────────────");
+            println!();
+
+            for (key, value) in state.artifacts.iter() {
+                println!("  {}", key);
+                if let Some(text) = value.as_text() {
+                    if text.len() > 100 {
+                        println!("    {}", &text[..100]);
+                        println!("    ... ({} bytes total)", text.len());
+                    } else {
+                        println!("    {}", text);
+                    }
+                } else if let Some(json) = value.as_json() {
+                    let s = serde_json::to_string_pretty(json)?;
+                    for line in s.lines().take(10) {
+                        println!("    {}", line);
+                    }
+                    if s.lines().count() > 10 {
+                        println!("    ... ({} lines total)", s.lines().count());
+                    }
+                }
             }
-            Event::RunCompleted { .. } => {
-                outcome = "done".to_string();
+        }
+        Err(_) => {
+            if let Some(end) = terminated {
+                if let Some(start) = started {
+                    let duration = end.signed_duration_since(start);
+                    println!("Duration: {:?}", duration);
+                }
+                println!("Status: ✓ Completed");
             }
-            Event::RunFailed { .. } => {
-                outcome = "failed".to_string();
+
+            if let Some((_, error)) = failed {
+                println!("Status: ✗ Failed");
+                println!("Error: {}", error);
             }
-            Event::RunEscalated { .. } => {
-                outcome = "escalated".to_string();
-            }
-            _ => {}
         }
     }
 
-    println!("Phase: {}", phase);
-    println!("Outcome: {}", outcome);
+    let steps: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            ExecutionEvent::StepEntered { step_name, .. } => Some(step_name.clone()),
+            _ => None,
+        })
+        .collect();
+
+    println!();
+    println!("─ Execution Trace ───────────────────────────────────");
+    println!();
+    println!("Steps executed ({}):", steps.len());
+    for (i, step) in steps.iter().enumerate() {
+        println!("  {}. {}", i + 1, step);
+    }
 
     Ok(())
 }
 
-fn artifacts(run_id: &str, view_artifact: Option<&str>, json: bool) -> Result<()> {
-    let run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
-    let run_id = RunId(run_uuid);
-    let run_dir = PathBuf::from(RUNS_DIR).join(run_id.0.to_string());
-    if !run_dir.exists() {
-        eprintln!("Run not found: {}", run_id.0);
-        std::process::exit(1);
-    }
-
-    let store = ArtifactStore::new(&run_dir)?;
-    let metadata = store.list_metadata(run_id)?;
-
-    if metadata.is_empty() {
-        println!("No artifacts found");
-        return Ok(());
-    }
-
-    if json {
-        let output: Vec<_> = metadata
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "id": m.id.0,
-                    "kind": m.kind.name(),
-                    "created_at": m.created_at.to_rfc3339()
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&output)?);
-        return Ok(());
-    }
-
-    if let Some(artifact_id_str) = view_artifact {
-        if let Ok(id) = artifact_id_str.parse::<uuid::Uuid>() {
-            let artifact_id = ArtifactId(id);
-            match store.load(artifact_id, run_id) {
-                Ok((_artifact, content)) => {
-                    println!("{}", String::from_utf8_lossy(&content));
-                }
-                Err(e) => {
-                    eprintln!("Error loading artifact: {}", e);
-                }
-            }
-        } else {
-            eprintln!("Invalid artifact ID format");
-        }
-        return Ok(());
-    }
-
-    println!("{:<38} {:<25} CREATED AT", "ID", "KIND");
-    println!("{}", "-".repeat(80));
-
-    for m in &metadata {
-        println!(
-            "{:<38} {:<25} {}",
-            m.id.0,
-            m.kind.name(),
-            m.created_at.format("%Y-%m-%d %H:%M:%S")
-        );
-    }
+fn list_workflows() -> Result<()> {
+    println!("Available workflows:");
+    println!();
+    println!("  draft-request");
+    println!("    Draft request workflow with classification, normalization, and acceptance");
+    println!();
+    println!("Usage: naaf run <workflow> <input>");
+    println!("Example: naaf run draft-request \"Create a file\"");
 
     Ok(())
 }
 
-fn journal(run_id: &str, filter: Option<&str>) -> Result<()> {
-    let run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
-    let _run_uuid = RunId(run_uuid);
+async fn replay_run(run_id: &str) -> Result<()> {
+    let _run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
+
     let run_dir = PathBuf::from(RUNS_DIR).join(run_id);
     if !run_dir.exists() {
-        eprintln!("Run not found: {}", run_id);
-        std::process::exit(1);
+        anyhow::bail!("Run not found: {}", run_id);
     }
 
-    let journal = Journal::new(&run_dir)?;
+    let previous_state = StateStore::load(&run_dir).context("Failed to load previous run state")?;
 
-    let events: Vec<_> = journal.iter()?.filter_map(|e| e.ok()).collect();
+    let input = previous_state
+        .artifacts
+        .get(&ArtifactKey::new("input"))
+        .and_then(|v| v.as_text())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("No input artifact found in previous run"))?;
 
-    if events.is_empty() {
-        println!("No journal events found");
-        return Ok(());
-    }
+    println!("Replaying run: {}", run_id);
+    println!("Original input: {}", input);
+    println!();
 
-    let filter_types: Option<Vec<&str>> = filter.map(|f| f.split(',').map(|s| s.trim()).collect());
-
-    for event in events {
-        let timestamp = match &event {
-            Event::RunStarted { timestamp } => timestamp,
-            Event::ReviewStarted { timestamp } => timestamp,
-            Event::TransitionExecuted { timestamp, .. } => timestamp,
-            Event::ArtifactCreated { timestamp, .. } => timestamp,
-            Event::FindingCreated { timestamp, .. } => timestamp,
-            Event::FindingResolved { timestamp, .. } => timestamp,
-            Event::RunCompleted { timestamp } => timestamp,
-            Event::RunFailed { timestamp, .. } => timestamp,
-            Event::RunEscalated { timestamp, .. } => timestamp,
-        };
-        let event_type = match &event {
-            Event::RunStarted { .. } => "run_started",
-            Event::ReviewStarted { .. } => "review_started",
-            Event::TransitionExecuted { .. } => "transition_executed",
-            Event::ArtifactCreated { .. } => "artifact_created",
-            Event::FindingCreated { .. } => "finding_created",
-            Event::FindingResolved { .. } => "finding_resolved",
-            Event::RunCompleted { .. } => "run_completed",
-            Event::RunFailed { .. } => "run_failed",
-            Event::RunEscalated { .. } => "run_escalated",
-        };
-
-        if let Some(ref types) = filter_types
-            && !types.contains(&event_type)
-        {
-            continue;
-        }
-
-        println!("{}  {}", timestamp.format("%Y-%m-%d %H:%M:%S"), event_type);
-    }
-
-    Ok(())
+    run("draft-request", input).await
 }
