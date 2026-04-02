@@ -1,4 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
+use tokio_util::sync::CancellationToken;
+use workflow_schema::state::RunId;
+
+use crate::events::EventSink;
 
 pub type StepBudget = u32;
 pub type BranchBudget = u32;
@@ -102,18 +107,26 @@ impl Services for DummyServices {
 }
 
 pub struct ExecCtx<S: Services> {
+    pub run_id: RunId,
     pub budget: BudgetImpl,
     pub services: S,
+    pub trace: Box<dyn EventSink>,
+    pub cancel: CancellationToken,
+    pub start_time: Instant,
     pub step_count: u32,
     pub branch_count: u32,
     pub total_tokens: u64,
 }
 
 impl<S: Services> ExecCtx<S> {
-    pub fn new(services: S) -> Self {
+    pub fn new(run_id: RunId, services: S) -> Self {
         Self {
+            run_id,
             budget: BudgetImpl::new(),
             services,
+            trace: Box::new(crate::events::NullEventSink),
+            cancel: CancellationToken::new(),
+            start_time: Instant::now(),
             step_count: 0,
             branch_count: 0,
             total_tokens: 0,
@@ -122,6 +135,16 @@ impl<S: Services> ExecCtx<S> {
 
     pub fn with_budget(mut self, budget: BudgetState) -> Self {
         self.budget = BudgetImpl::new().with_state(budget);
+        self
+    }
+
+    pub fn with_trace(mut self, trace: Box<dyn EventSink>) -> Self {
+        self.trace = trace;
+        self
+    }
+
+    pub fn with_cancel(mut self, cancel: CancellationToken) -> Self {
+        self.cancel = cancel;
         self
     }
 
@@ -170,7 +193,7 @@ mod tests {
                 Ok(vec![])
             }
         }
-        let ctx = ExecCtx::new(NoServices);
+        let ctx = ExecCtx::new(RunId::new(), NoServices);
         assert_eq!(ctx.step_count, 0);
     }
 
@@ -183,7 +206,7 @@ mod tests {
                 Ok(vec![])
             }
         }
-        let mut ctx = ExecCtx::new(NoServices);
+        let mut ctx = ExecCtx::new(RunId::new(), NoServices);
         ctx.inc_steps();
         ctx.inc_steps();
         assert_eq!(ctx.step_count, 2);

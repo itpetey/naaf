@@ -1,21 +1,19 @@
 use serde::{Deserialize, Serialize};
 
-use workflow_schema::state::StateId;
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum RouteDecision {
-    Next(StateId),
-    Branch(Vec<StateId>),
+    Next(String),
+    Branch(Vec<String>),
     Terminal,
 }
 
 impl RouteDecision {
-    pub fn next(id: StateId) -> Self {
-        Self::Next(id)
+    pub fn next(node_id: impl Into<String>) -> Self {
+        Self::Next(node_id.into())
     }
 
-    pub fn branch(ids: Vec<StateId>) -> Self {
-        Self::Branch(ids)
+    pub fn branch(node_ids: Vec<String>) -> Self {
+        Self::Branch(node_ids)
     }
 
     pub fn terminal() -> Self {
@@ -26,9 +24,9 @@ impl RouteDecision {
         matches!(self, Self::Terminal)
     }
 
-    pub fn target_ids(&self) -> Vec<StateId> {
+    pub fn target_nodes(&self) -> Vec<String> {
         match self {
-            Self::Next(id) => vec![*id],
+            Self::Next(id) => vec![id.clone()],
             Self::Branch(ids) => ids.clone(),
             Self::Terminal => vec![],
         }
@@ -41,25 +39,25 @@ mod tests {
 
     #[test]
     fn route_decision_next() {
-        let id = StateId::new();
-        let rd = RouteDecision::next(id);
+        let rd = RouteDecision::next("node-1");
         assert!(!rd.is_terminal());
-        assert_eq!(rd.target_ids().len(), 1);
+        assert_eq!(rd.target_nodes().len(), 1);
+        assert_eq!(rd.target_nodes()[0], "node-1");
     }
 
     #[test]
     fn route_decision_branch() {
-        let ids = vec![StateId::new(), StateId::new()];
+        let ids = vec!["node-1".to_string(), "node-2".to_string()];
         let rd = RouteDecision::branch(ids.clone());
         assert!(!rd.is_terminal());
-        assert_eq!(rd.target_ids().len(), 2);
+        assert_eq!(rd.target_nodes().len(), 2);
     }
 
     #[test]
     fn route_decision_terminal() {
         let rd = RouteDecision::terminal();
         assert!(rd.is_terminal());
-        assert!(rd.target_ids().is_empty());
+        assert!(rd.target_nodes().is_empty());
     }
 
     #[test]

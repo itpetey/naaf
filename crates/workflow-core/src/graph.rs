@@ -180,16 +180,16 @@ impl<S: Services> CompiledWorkflow<S> {
             if let Some(node) = self.nodes.iter().find(|n| n.id() == node_id) {
                 sorted.push(node);
             }
-for edge in &self.edges {
-            if edge.source == node_id
-                && let Some(degree) = in_degree.get_mut(&edge.target.as_str())
-            {
-                *degree -= 1;
-                if *degree == 0 {
-                    queue.push(edge.target.as_str());
+            for edge in &self.edges {
+                if edge.source == node_id
+                    && let Some(degree) = in_degree.get_mut(&edge.target.as_str())
+                {
+                    *degree -= 1;
+                    if *degree == 0 {
+                        queue.push(edge.target.as_str());
+                    }
                 }
             }
-        }
         }
 
         if sorted.len() != self.nodes.len() {
