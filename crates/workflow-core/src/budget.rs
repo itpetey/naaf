@@ -90,6 +90,17 @@ pub trait Services: Send + Sync {
     ) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>> + Send;
 }
 
+#[derive(Clone, Default)]
+pub struct DummyServices;
+
+impl Services for DummyServices {
+    type Error = std::io::Error;
+
+    async fn call(&self, _: &str, _: &[u8]) -> Result<Vec<u8>, Self::Error> {
+        Ok(vec![])
+    }
+}
+
 pub struct ExecCtx<S: Services> {
     pub budget: BudgetImpl,
     pub services: S,

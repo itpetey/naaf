@@ -8,3 +8,7 @@ pub mod graph;
 pub mod join;
 pub mod route;
 pub mod steps;
+
+pub use builder::WorkflowBuilder;
+pub use errors::{Error, StepError, ValidationError};
+pub use graph::{CompiledWorkflow, EdgeType, GraphEdge, GraphNode};
