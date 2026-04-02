@@ -37,3 +37,7 @@ uuid = { version = "1.23", default-features = false, features = ["v4", "std"] }
 
 naaf-model = { path = "crates/model" }
 naaf-openspec = { path = "crates/openspec" }
+workflow-core = { path = "crates/workflow-core" }
+workflow-schema = { path = "crates/workflow-schema" }
+workflow-llm = { path = "crates/workflow-llm" }
+workflow-builtins = { path = "crates/workflow-builtins" }

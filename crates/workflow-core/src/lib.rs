@@ -1,3 +1,4 @@
+pub mod budget;
 pub mod builder;
 pub mod compiled;
 pub mod errors;
@@ -7,4 +8,3 @@ pub mod graph;
 pub mod join;
 pub mod route;
 pub mod steps;
-pub mod budget;
