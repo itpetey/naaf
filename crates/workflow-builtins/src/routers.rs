@@ -13,6 +13,103 @@ use workflow_schema::state::StateEnvelope;
 
 use crate::classify_input::{Classification, InputClass};
 
+/// Router that directs inputs based on their classification category.
+///
+/// Routes to different workflow nodes depending on whether the input is
+/// `Greeting`, `Ambiguous`, or `Actionable`.
+///
+/// # Input
+/// Expects a `Classification` artifact at the specified key (default: "classification").
+///
+/// # Output
+/// - `RouteDecision::Next(greeting_route)` for greeting inputs
+/// - `RouteDecision::Next(clarification_route)` for ambiguous inputs
+/// - `RouteDecision::Next(actionable_route)` for actionable inputs
+///
+/// # Example
+///
+/// ```ignore
+/// use workflow_builtins::InputClassificationRouter;
+/// use workflow_core::steps::Router;
+///
+/// let router = InputClassificationRouter::new("greeting_path", "clarify_path", "continue_path");
+/// // Routes based on input classification
+/// ```
+pub struct InputClassificationRouter {
+    classification_key: ArtifactKey,
+    greeting_route: String,
+    clarification_route: String,
+    actionable_route: String,
+}
+
+impl InputClassificationRouter {
+    /// Creates a new router with default artifact key "classification".
+    ///
+    /// # Arguments
+    ///
+    /// * `greeting_route` - Route for greeting inputs
+    /// * `clarification_route` - Route for ambiguous inputs
+    /// * `actionable_route` - Route for actionable inputs
+    pub fn new(
+        greeting_route: impl Into<String>,
+        clarification_route: impl Into<String>,
+        actionable_route: impl Into<String>,
+    ) -> Self {
+        Self {
+            classification_key: ArtifactKey::new("classification"),
+            greeting_route: greeting_route.into(),
+            clarification_route: clarification_route.into(),
+            actionable_route: actionable_route.into(),
+        }
+    }
+
+    /// Creates a new router with a custom classification artifact key.
+    pub fn with_keys(
+        classification_key: impl Into<String>,
+        greeting_route: impl Into<String>,
+        clarification_route: impl Into<String>,
+        actionable_route: impl Into<String>,
+    ) -> Self {
+        Self {
+            classification_key: ArtifactKey::new(classification_key),
+            greeting_route: greeting_route.into(),
+            clarification_route: clarification_route.into(),
+            actionable_route: actionable_route.into(),
+        }
+    }
+}
+
+impl Router for InputClassificationRouter {
+    type Services = DummyServices;
+
+    fn name(&self) -> &'static str {
+        "input_classification_router"
+    }
+
+    fn route(
+        &self,
+        _ctx: &mut ExecCtx<Self::Services>,
+        state: &StateEnvelope,
+    ) -> Result<RouteDecision, StepError> {
+        let classification: Classification =
+            get_typed(&self.classification_key, state).map_err(|e| {
+                StepError::router(
+                    "input_classification_router",
+                    format!(
+                        "Failed to get classification from artifact key '{}': {}",
+                        self.classification_key, e
+                    ),
+                )
+            })?;
+
+        match classification.class {
+            InputClass::Greeting => Ok(RouteDecision::next(&self.greeting_route)),
+            InputClass::Ambiguous => Ok(RouteDecision::next(&self.clarification_route)),
+            InputClass::Actionable => Ok(RouteDecision::next(&self.actionable_route)),
+        }
+    }
+}
+
 /// Router that directs ambiguous inputs to human clarification.
 ///
 /// Routes to a clarification workflow when the input classification is
@@ -341,5 +438,58 @@ mod tests {
 
         let result = router.route(&mut ctx, &state);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_input_classification_router_greeting() {
+        let router = InputClassificationRouter::new("greeting", "clarify", "continue");
+        let mut ctx = make_ctx();
+        let state = make_state_with_classification(InputClass::Greeting, 0.95);
+
+        let decision = router.route(&mut ctx, &state).unwrap();
+        assert_eq!(decision.target_nodes(), vec!["greeting".to_string()]);
+    }
+
+    #[test]
+    fn test_input_classification_router_ambiguous() {
+        let router = InputClassificationRouter::new("greeting", "clarify", "continue");
+        let mut ctx = make_ctx();
+        let state = make_state_with_classification(InputClass::Ambiguous, 0.70);
+
+        let decision = router.route(&mut ctx, &state).unwrap();
+        assert_eq!(decision.target_nodes(), vec!["clarify".to_string()]);
+    }
+
+    #[test]
+    fn test_input_classification_router_actionable() {
+        let router = InputClassificationRouter::new("greeting", "clarify", "continue");
+        let mut ctx = make_ctx();
+        let state = make_state_with_classification(InputClass::Actionable, 0.90);
+
+        let decision = router.route(&mut ctx, &state).unwrap();
+        assert_eq!(decision.target_nodes(), vec!["continue".to_string()]);
+    }
+
+    #[test]
+    fn test_input_classification_router_custom_keys() {
+        let router = InputClassificationRouter::with_keys("result", "hi", "ask", "proceed");
+        let mut state = StateEnvelope::new(
+            StateId::new(),
+            RunId::new(),
+            StateKind::Proposed,
+            Lineage::new(None, None, ExecutionStatus::Pending),
+        );
+        let classification = Classification {
+            class: InputClass::Actionable,
+            confidence: 0.92,
+        };
+        state.artifacts.insert(
+            ArtifactKey::new("result"),
+            ArtifactValue::json(serde_json::json!(classification)),
+        );
+
+        let mut ctx = make_ctx();
+        let decision = router.route(&mut ctx, &state).unwrap();
+        assert_eq!(decision.target_nodes(), vec!["proceed".to_string()]);
     }
 }

@@ -243,9 +243,9 @@ mod tests {
     fn test_f64_roundtrip() {
         let mut state = create_test_state();
         let key = ArtifactKey::new("my_float");
-        3.14f64.into_state(key.clone(), &mut state);
+        1.5f64.into_state(key.clone(), &mut state);
         let result: f64 = f64::try_from_state(&key, &state).unwrap();
-        assert!((result - 3.14).abs() < f64::EPSILON);
+        assert!((result - 1.5).abs() < f64::EPSILON);
     }
 
     #[test]

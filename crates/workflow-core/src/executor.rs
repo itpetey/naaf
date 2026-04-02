@@ -10,6 +10,11 @@ pub struct Executor<S: Services> {
     workflow: CompiledWorkflow<S>,
 }
 
+struct StepResult {
+    decision: RouteDecision,
+    state: Option<StateEnvelope>,
+}
+
 impl<S: Services> Executor<S> {
     pub fn new(workflow: CompiledWorkflow<S>) -> Result<Self, Error> {
         workflow.validate()?;
@@ -100,32 +105,38 @@ impl<S: Services> Executor<S> {
             let result = self.execute_step(ctx, node, &current_state).await;
 
             match result {
-                Ok(route_decision) => match route_decision {
-                    RouteDecision::Terminal => {
-                        return Ok(current_state);
+                Ok(step_result) => {
+                    if let Some(new_state) = step_result.state {
+                        current_state = new_state;
                     }
-                    RouteDecision::Next(next_node_id) => {
-                        if next_node_id.is_empty() {
-                            return Ok(current_state);
-                        }
-                        current_node_id = next_node_id;
-                    }
-                    RouteDecision::Branch(branch_node_ids) => {
-                        current_state = Box::pin(self.execute_branches(
-                            ctx,
-                            &current_node_id,
-                            &branch_node_ids,
-                            &current_state,
-                        ))
-                        .await?;
 
-                        let join_node_id = self.find_join_node(&current_node_id)?;
-                        if join_node_id.is_empty() {
+                    match step_result.decision {
+                        RouteDecision::Terminal => {
                             return Ok(current_state);
                         }
-                        current_node_id = join_node_id;
+                        RouteDecision::Next(next_node_id) => {
+                            if next_node_id.is_empty() {
+                                return Ok(current_state);
+                            }
+                            current_node_id = next_node_id;
+                        }
+                        RouteDecision::Branch(branch_node_ids) => {
+                            current_state = Box::pin(self.execute_branches(
+                                ctx,
+                                &current_node_id,
+                                &branch_node_ids,
+                                &current_state,
+                            ))
+                            .await?;
+
+                            let join_node_id = self.find_join_node(&current_node_id)?;
+                            if join_node_id.is_empty() {
+                                return Ok(current_state);
+                            }
+                            current_node_id = join_node_id;
+                        }
                     }
-                },
+                }
                 Err(e) => {
                     ctx.trace.emit(ExecutionEvent::RunFailed {
                         run_id: ctx.run_id,
@@ -146,13 +157,16 @@ impl<S: Services> Executor<S> {
         ctx: &mut ExecCtx<S>,
         node: &GraphNode<S>,
         state: &StateEnvelope,
-    ) -> Result<RouteDecision, Error> {
+    ) -> Result<StepResult, Error> {
         match node {
             GraphNode::Transformer { id, transformer } => {
                 let new_state = transformer.transform(ctx, state.clone())?;
                 ctx.add_tokens(new_state.meta.token_count.unwrap_or(0));
                 let next_node_id = self.find_next_node(id)?;
-                Ok(RouteDecision::next(next_node_id))
+                Ok(StepResult {
+                    decision: RouteDecision::next(next_node_id),
+                    state: Some(new_state),
+                })
             }
             GraphNode::Router { id, router } => {
                 let decision = router.route(ctx, state)?;
@@ -163,16 +177,25 @@ impl<S: Services> Executor<S> {
                     sequence_number: ctx.next_sequence_number(),
                     timestamp: Utc::now(),
                 })?;
-                Ok(decision)
+                Ok(StepResult {
+                    decision,
+                    state: None,
+                })
             }
             GraphNode::Reducer { id, reducer } => {
                 let inputs = vec![state.clone()];
                 let merged_state = reducer.reduce(ctx, inputs)?;
                 ctx.add_tokens(merged_state.meta.token_count.unwrap_or(0));
                 let next_node_id = self.find_next_node(id)?;
-                Ok(RouteDecision::next(next_node_id))
+                Ok(StepResult {
+                    decision: RouteDecision::next(next_node_id),
+                    state: Some(merged_state),
+                })
             }
-            GraphNode::Validator { .. } => Ok(RouteDecision::Terminal),
+            GraphNode::Validator { .. } => Ok(StepResult {
+                decision: RouteDecision::Terminal,
+                state: None,
+            }),
         }
     }
 

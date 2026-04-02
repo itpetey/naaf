@@ -217,11 +217,12 @@ impl<S: Services> fmt::Debug for CompiledWorkflow<S> {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 mod tests {
     use super::*;
     use crate::budget::DummyServices;
     use crate::errors::StepError;
-    use crate::steps::{BoxedReducer, BoxedRouter, BoxedTransformer};
+    use crate::steps::BoxedTransformer;
     use crate::steps::{Reducer, Router, Transformer, Validator};
     use workflow_schema::state::StateEnvelope;
 

@@ -1,10 +1,22 @@
-//! Normalize step transformer for workflow systems.
+//! Propose step transformer for workflow systems.
 //!
-//! This module provides normalization of user input into a structured spec.
+//! This module provides the initial proposal transformer that creates
+//! a proposal artifact from user input. It is typically the first step
+//! in a draft request workflow pipeline.
 //!
 //! # Artifact Flow
-//! - Reads from: `proposal` (Proposal artifact from ProposeStep)
-//! - Writes to: `normalized` (NormalizedInput artifact)
+//! - Reads from: `input` (raw user input as String)
+//! - Writes to: `proposal` (Proposal struct containing the input)
+//!
+//! # Example
+//!
+//! ```ignore
+//! use workflow_builtins::ProposeStep;
+//! use workflow_core::steps::Transformer;
+//!
+//! let propose = ProposeStep::new();
+//! // Transform state with "input" artifact to get "proposal" artifact
+//! ```
 
 use serde::{Deserialize, Serialize};
 use workflow_core::budget::{DummyServices, ExecCtx};
@@ -14,15 +26,12 @@ use workflow_schema::adapters::{AdapterError, IntoState, TryFromState, get_typed
 use workflow_schema::artifacts::ArtifactKey;
 use workflow_schema::state::StateEnvelope;
 
-use crate::propose::Proposal;
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct NormalizedInput {
-    pub original: String,
-    pub normalized: String,
+pub struct Proposal {
+    pub input: String,
 }
 
-impl TryFromState for NormalizedInput {
+impl TryFromState for Proposal {
     fn try_from_state(key: &ArtifactKey, state: &StateEnvelope) -> Result<Self, AdapterError> {
         let json: serde_json::Value = serde_json::Value::try_from_state(key, state)?;
         serde_json::from_value(json.clone()).map_err(|e| AdapterError::JsonError {
@@ -32,24 +41,23 @@ impl TryFromState for NormalizedInput {
     }
 }
 
-impl IntoState for NormalizedInput {
+impl IntoState for Proposal {
     fn into_state(self, key: ArtifactKey, state: &mut StateEnvelope) {
         let json = serde_json::to_value(&self).unwrap();
         json.into_state(key, state);
     }
 }
 
-pub struct NormalizeStep {
+pub struct ProposeStep {
     input_key: ArtifactKey,
     output_key: ArtifactKey,
 }
 
-impl NormalizeStep {
-    /// Creates a new NormalizeStep that reads from "proposal" and writes to "normalized".
+impl ProposeStep {
     pub fn new() -> Self {
         Self {
-            input_key: ArtifactKey::new("proposal"),
-            output_key: ArtifactKey::new("normalized"),
+            input_key: ArtifactKey::new("input"),
+            output_key: ArtifactKey::new("proposal"),
         }
     }
 
@@ -59,24 +67,19 @@ impl NormalizeStep {
             output_key: ArtifactKey::new(output_key),
         }
     }
-
-    fn normalize(input: &str) -> String {
-        let trimmed = input.trim();
-        trimmed.to_lowercase()
-    }
 }
 
-impl Default for NormalizeStep {
+impl Default for ProposeStep {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Transformer for NormalizeStep {
+impl Transformer for ProposeStep {
     type Services = DummyServices;
 
     fn name(&self) -> &'static str {
-        "normalize"
+        "propose"
     }
 
     fn transform(
@@ -84,23 +87,21 @@ impl Transformer for NormalizeStep {
         _ctx: &mut ExecCtx<Self::Services>,
         mut state: StateEnvelope,
     ) -> Result<StateEnvelope, StepError> {
-        let proposal: Proposal = get_typed(&self.input_key, &state).map_err(|e| {
+        let input: String = get_typed(&self.input_key, &state).map_err(|e| {
             StepError::transformer(
-                "normalize",
+                "propose",
                 format!(
-                    "Failed to get proposal from artifact key '{}': {}",
+                    "Failed to get input from artifact key '{}': {}",
                     self.input_key, e
                 ),
             )
         })?;
 
-        let normalized = Self::normalize(&proposal.input);
-        let normalized_input = NormalizedInput {
-            original: proposal.input.clone(),
-            normalized,
+        let proposal = Proposal {
+            input: input.clone(),
         };
 
-        put_typed(self.output_key.clone(), normalized_input, &mut state);
+        put_typed(self.output_key.clone(), proposal, &mut state);
 
         Ok(state)
     }
@@ -116,20 +117,16 @@ mod tests {
     use workflow_schema::state::{RunId, StateEnvelope, StateId};
     use workflow_schema::state_kind::StateKind;
 
-    fn make_state_with_proposal(input: &str) -> StateEnvelope {
+    fn make_state_with_input(input: &str) -> StateEnvelope {
         let mut state = StateEnvelope::new(
             StateId::new(),
             RunId::new(),
             StateKind::Proposed,
             Lineage::new(None, None, ExecutionStatus::Pending),
         );
-        let proposal = Proposal {
-            input: input.to_string(),
-        };
-        state.artifacts.insert(
-            ArtifactKey::new("proposal"),
-            ArtifactValue::json(serde_json::json!(proposal)),
-        );
+        state
+            .artifacts
+            .insert(ArtifactKey::new("input"), ArtifactValue::text(input));
         state
     }
 
@@ -138,46 +135,39 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_creates_normalized_input() {
-        let normalize = NormalizeStep::new();
+    fn test_propose_creates_proposal() {
+        let propose = ProposeStep::new();
         let mut ctx = make_ctx();
-        let state = make_state_with_proposal("  CREATE A File  ");
+        let state = make_state_with_input("Create a file");
 
-        let result = normalize.transform(&mut ctx, state).unwrap();
-        let normalized: NormalizedInput =
-            get_typed(&ArtifactKey::new("normalized"), &result).unwrap();
-        assert_eq!(normalized.original, "  CREATE A File  ");
-        assert_eq!(normalized.normalized, "create a file");
+        let result = propose.transform(&mut ctx, state).unwrap();
+        let proposal: Proposal = get_typed(&ArtifactKey::new("proposal"), &result).unwrap();
+        assert_eq!(proposal.input, "Create a file");
     }
 
     #[test]
-    fn test_normalize_custom_keys() {
-        let normalize = NormalizeStep::with_keys("my_proposal", "result");
+    fn test_propose_custom_keys() {
+        let propose = ProposeStep::with_keys("text", "result");
         let mut state = StateEnvelope::new(
             StateId::new(),
             RunId::new(),
             StateKind::Proposed,
             Lineage::new(None, None, ExecutionStatus::Pending),
         );
-        let proposal = Proposal {
-            input: "Hello World".to_string(),
-        };
-        state.artifacts.insert(
-            ArtifactKey::new("my_proposal"),
-            ArtifactValue::json(serde_json::json!(proposal)),
-        );
+        state
+            .artifacts
+            .insert(ArtifactKey::new("text"), ArtifactValue::text("Hello"));
 
         let mut ctx = make_ctx();
-        let result = normalize.transform(&mut ctx, state).unwrap();
+        let result = propose.transform(&mut ctx, state).unwrap();
 
-        let normalized: NormalizedInput = get_typed(&ArtifactKey::new("result"), &result).unwrap();
-        assert_eq!(normalized.original, "Hello World");
-        assert_eq!(normalized.normalized, "hello world");
+        let proposal: Proposal = get_typed(&ArtifactKey::new("result"), &result).unwrap();
+        assert_eq!(proposal.input, "Hello");
     }
 
     #[test]
-    fn test_normalize_missing_proposal() {
-        let normalize = NormalizeStep::new();
+    fn test_propose_missing_input() {
+        let propose = ProposeStep::new();
         let mut ctx = make_ctx();
         let state = StateEnvelope::new(
             StateId::new(),
@@ -186,7 +176,7 @@ mod tests {
             Lineage::new(None, None, ExecutionStatus::Pending),
         );
 
-        let result = normalize.transform(&mut ctx, state);
+        let result = propose.transform(&mut ctx, state);
         assert!(result.is_err());
     }
 }
