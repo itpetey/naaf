@@ -1,4 +1,10 @@
 //! Run lifecycle and execution state.
+//!
+//! # Legacy Code
+//!
+//! This module is part of the legacy prototype runtime.
+//! **Do not build new features on this code.**
+//! See the repository root `LEGACY.md` for details.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

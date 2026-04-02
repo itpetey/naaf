@@ -1,4 +1,10 @@
 //! Filesystem-backed artifact store.
+//!
+//! # Legacy Code
+//!
+//! This module is part of the legacy prototype runtime.
+//! **Do not build new features on this code.**
+//! See the repository root `LEGACY.md` for details.
 
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Read, Write};

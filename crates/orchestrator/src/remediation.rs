@@ -1,4 +1,10 @@
 //! Remediation loop implementation.
+//!
+//! # Legacy Code
+//!
+//! This module is part of the legacy prototype runtime.
+//! **Do not build new features on this code.**
+//! See the repository root `LEGACY.md` for details.
 
 use std::collections::HashSet;
 use std::sync::Arc;
