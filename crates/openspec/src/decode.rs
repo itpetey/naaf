@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::artifacts::{
+use workflow_schema::{
     AcceptanceCriteriaSet, ConsistencyFinding, FindingSet, NormalizedSpec, ProposalSkeleton,
     ReadinessDecision, RemediationPlan, RiskFinding, ScopeReport, SectionPatch,
 };

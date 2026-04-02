@@ -2,14 +2,19 @@
 //!
 //! This module provides ready-to-use workflow definitions.
 
+use std::sync::Arc;
+
+use naaf_model::ModelProvider;
 use workflow_core::budget::DummyServices;
 use workflow_core::builder::WorkflowBuilder;
 use workflow_core::errors::Result;
 use workflow_core::graph::CompiledWorkflow;
 use workflow_core::steps::{BoxedRouter, BoxedTransformer, BoxedValidator};
+use workflow_llm::LlmServices;
 
 use crate::accept::AcceptStep;
 use crate::classify_input::ClassifyInput;
+use crate::llm_steps::{LlmAcceptanceStep, LlmNormalizeStep, LlmScopeStep, LlmSkeletonStep};
 use crate::normalize::NormalizeStep;
 use crate::plan::PlanStep;
 use crate::propose::ProposeStep;
@@ -70,9 +75,91 @@ pub fn draft_request_workflow() -> Result<CompiledWorkflow<DummyServices>> {
     Ok(workflow)
 }
 
+/// Creates an LLM-powered workflow for processing normalized specifications.
+///
+/// This workflow uses LLM services to:
+/// 1. Normalize the request into a structured spec
+/// 2. Analyze scope of the work
+/// 3. Build a proposal skeleton
+/// 4. Generate acceptance criteria
+///
+/// # Arguments
+///
+/// * `provider` - The model provider (e.g., OpenAI, Anthropic)
+/// * `model` - The model name to use
+///
+/// # Returns
+///
+/// A compiled workflow ready for execution with LlmServices
+///
+/// # Panics
+///
+/// Panics if called outside of a Tokio runtime context.
+pub fn openspec_happy_path_llm<P: ModelProvider + Send + Sync + 'static>(
+    provider: Arc<P>,
+    model: String,
+) -> Result<CompiledWorkflow<LlmServices<P>>> {
+    let handle = tokio::runtime::Handle::current();
+    let services = LlmServices::new(provider, model);
+
+    let normalize_step: BoxedTransformer<LlmServices<P>> =
+        BoxedTransformer::new(LlmNormalizeStep::new(services.clone(), handle.clone()));
+    let scope_step: BoxedTransformer<LlmServices<P>> =
+        BoxedTransformer::new(LlmScopeStep::new(services.clone(), handle.clone()));
+    let skeleton_step: BoxedTransformer<LlmServices<P>> =
+        BoxedTransformer::new(LlmSkeletonStep::new(services.clone(), handle.clone()));
+    let acceptance_step: BoxedTransformer<LlmServices<P>> =
+        BoxedTransformer::new(LlmAcceptanceStep::new(services, handle));
+
+    let workflow = WorkflowBuilder::new("openspec-happy-path-llm")
+        .step("normalize", normalize_step)
+        .step("scope", scope_step)
+        .step("skeleton", skeleton_step)
+        .step("acceptance", acceptance_step)
+        .path("normalize", "scope")
+        .path("scope", "skeleton")
+        .path("skeleton", "acceptance")
+        .compile()?;
+
+    Ok(workflow)
+}
+
+/// Creates an LLM-powered workflow with mock services for testing.
+///
+/// This is intended for testing and demonstration purposes only.
+/// Must be called from within a Tokio runtime context.
+#[cfg(test)]
+pub fn openspec_happy_path_mock(
+    mock_services: crate::mock_llm::MockLlmServices,
+) -> Result<CompiledWorkflow<crate::mock_llm::MockLlmServices>> {
+    let handle = tokio::runtime::Handle::current();
+
+    let normalize_step: BoxedTransformer<crate::mock_llm::MockLlmServices> =
+        BoxedTransformer::new(LlmNormalizeStep::new(mock_services.clone(), handle.clone()));
+    let scope_step: BoxedTransformer<crate::mock_llm::MockLlmServices> =
+        BoxedTransformer::new(LlmScopeStep::new(mock_services.clone(), handle.clone()));
+    let skeleton_step: BoxedTransformer<crate::mock_llm::MockLlmServices> =
+        BoxedTransformer::new(LlmSkeletonStep::new(mock_services.clone(), handle.clone()));
+    let acceptance_step: BoxedTransformer<crate::mock_llm::MockLlmServices> =
+        BoxedTransformer::new(LlmAcceptanceStep::new(mock_services, handle));
+
+    let workflow = WorkflowBuilder::new("openspec-happy-path-mock")
+        .step("normalize", normalize_step)
+        .step("scope", scope_step)
+        .step("skeleton", skeleton_step)
+        .step("acceptance", acceptance_step)
+        .path("normalize", "scope")
+        .path("scope", "skeleton")
+        .path("skeleton", "acceptance")
+        .compile()?;
+
+    Ok(workflow)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mock_llm::MockLlmServices;
     use workflow_core::budget::{DummyServices, ExecCtx};
     use workflow_core::executor::Executor;
     use workflow_schema::artifacts::{ArtifactKey, ArtifactValue};
@@ -80,6 +167,7 @@ mod tests {
     use workflow_schema::lineage::Lineage;
     use workflow_schema::state::{RunId, StateEnvelope, StateId};
     use workflow_schema::state_kind::StateKind;
+    use workflow_schema::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
 
     fn make_state_with_input(input: &str) -> StateEnvelope {
         let mut state = StateEnvelope::new(
@@ -289,5 +377,125 @@ mod tests {
             workflow_schema::adapters::get_typed(&ArtifactKey::new("acceptance"), &final_state)
                 .expect("Should have acceptance artifact");
         assert!(acceptance.accepted);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_openspec_happy_path_mock_workflow() {
+        let mock_services = MockLlmServices::new(MockLlmServices::default_sequence());
+        let workflow = openspec_happy_path_mock(mock_services).unwrap();
+        let executor = Executor::new(workflow).unwrap();
+        let mut ctx = ExecCtx::new(RunId::new(), MockLlmServices::new(vec![]));
+
+        let mut state = StateEnvelope::new(
+            StateId::new(),
+            RunId::new(),
+            StateKind::Proposed,
+            Lineage::new(None, None, ExecutionStatus::Pending),
+        );
+        state.artifacts.insert(
+            ArtifactKey::new("input"),
+            ArtifactValue::text("Add user authentication"),
+        );
+
+        let result = executor.execute(&mut ctx, state).await;
+        assert!(
+            result.is_ok(),
+            "Workflow execution failed: {:?}",
+            result.err()
+        );
+
+        let final_state = result.unwrap();
+
+        // Verify normalized_spec artifact
+        assert!(
+            final_state
+                .artifacts
+                .contains_key(&ArtifactKey::new("normalized_spec")),
+            "Missing normalized_spec artifact"
+        );
+        let normalized_spec: NormalizedSpec = workflow_schema::adapters::get_typed(
+            &ArtifactKey::new("normalized_spec"),
+            &final_state,
+        )
+        .expect("Should have normalized_spec artifact");
+        assert!(!normalized_spec.problem_statement.is_empty());
+
+        // Verify scope_report artifact
+        assert!(
+            final_state
+                .artifacts
+                .contains_key(&ArtifactKey::new("scope_report")),
+            "Missing scope_report artifact"
+        );
+        let scope_report: ScopeReport =
+            workflow_schema::adapters::get_typed(&ArtifactKey::new("scope_report"), &final_state)
+                .expect("Should have scope_report artifact");
+        assert!(!scope_report.in_scope_items.is_empty());
+
+        // Verify proposal_skeleton artifact
+        assert!(
+            final_state
+                .artifacts
+                .contains_key(&ArtifactKey::new("proposal_skeleton")),
+            "Missing proposal_skeleton artifact"
+        );
+        let proposal: ProposalSkeleton = workflow_schema::adapters::get_typed(
+            &ArtifactKey::new("proposal_skeleton"),
+            &final_state,
+        )
+        .expect("Should have proposal_skeleton artifact");
+        assert!(!proposal.title.is_empty());
+
+        // Verify acceptance_criteria artifact
+        assert!(
+            final_state
+                .artifacts
+                .contains_key(&ArtifactKey::new("acceptance_criteria")),
+            "Missing acceptance_criteria artifact"
+        );
+        let criteria: AcceptanceCriteriaSet = workflow_schema::adapters::get_typed(
+            &ArtifactKey::new("acceptance_criteria"),
+            &final_state,
+        )
+        .expect("Should have acceptance_criteria artifact");
+        assert!(!criteria.criteria.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_openspec_workflow_artifact_chain() {
+        let mock_services = MockLlmServices::new(MockLlmServices::default_sequence());
+        let workflow = openspec_happy_path_mock(mock_services).unwrap();
+        let executor = Executor::new(workflow).unwrap();
+        let mut ctx = ExecCtx::new(RunId::new(), MockLlmServices::new(vec![]));
+
+        let mut state = StateEnvelope::new(
+            StateId::new(),
+            RunId::new(),
+            StateKind::Proposed,
+            Lineage::new(None, None, ExecutionStatus::Pending),
+        );
+        state.artifacts.insert(
+            ArtifactKey::new("input"),
+            ArtifactValue::text("Test request"),
+        );
+
+        let result = executor.execute(&mut ctx, state).await;
+        assert!(result.is_ok());
+
+        let final_state = result.unwrap();
+
+        // Verify that all expected artifacts are present and properly typed
+        let artifacts = &final_state.artifacts;
+        assert!(artifacts.contains_key(&ArtifactKey::new("normalized_spec")));
+        assert!(artifacts.contains_key(&ArtifactKey::new("scope_report")));
+        assert!(artifacts.contains_key(&ArtifactKey::new("proposal_skeleton")));
+        assert!(artifacts.contains_key(&ArtifactKey::new("acceptance_criteria")));
+
+        // Verify artifact count
+        assert_eq!(
+            artifacts.len(),
+            5,
+            "Expected input plus 4 derived artifacts in final state"
+        );
     }
 }

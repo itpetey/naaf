@@ -956,6 +956,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "workflow-llm",
+ "workflow-schema",
 ]
 
 [[package]]
@@ -2400,10 +2402,12 @@ name = "workflow-builtins"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "naaf-model",
  "serde",
  "serde_json",
  "tokio",
  "workflow-core",
+ "workflow-llm",
  "workflow-schema",
 ]
 

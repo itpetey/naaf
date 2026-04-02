@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::kind::ArtifactKind;
+use crate::{ArtifactKind, NormalizedSpec, ProposalSkeleton, ScopeReport};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WorkerId {
@@ -61,19 +61,19 @@ pub struct NormalizerContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScopeAnalystInput {
-    pub normalized_spec: super::artifacts::NormalizedSpec,
+    pub normalized_spec: NormalizedSpec,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkeletonBuilderInput {
-    pub normalized_spec: super::artifacts::NormalizedSpec,
-    pub scope_report: super::artifacts::ScopeReport,
+    pub normalized_spec: NormalizedSpec,
+    pub scope_report: ScopeReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CriteriaAuthorInput {
-    pub normalized_spec: super::artifacts::NormalizedSpec,
-    pub proposal_skeleton: super::artifacts::ProposalSkeleton,
+    pub normalized_spec: NormalizedSpec,
+    pub proposal_skeleton: ProposalSkeleton,
 }
 
 pub const REQUEST_NORMALIZER_PROMPT: &str = r#"You are a proposal normalizer.

@@ -4,12 +4,38 @@ This directory contains the original NAAF prototype runtime. This implementation
 
 ## Status
 
-**DEPRECATED** - This runtime is no longer actively developed. New development should target the new workflow runtime.
+**DEPRECATED - MIGRATION IN PROGRESS** - Artifact schemas and prompts have been migrated to the new runtime. The legacy orchestrator and workflow definitions remain for reference.
+
+## Migration Status
+
+### Completed Migrations
+
+1. **Artifact Schemas** (`openspec/artifacts.rs`)
+   - All domain types moved to `workflow-schema/artifacts.rs`
+   - Types include: `NormalizedSpec`, `ScopeReport`, `ProposalSkeleton`, `AcceptanceCriteriaSet`, etc.
+   - Backward compatibility maintained via re-exports in `openspec` crate
+
+2. **LLM Prompts** (`openspec/workers.rs`)
+   - All prompt constants moved to `workflow-llm/prompts.rs`
+   - Constants include: `REQUEST_NORMALIZER_PROMPT`, `SCOPE_ANALYST_PROMPT`, etc.
+
+3. **LLM-Powered Steps**
+   - New LLM-powered transformers created in `workflow-builtins/llm_steps.rs`
+   - Steps: `LlmNormalizeStep`, `LlmScopeStep`, `LlmSkeletonStep`, `LlmAcceptanceStep`
+
+### Remaining Legacy Components
+
+- **Orchestrator crate** (`crates/orchestrator`) - Legacy execution engine
+- **Workflow definitions** (`openspec/workflow.rs`) - Legacy `openspec_happy_path()` and `review_workflow()`  
+- **Worker specs** (`openspec/workers.rs`) - Legacy worker specifications (prompts moved, specs remain)
 
 ## Migration Policy
 
 - **Do not build new features on this runtime.** The architecture cannot support required features like explicit routing, ambiguity handling, human escalation, fan-out/fan-in, and workflow composition.
-- **Existing workflows will eventually need migration** to the new runtime (Phase 11+ of the refactor plan).
+- **Use new runtime components:**
+  - Artifacts: Import from `workflow_schema` (re-exported via `naaf_openspec` for backward compatibility)
+  - Prompts: Import from `workflow_llm::prompts`
+  - LLM Steps: Import from `workflow_builtins::{LlmNormalizeStep, LlmScopeStep, ...}`
 - **This code is preserved for reference** and can be used for rollback if needed.
 
 ## Preservation
@@ -20,4 +46,4 @@ This directory contains the original NAAF prototype runtime. This implementation
 
 ## New Development
 
-All new development should target the new workflow runtime. See the main README for details on the new architecture.
+All new development should target the new workflow runtime (`workflow-core`, `workflow-schema`, `workflow-builtins`). See the main README for details on the new architecture.

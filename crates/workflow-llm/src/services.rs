@@ -13,6 +13,15 @@ pub struct LlmServices<P: ModelProvider> {
     model: String,
 }
 
+impl<P: ModelProvider> Clone for LlmServices<P> {
+    fn clone(&self) -> Self {
+        Self {
+            provider: Arc::clone(&self.provider),
+            model: self.model.clone(),
+        }
+    }
+}
+
 impl<P: ModelProvider> LlmServices<P> {
     pub fn new(provider: Arc<P>, model: String) -> Self {
         Self { provider, model }
