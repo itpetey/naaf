@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::artifacts::ArtifactMap;
+use crate::execution_status::ExecutionStatus;
 use crate::lineage::Lineage;
 use crate::meta::StateMeta;
 use crate::state_kind::StateKind;
@@ -109,6 +110,41 @@ impl StateEnvelope {
             lineage,
         }
     }
+
+    pub fn with_parent(
+        id: StateId,
+        run_id: RunId,
+        kind: StateKind,
+        parent_state_id: Option<StateId>,
+        transition_name: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            run_id,
+            kind,
+            artifacts: ArtifactMap::new(),
+            meta: StateMeta::now(),
+            lineage: Lineage::new(parent_state_id, transition_name, ExecutionStatus::default()),
+        }
+    }
+
+    pub fn with_status(
+        id: StateId,
+        run_id: RunId,
+        kind: StateKind,
+        parent_state_id: Option<StateId>,
+        transition_name: Option<String>,
+        execution_status: ExecutionStatus,
+    ) -> Self {
+        Self {
+            id,
+            run_id,
+            kind,
+            artifacts: ArtifactMap::new(),
+            meta: StateMeta::now(),
+            lineage: Lineage::new(parent_state_id, transition_name, execution_status),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -137,32 +173,52 @@ mod tests {
             StateKind::Scoped,
             StateKind::Planned,
             StateKind::Accepted,
-            StateKind::Ambiguous,
-            StateKind::Escalated,
-            StateKind::Terminal,
         ];
-        assert_eq!(kinds.len(), 8);
+        assert_eq!(kinds.len(), 5);
     }
 
     #[test]
     fn test_state_envelope_creation() {
-        let envelope = StateEnvelope::new(
+        let envelope = StateEnvelope::with_parent(
             StateId::new(),
             RunId::new(),
             StateKind::Proposed,
-            Lineage::new(None, None),
+            None,
+            None,
         );
         assert_eq!(envelope.kind, StateKind::Proposed);
         assert!(envelope.artifacts.is_empty());
+        assert_eq!(envelope.lineage.execution_status, ExecutionStatus::Pending);
+    }
+
+    #[test]
+    fn test_execution_status_default() {
+        let status = ExecutionStatus::default();
+        assert_eq!(status, ExecutionStatus::Pending);
+    }
+
+    #[test]
+    fn test_state_envelope_with_status() {
+        let envelope = StateEnvelope::with_status(
+            StateId::new(),
+            RunId::new(),
+            StateKind::Normalized,
+            None,
+            Some("normalize".to_string()),
+            ExecutionStatus::Running,
+        );
+        assert_eq!(envelope.kind, StateKind::Normalized);
+        assert_eq!(envelope.lineage.execution_status, ExecutionStatus::Running);
     }
 
     #[test]
     fn test_state_envelope_serde() {
-        let envelope = StateEnvelope::new(
+        let envelope = StateEnvelope::with_parent(
             StateId::new(),
             RunId::new(),
             StateKind::Normalized,
-            Lineage::new(None, Some("normalize".to_string())),
+            None,
+            Some("normalize".to_string()),
         );
         let json = serde_json::to_string(&envelope).unwrap();
         let restored: StateEnvelope = serde_json::from_str(&json).unwrap();
