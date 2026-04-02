@@ -7,3 +7,5 @@ pub mod state;
 pub mod state_kind;
 pub mod validation;
 pub mod workflow_outcome;
+
+pub use contracts::{WorkflowAdapter, WorkflowContract, is_compatible};
