@@ -21,6 +21,9 @@ pub enum Error {
 
     #[error("Persistence error: {0}")]
     Persistence(String),
+
+    #[error("Workflow package error: {0}")]
+    WorkflowPackage(String),
 }
 
 #[derive(Debug, Error)]

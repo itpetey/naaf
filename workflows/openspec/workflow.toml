@@ -1,0 +1,115 @@
+id = "draft-request"
+name = "Draft Request"
+summary = "Draft request workflow with classification, normalization, planning, and acceptance."
+entry = "propose"
+
+[ui]
+input_artifact = "input"
+input_prompt = "Describe what you want to build or fix."
+
+[[nodes]]
+id = "propose"
+kind = "transformer"
+step = "openspec.propose"
+
+[[nodes]]
+id = "classify_input"
+kind = "transformer"
+step = "openspec.classify_input"
+
+[[nodes]]
+id = "initial_decision"
+kind = "router"
+step = "openspec.input_classification_router"
+config = { greeting_route = "greeting_terminal", clarification_route = "clarification_terminal", actionable_route = "normalize" }
+
+[[nodes]]
+id = "greeting_terminal"
+kind = "transformer"
+step = "openspec.greeting_terminal"
+config = { response = "Hello! How can I help you today?" }
+
+[[nodes]]
+id = "clarification_terminal"
+kind = "transformer"
+step = "openspec.escalation_terminal"
+config = { message = "This request needs clarification" }
+
+[[nodes]]
+id = "normalize"
+kind = "transformer"
+step = "openspec.normalize"
+
+[[nodes]]
+id = "scope"
+kind = "transformer"
+step = "openspec.scope"
+
+[[nodes]]
+id = "plan"
+kind = "transformer"
+step = "openspec.plan"
+
+[[nodes]]
+id = "accept"
+kind = "transformer"
+step = "openspec.accept"
+
+[[nodes]]
+id = "greeting_done"
+kind = "validator"
+step = "openspec.done_validator"
+
+[[nodes]]
+id = "clarification_done"
+kind = "validator"
+step = "openspec.done_validator"
+
+[[nodes]]
+id = "done"
+kind = "validator"
+step = "openspec.done_validator"
+
+[[edges]]
+from = "propose"
+to = "classify_input"
+
+[[edges]]
+from = "classify_input"
+to = "initial_decision"
+
+[[edges]]
+from = "initial_decision"
+to = "greeting_terminal"
+
+[[edges]]
+from = "initial_decision"
+to = "clarification_terminal"
+
+[[edges]]
+from = "initial_decision"
+to = "normalize"
+
+[[edges]]
+from = "greeting_terminal"
+to = "greeting_done"
+
+[[edges]]
+from = "clarification_terminal"
+to = "clarification_done"
+
+[[edges]]
+from = "normalize"
+to = "scope"
+
+[[edges]]
+from = "scope"
+to = "plan"
+
+[[edges]]
+from = "plan"
+to = "accept"
+
+[[edges]]
+from = "accept"
+to = "done"

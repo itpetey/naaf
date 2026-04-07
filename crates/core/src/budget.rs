@@ -1,5 +1,7 @@
 use naaf_schema::state::RunId;
+use naaf_schema::state::StateEnvelope;
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -118,6 +120,7 @@ pub struct ExecCtx<S: Services> {
     pub branch_count: u32,
     pub total_tokens: u64,
     event_sequence: AtomicU64,
+    latest_state: Mutex<Option<StateEnvelope>>,
 }
 
 impl<S: Services> crate::events::TraceSink for ExecCtx<S> {
@@ -139,6 +142,7 @@ impl<S: Services> ExecCtx<S> {
             branch_count: 0,
             total_tokens: 0,
             event_sequence: AtomicU64::new(0),
+            latest_state: Mutex::new(None),
         }
     }
 
@@ -171,6 +175,19 @@ impl<S: Services> ExecCtx<S> {
 
     pub fn add_tokens(&mut self, tokens: u64) {
         self.total_tokens += tokens;
+    }
+
+    pub fn remember_state(&self, state: &StateEnvelope) {
+        if let Ok(mut latest_state) = self.latest_state.lock() {
+            *latest_state = Some(state.clone());
+        }
+    }
+
+    pub fn latest_state(&self) -> Option<StateEnvelope> {
+        self.latest_state
+            .lock()
+            .ok()
+            .and_then(|state| state.clone())
     }
 }
 

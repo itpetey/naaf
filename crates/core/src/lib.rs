@@ -8,6 +8,9 @@ pub mod join;
 pub mod route;
 pub mod state_store;
 pub mod steps;
+pub mod workflow_loader;
+pub mod workflow_package;
+pub mod workflow_registry;
 
 pub use builder::WorkflowBuilder;
 pub use errors::{Error, StepError, ValidationError};
@@ -16,3 +19,6 @@ pub use events::{
 };
 pub use graph::{CompiledWorkflow, EdgeType, GraphEdge, GraphNode};
 pub use state_store::StateStore;
+pub use workflow_loader::{build_workflow, discover_workflow_packages};
+pub use workflow_package::{DiscoveredWorkflowPackage, WorkflowNodeKind, WorkflowPackage};
+pub use workflow_registry::WorkflowRegistry;
