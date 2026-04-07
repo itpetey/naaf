@@ -5,11 +5,11 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use naaf_builtins::draft_request_workflow;
 use naaf_core::budget::{DummyServices, ExecCtx};
 use naaf_core::events::ExecutionEvent;
 use naaf_core::executor::Executor;
 use naaf_core::state_store::StateStore;
+use naaf_openspec::draft_request_workflow;
 use naaf_schema::artifacts::{ArtifactKey, ArtifactValue};
 use naaf_schema::execution_status::ExecutionStatus;
 use naaf_schema::lineage::Lineage;

@@ -29,7 +29,7 @@ use crate::classify_input::{Classification, InputClass};
 /// # Example
 ///
 /// ```ignore
-/// use naaf_builtins::InputClassificationRouter;
+/// use naaf_openspec::InputClassificationRouter;
 /// use naaf_core::steps::Router;
 ///
 /// let router = InputClassificationRouter::new("greeting_path", "clarify_path", "continue_path");
@@ -126,7 +126,7 @@ impl Router for InputClassificationRouter {
 /// # Example
 ///
 /// ```ignore
-/// use naaf_builtins::NeedsHumanClarification;
+/// use naaf_openspec::NeedsHumanClarification;
 /// use naaf_core::steps::Router;
 ///
 /// let router = NeedsHumanClarification::new("clarification_workflow");
@@ -208,7 +208,7 @@ impl Router for NeedsHumanClarification {
 /// # Example
 ///
 /// ```ignore
-/// use naaf_builtins::ConfidenceThresholdRouter;
+/// use naaf_openspec::ConfidenceThresholdRouter;
 /// use naaf_core::steps::Router;
 ///
 /// let router = ConfidenceThresholdRouter::new(0.8, "high_confidence", "low_confidence");

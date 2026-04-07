@@ -1,13 +1,13 @@
-//! LLM-powered workflow steps using prompts from workflow-llm.
+//! LLM-powered workflow steps using OpenSpec prompts.
 
+use crate::prompts;
+use crate::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
 use naaf_core::budget::Services;
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
-use naaf_llm::prompts;
 use naaf_schema::adapters::{get_typed, put_typed};
 use naaf_schema::artifacts::ArtifactKey;
 use naaf_schema::state::StateEnvelope;
-use naaf_schema::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
 use serde::de::DeserializeOwned;
 use tokio::runtime::Handle;
 

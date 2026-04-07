@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use naaf_builtins::ScopeStep;
+//! use naaf_openspec::ScopeStep;
 //! use naaf_core::steps::Transformer;
 //!
 //! let scope_step = ScopeStep::new();

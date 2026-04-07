@@ -2,11 +2,10 @@
 
 use naaf_core::budget::Services;
 use naaf_core::errors::StepError;
-use naaf_schema::{
-    AcceptanceCriteriaSet, Criterion, NormalizedSpec, ProposalSkeleton, ScopeReport,
-};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use crate::{AcceptanceCriteriaSet, Criterion, NormalizedSpec, ProposalSkeleton, ScopeReport};
 
 #[derive(Debug)]
 pub struct MockLlmServices {

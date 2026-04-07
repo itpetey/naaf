@@ -1,5 +1,8 @@
 //! OpenSpec artifact schemas.
 
+use naaf_schema::adapters::{AdapterError, IntoState, TryFromState};
+use naaf_schema::artifacts::ArtifactKey;
+use naaf_schema::state::StateEnvelope;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,6 +193,74 @@ pub struct ReadinessEvaluatorInput {
     pub current_proposal: ProposalSkeleton,
     pub applied_patches: Vec<SectionPatch>,
     pub remaining_findings: FindingSet,
+}
+
+impl TryFromState for NormalizedSpec {
+    fn try_from_state(key: &ArtifactKey, state: &StateEnvelope) -> Result<Self, AdapterError> {
+        let json: serde_json::Value = serde_json::Value::try_from_state(key, state)?;
+        serde_json::from_value(json.clone()).map_err(|e| AdapterError::JsonError {
+            key: key.to_string(),
+            error: e.to_string(),
+        })
+    }
+}
+
+impl IntoState for NormalizedSpec {
+    fn into_state(self, key: ArtifactKey, state: &mut StateEnvelope) {
+        let json = serde_json::to_value(&self).unwrap();
+        json.into_state(key, state);
+    }
+}
+
+impl TryFromState for ScopeReport {
+    fn try_from_state(key: &ArtifactKey, state: &StateEnvelope) -> Result<Self, AdapterError> {
+        let json: serde_json::Value = serde_json::Value::try_from_state(key, state)?;
+        serde_json::from_value(json.clone()).map_err(|e| AdapterError::JsonError {
+            key: key.to_string(),
+            error: e.to_string(),
+        })
+    }
+}
+
+impl IntoState for ScopeReport {
+    fn into_state(self, key: ArtifactKey, state: &mut StateEnvelope) {
+        let json = serde_json::to_value(&self).unwrap();
+        json.into_state(key, state);
+    }
+}
+
+impl TryFromState for ProposalSkeleton {
+    fn try_from_state(key: &ArtifactKey, state: &StateEnvelope) -> Result<Self, AdapterError> {
+        let json: serde_json::Value = serde_json::Value::try_from_state(key, state)?;
+        serde_json::from_value(json.clone()).map_err(|e| AdapterError::JsonError {
+            key: key.to_string(),
+            error: e.to_string(),
+        })
+    }
+}
+
+impl IntoState for ProposalSkeleton {
+    fn into_state(self, key: ArtifactKey, state: &mut StateEnvelope) {
+        let json = serde_json::to_value(&self).unwrap();
+        json.into_state(key, state);
+    }
+}
+
+impl TryFromState for AcceptanceCriteriaSet {
+    fn try_from_state(key: &ArtifactKey, state: &StateEnvelope) -> Result<Self, AdapterError> {
+        let json: serde_json::Value = serde_json::Value::try_from_state(key, state)?;
+        serde_json::from_value(json.clone()).map_err(|e| AdapterError::JsonError {
+            key: key.to_string(),
+            error: e.to_string(),
+        })
+    }
+}
+
+impl IntoState for AcceptanceCriteriaSet {
+    fn into_state(self, key: ArtifactKey, state: &mut StateEnvelope) {
+        let json = serde_json::to_value(&self).unwrap();
+        json.into_state(key, state);
+    }
 }
 
 #[cfg(test)]

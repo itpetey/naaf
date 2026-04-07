@@ -6,13 +6,13 @@ This guide helps contributors migrate legacy concepts to the workflow runtime.
 
 The migration involves moving from:
 - **Legacy**: Artifact pipeline with transitions (historically `orchestrator` + `openspec` crates)
-- **New**: State-based workflow with transformers (`workflow-core` + `workflow-schema` + `workflow-builtins`)
+- **New**: State-based workflow with transformers (`naaf-core` + `naaf-schema` + `naaf-openspec`)
 
 ## What Has Been Migrated
 
 ### Artifact Schemas
 
-All domain-specific artifact types have been moved from `openspec::artifacts` to `naaf_schema::artifacts`:
+OpenSpec domain-specific artifact types now live in `naaf_openspec::artifacts`, while generic artifact containers remain in `naaf_schema::artifacts`:
 
 - `NormalizedSpec`
 - `ScopeReport`  
@@ -29,15 +29,12 @@ use naaf_openspec::{NormalizedSpec, ScopeReport};
 
 **New Import:**
 ```rust
-use naaf_schema::{NormalizedSpec, ScopeReport};
-
-// Or for backward compatibility:
-use naaf_openspec::{NormalizedSpec, ScopeReport}; // Re-exported from naaf_schema
+use naaf_openspec::{NormalizedSpec, ScopeReport};
 ```
 
 ### LLM Prompts
 
-All LLM prompt templates have been moved from `openspec::workers` to `naaf_llm::prompts`:
+All LLM prompt templates now live in `naaf_openspec::prompts`:
 
 - `REQUEST_NORMALIZER_PROMPT`
 - `SCOPE_ANALYST_PROMPT`
@@ -54,18 +51,20 @@ use crate::workers::REQUEST_NORMALIZER_PROMPT;
 
 **New Usage:**
 ```rust
-use naaf_llm::prompts::REQUEST_NORMALIZER_PROMPT;
+use naaf_openspec::prompts::REQUEST_NORMALIZER_PROMPT;
 ```
 
 ## Using LLM-Powered Steps
 
-The new runtime provides LLM-powered transformer steps in `workflow-builtins`:
+The new runtime provides LLM-powered transformer steps in `naaf_openspec`:
 
 ```rust
-use naaf_builtins::{LlmNormalizeStep, LlmScopeStep, LlmSkeletonStep, LlmAcceptanceStep};
+use naaf_openspec::{
+    LlmAcceptanceStep, LlmNormalizeStep, LlmScopeStep, LlmSkeletonStep,
+};
 use naaf_core::budget::ExecCtx;
 use naaf_core::steps::Transformer;
-use naaf_llm::LlmServices;
+use naaf_openspec::LlmServices;
 use std::sync::Arc;
 
 // Create LLM services
@@ -146,21 +145,12 @@ When migrating a workflow:
 
 ## Getting Help
 
-- See `workflow-builtins/src/workflows.rs` for example workflow
-- See `workflow-builtins/src/llm_steps.rs` for LLM step implementations
-- See `workflow-builtins/src/{normalize,scope,plan,accept}.rs` for rule-based steps
-- Check `LEGACY.md` for status updates
+ - See `workflows/openspec/src/workflows.rs` for example workflow
+ - See `workflows/openspec/src/llm_steps.rs` for LLM step implementations
+ - See `workflows/openspec/src/{normalize,scope,plan,accept}.rs` for rule-based steps
+ - Check `LEGACY.md` for status updates
 
-## Backward Compatibility
+## Current Guidance
 
-The `naaf-openspec` crate re-exports migrated types for backward compatibility:
-
-```rust
-// This still works:
-use naaf_openspec::NormalizedSpec;
-
-// Behind the scenes, it's now:
-pub use naaf_schema::NormalizedSpec;
-```
-
-New code should prefer direct imports from `naaf_schema` and `naaf_llm`.
+- Prefer `naaf_schema` for runtime-neutral types like `StateEnvelope`, `ArtifactKey`, and workflow contracts.
+- Prefer `naaf_openspec` for OpenSpec-specific artefacts, prompts, steps, and workflows.

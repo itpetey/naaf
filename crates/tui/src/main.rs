@@ -168,7 +168,7 @@ async fn watch_workflow(input: String, workflow_name: &str) -> Result<()> {
     println!();
 
     let workflow = match workflow_name {
-        "draft-request" => naaf_builtins::draft_request_workflow()?,
+        "draft-request" => naaf_openspec::draft_request_workflow()?,
         _ => anyhow::bail!(
             "Unknown workflow: {}. Available: draft-request",
             workflow_name

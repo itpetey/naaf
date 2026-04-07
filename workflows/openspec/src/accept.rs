@@ -9,7 +9,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use naaf_builtins::AcceptStep;
+//! use naaf_openspec::AcceptStep;
 //! use naaf_core::steps::Transformer;
 //!
 //! let accept_step = AcceptStep::new();

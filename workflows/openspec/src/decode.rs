@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use naaf_schema::{
+use crate::{
     AcceptanceCriteriaSet, ConsistencyFinding, FindingSet, NormalizedSpec, ProposalSkeleton,
     ReadinessDecision, RemediationPlan, RiskFinding, ScopeReport, SectionPatch,
 };

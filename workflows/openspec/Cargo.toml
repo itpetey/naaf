@@ -1,5 +1,5 @@
 [package]
-name = "naaf-builtins"
+name = "naaf-openspec"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
@@ -8,12 +8,12 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 naaf-core.workspace = true
-naaf-llm.workspace = true
 naaf-providers.workspace = true
 naaf-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+thiserror.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }

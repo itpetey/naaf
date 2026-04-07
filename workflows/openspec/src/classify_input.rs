@@ -91,7 +91,7 @@ impl IntoState for Classification {
 /// # Example
 ///
 /// ```ignore
-/// use naaf_builtins::ClassifyInput;
+/// use naaf_openspec::ClassifyInput;
 /// use naaf_core::steps::Transformer;
 ///
 /// let classifier = ClassifyInput::new();

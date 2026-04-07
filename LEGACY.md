@@ -11,16 +11,16 @@ This directory contains the original NAAF prototype runtime. This implementation
 ### Completed Migrations
 
 1. **Artifact Schemas** (`openspec/artifacts.rs`)
-   - All domain types moved to `workflow-schema/artifacts.rs`
+   - OpenSpec domain types now live in `workflows/openspec/src/artifacts.rs`
    - Types include: `NormalizedSpec`, `ScopeReport`, `ProposalSkeleton`, `AcceptanceCriteriaSet`, etc.
-   - Backward compatibility maintained via re-exports in `openspec` crate
+   - Generic artifact plumbing remains in `naaf_schema`
 
 2. **LLM Prompts** (`openspec/workers.rs`)
-   - All prompt constants moved to `workflow-llm/prompts.rs`
+   - All prompt constants now live in `workflows/openspec/src/prompts.rs`
    - Constants include: `REQUEST_NORMALIZER_PROMPT`, `SCOPE_ANALYST_PROMPT`, etc.
 
 3. **LLM-Powered Steps**
-   - New LLM-powered transformers created in `workflow-builtins/llm_steps.rs`
+   - New LLM-powered transformers live in `workflows/openspec/src/llm_steps.rs`
    - Steps: `LlmNormalizeStep`, `LlmScopeStep`, `LlmSkeletonStep`, `LlmAcceptanceStep`
 
 ### Remaining Legacy Components
@@ -32,9 +32,8 @@ This directory contains the original NAAF prototype runtime. This implementation
 
 - **Do not build new features on this runtime.** The architecture cannot support required features like explicit routing, ambiguity handling, human escalation, fan-out/fan-in, and workflow composition.
 - **Use new runtime components:**
-  - Artifacts: Import from `naaf_schema` (re-exported via `naaf_openspec` for backward compatibility)
-  - Prompts: Import from `naaf_llm::prompts`
-  - LLM Steps: Import from `naaf_builtins::{LlmNormalizeStep, LlmScopeStep, ...}`
+  - Generic state/artifact plumbing: Import from `naaf_schema`
+  - OpenSpec artefacts, prompts, workflows, and steps: Import from `naaf_openspec`
 - **Archived history is preserved for reference** and can be used for rollback if needed.
 
 ## Preservation
@@ -45,4 +44,4 @@ This directory contains the original NAAF prototype runtime. This implementation
 
 ## New Development
 
-All new development should target the new workflow runtime (`workflow-core`, `workflow-schema`, `workflow-builtins`). See the main README for details on the new architecture.
+All new development should target the new workflow runtime (`naaf-core`, `naaf-schema`, `naaf-openspec`). See the main README for details on the current architecture.

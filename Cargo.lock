@@ -909,27 +909,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "naaf-builtins"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "naaf-core",
- "naaf-llm",
- "naaf-providers",
- "naaf-schema",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "naaf-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "naaf-builtins",
  "naaf-core",
+ "naaf-openspec",
  "naaf-schema",
  "serde_json",
  "tokio",
@@ -953,25 +939,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "naaf-llm"
-version = "0.1.0"
-dependencies = [
- "naaf-core",
- "naaf-providers",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
 name = "naaf-openspec"
 version = "0.1.0"
 dependencies = [
- "naaf-llm",
+ "anyhow",
+ "naaf-core",
+ "naaf-providers",
  "naaf-schema",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -1001,8 +979,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "naaf-builtins",
  "naaf-core",
+ "naaf-openspec",
  "naaf-schema",
  "serde_json",
  "tokio",

@@ -11,7 +11,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use naaf_builtins::ProposeStep;
+//! use naaf_openspec::ProposeStep;
 //! use naaf_core::steps::Transformer;
 //!
 //! let propose = ProposeStep::new();

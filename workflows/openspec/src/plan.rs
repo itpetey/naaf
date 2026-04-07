@@ -9,7 +9,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use naaf_builtins::PlanStep;
+//! use naaf_openspec::PlanStep;
 //! use naaf_core::steps::Transformer;
 //!
 //! let plan_step = PlanStep::new();

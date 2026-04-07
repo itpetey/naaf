@@ -9,7 +9,6 @@ use naaf_core::builder::WorkflowBuilder;
 use naaf_core::errors::Result;
 use naaf_core::graph::CompiledWorkflow;
 use naaf_core::steps::{BoxedRouter, BoxedTransformer, BoxedValidator};
-use naaf_llm::LlmServices;
 use naaf_providers::ModelProvider;
 
 use crate::accept::AcceptStep;
@@ -20,6 +19,7 @@ use crate::plan::PlanStep;
 use crate::propose::ProposeStep;
 use crate::routers::InputClassificationRouter;
 use crate::scope::ScopeStep;
+use crate::services::LlmServices;
 use crate::terminal::{EscalationTerminal, GreetingTerminal};
 use crate::validators::DoneValidator;
 
@@ -160,6 +160,7 @@ pub fn openspec_happy_path_mock(
 mod tests {
     use super::*;
     use crate::mock_llm::MockLlmServices;
+    use crate::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
     use naaf_core::budget::{DummyServices, ExecCtx};
     use naaf_core::executor::Executor;
     use naaf_schema::artifacts::{ArtifactKey, ArtifactValue};
@@ -167,7 +168,6 @@ mod tests {
     use naaf_schema::lineage::Lineage;
     use naaf_schema::state::{RunId, StateEnvelope, StateId};
     use naaf_schema::state_kind::StateKind;
-    use naaf_schema::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
 
     fn make_state_with_input(input: &str) -> StateEnvelope {
         let mut state = StateEnvelope::new(

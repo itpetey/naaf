@@ -1,14 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/builtins",
   "crates/cli",
   "crates/core",
-  "crates/llm",
-  "crates/openspec",
   "crates/providers",
   "crates/schema",
   "crates/tui",
+  "workflows/openspec",
 ]
 
 [workspace.package]
@@ -34,9 +32,7 @@ tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 uuid = { version = "1.23", default-features = false }
 
-naaf-builtins = { path = "crates/builtins" }
 naaf-core = { path = "crates/core" }
-naaf-llm = { path = "crates/llm" }
-naaf-openspec = { path = "crates/openspec" }
+naaf-openspec = { path = "workflows/openspec" }
 naaf-providers = { path = "crates/providers" }
 naaf-schema = { path = "crates/schema" }

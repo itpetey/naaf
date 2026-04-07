@@ -83,10 +83,7 @@ impl<A: Auth, S: ApiSpec> Provider<A, S> {
 }
 
 impl<A: Auth + Send + Sync, S: ApiSpec + Send + Sync> ModelProvider for Provider<A, S> {
-    async fn generate(
-        &self,
-        request: GenerationRequest,
-    ) -> Result<GenerationResponse> {
+    async fn generate(&self, request: GenerationRequest) -> Result<GenerationResponse> {
         let url = format!("{}{}", self.auth.base_url(), self.api.endpoint());
 
         let response = reqwest::Client::new()
@@ -143,9 +140,9 @@ mod tests {
 #[cfg(test)]
 mod integration {
     use super::*;
+    use crate::Message;
     use crate::api::OpenAiChatCompletions;
     use crate::auth::OpenAiAuth;
-    use crate::Message;
 
     #[tokio::test]
     async fn test_provider_generate_success() {
