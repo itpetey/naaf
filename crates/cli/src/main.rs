@@ -1,5 +1,6 @@
 //! CLI entry point.
 
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -17,6 +18,11 @@ use workflow_schema::state::{RunId, StateEnvelope, StateId};
 use workflow_schema::state_kind::StateKind;
 
 const RUNS_DIR: &str = ".runs";
+
+struct RunSummary {
+    run_id: RunId,
+    ambiguous_escalation: bool,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "naaf", about = "NAAF - Not Another AI Framework CLI", version)]
@@ -84,6 +90,32 @@ async fn main() -> Result<()> {
 }
 
 async fn run(workflow_name: &str, input: String) -> Result<()> {
+    let interactive_clarification = io::stdin().is_terminal() && io::stdout().is_terminal();
+    let initial_run = run_once(workflow_name, &input).await?;
+
+    if !interactive_clarification || !initial_run.ambiguous_escalation {
+        return Ok(());
+    }
+
+    println!("\nThis request needs clarification before it can continue.");
+    println!("Original ambiguous run: {}", initial_run.run_id);
+
+    let Some(clarification) = prompt_for_clarification()? else {
+        println!("No clarification provided. Leaving the ambiguous run as-is.");
+        return Ok(());
+    };
+
+    let clarified_input = compose_clarified_input(&input, &clarification);
+    println!("\nStarting clarified follow-up run...");
+    let follow_up_run = run_once(workflow_name, &clarified_input).await?;
+
+    println!("\nOriginal ambiguous run: {}", initial_run.run_id);
+    println!("Clarified follow-up run: {}", follow_up_run.run_id);
+
+    Ok(())
+}
+
+async fn run_once(workflow_name: &str, input: &str) -> Result<RunSummary> {
     let runs_dir = PathBuf::from(RUNS_DIR);
     std::fs::create_dir_all(&runs_dir)?;
 
@@ -116,7 +148,7 @@ async fn run(workflow_name: &str, input: String) -> Result<()> {
     );
     state
         .artifacts
-        .insert(ArtifactKey::new("input"), ArtifactValue::text(&input));
+        .insert(ArtifactKey::new("input"), ArtifactValue::text(input));
 
     let mut ctx = ExecCtx::new(run_id, DummyServices)
         .with_trace(Box::new(event_sink))
@@ -124,8 +156,12 @@ async fn run(workflow_name: &str, input: String) -> Result<()> {
 
     println!("\nExecuting...");
 
+    let mut ambiguous_escalation = false;
+
     match executor.execute(&mut ctx, state).await {
         Ok(final_state) => {
+            ambiguous_escalation = is_ambiguous_escalation(&final_state);
+
             if let Err(e) = StateStore::save(&final_state, &run_dir) {
                 eprintln!("Warning: Failed to persist state: {}", e);
             }
@@ -159,7 +195,49 @@ async fn run(workflow_name: &str, input: String) -> Result<()> {
 
     println!("\nRun directory: {}", run_dir.display());
 
-    Ok(())
+    Ok(RunSummary {
+        run_id,
+        ambiguous_escalation,
+    })
+}
+
+fn is_ambiguous_escalation(final_state: &StateEnvelope) -> bool {
+    final_state
+        .artifacts
+        .get(&ArtifactKey::new("escalation"))
+        .and_then(|escalation| escalation.as_json())
+        .is_some_and(escalation_is_ambiguous)
+}
+
+fn escalation_is_ambiguous(escalation: &serde_json::Value) -> bool {
+    escalation
+        .get("classification")
+        .and_then(|classification| classification.as_str())
+        == Some("Ambiguous")
+}
+
+fn prompt_for_clarification() -> Result<Option<String>> {
+    print!("Clarification: ");
+    io::stdout().flush()?;
+
+    let mut clarification = String::new();
+    if io::stdin().read_line(&mut clarification)? == 0 {
+        return Ok(None);
+    }
+
+    let clarification = clarification.trim().to_string();
+    if clarification.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(clarification))
+}
+
+fn compose_clarified_input(input: &str, clarification: &str) -> String {
+    format!(
+        "build this request using the following clarification:\n\nOriginal request:\n{}\n\nClarification:\n{}",
+        input, clarification
+    )
 }
 
 fn list_runs() -> Result<()> {
@@ -523,5 +601,40 @@ async fn replay_run(run_id: &str) -> Result<()> {
     println!("Original input: {}", input);
     println!();
 
-    run("draft-request", input).await
+    run_once("draft-request", &input).await?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escalation_classification_detects_ambiguity() {
+        let escalation = serde_json::json!({
+            "classification": "Ambiguous",
+            "confidence": 0.6,
+        });
+
+        assert!(escalation_is_ambiguous(&escalation));
+    }
+
+    #[test]
+    fn escalation_classification_ignores_other_values() {
+        let escalation = serde_json::json!({
+            "classification": "Actionable",
+        });
+
+        assert!(!escalation_is_ambiguous(&escalation));
+    }
+
+    #[test]
+    fn clarification_input_is_composed_as_structured_text() {
+        let clarified = compose_clarified_input("plan a todo app", "single-user React app");
+
+        assert!(clarified.starts_with("build "));
+        assert!(clarified.contains("Original request:\nplan a todo app"));
+        assert!(clarified.contains("Clarification:\nsingle-user React app"));
+    }
 }

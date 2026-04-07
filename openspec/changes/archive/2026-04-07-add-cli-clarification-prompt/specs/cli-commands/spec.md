@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Run workflow command
 The system SHALL provide a CLI command to run a workflow with input.
@@ -21,10 +21,3 @@ The system SHALL provide a CLI command to run a workflow with input.
 - **WHEN** the follow-up run also completes with an ambiguous escalation
 - **THEN** the CLI prints the escalation details
 - **AND** the CLI does not prompt a second time
-
-### Requirement: Show trace command
-The system SHALL provide a CLI command to show run trace.
-
-#### Scenario: Trace command
-- **WHEN** running `naaf trace <run-id>`
-- **THEN** trace is displayed
