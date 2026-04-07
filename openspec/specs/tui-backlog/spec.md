@@ -24,8 +24,6 @@ The backlog SHALL include features for controlling runs.
 - **THEN** it includes: resume run, abort run, retry transition
 
 ### Requirement: TUI is explicitly not implemented
-The system SHALL NOT implement TUI in this phase.
+**This requirement is now stale.** The TUI exists as the primary workflow host.
 
-#### Scenario: TUI implementation not present
-- **WHEN** the codebase is inspected
-- **THEN** no TUI crate implementation exists
+**Migration**: Consider archiving or updating this spec to reflect current state.

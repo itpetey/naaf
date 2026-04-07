@@ -17,3 +17,7 @@ The system SHALL provide a TUI flow for inspecting saved workflow runs.
 #### Scenario: Inspect run in TUI
 - **WHEN** a user chooses a saved run from the TUI
 - **THEN** the TUI displays the run's execution events and final state summary
+
+#### Scenario: Inspection view shows primary outputs
+- **WHEN** a user inspects a saved run in the TUI
+- **THEN** the TUI prioritises the workflow-defined primary output artifacts alongside the execution trace and final state
