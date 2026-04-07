@@ -15,9 +15,11 @@ chrono.workspace = true
 clap = { workspace = true, features = ["derive", "env", "std"] }
 naaf-core.workspace = true
 naaf-openspec.workspace = true
+naaf-providers.workspace = true
 naaf-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-util = { workspace = true }
 uuid.workspace = true

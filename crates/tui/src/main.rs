@@ -55,6 +55,11 @@ struct HostPaths {
 enum Command {
     #[command(about = "List discovered workflow packages")]
     Workflows,
+    #[command(about = "Show details of a workflow package")]
+    Show {
+        #[arg(help = "Workflow package identifier")]
+        workflow: String,
+    },
     #[command(about = "Run a discovered workflow package")]
     Run {
         #[arg(help = "Workflow package identifier")]
@@ -223,6 +228,7 @@ async fn main() -> Result<()> {
 
     match args.command {
         Command::Workflows => list_workflows(&paths)?,
+        Command::Show { workflow } => show_workflow(&paths, &workflow)?,
         Command::Run { workflow, input } => run_workflow_host(&paths, &workflow, input).await?,
         Command::Runs => list_runs(&paths)?,
         Command::Inspect { run_id } => inspect_run(&paths, &run_id)?,
@@ -239,6 +245,32 @@ async fn run_workflow_host(
 ) -> Result<()> {
     let packages = load_workflow_packages(paths)?;
     let package = find_workflow(&packages, workflow_id)?;
+
+    if let Some(llm) = &package.package.runtime.llm {
+        if llm.required {
+            if llm.providers.is_empty() {
+                println!(
+                    "Workflow '{}' requires LLM but has no declared providers.",
+                    workflow_id
+                );
+                println!(
+                    "The host will attempt to use your configured API key or OPENAI_API_KEY environment variable."
+                );
+            } else {
+                println!(
+                    "Workflow '{}' requires LLM provider(s): {}",
+                    workflow_id,
+                    llm.providers.join(", ")
+                );
+            }
+            if !llm.model.is_empty() && llm.model != "default" {
+                println!("Model: {}", llm.model);
+            }
+            println!();
+            let _ = prompt_for_input("Press Enter to continue (Ctrl+C to abort)...")?;
+        }
+    }
+
     let input = match input {
         Some(input) => input,
         None => prompt_for_input(&package.package.ui.input_prompt)?
@@ -309,6 +341,7 @@ async fn run_once(
     let initial_state = make_initial_state(run_id, input_artifact, input);
 
     let mut registry = WorkflowRegistry::<DummyServices>::new();
+    naaf_openspec::register_legacy_steps(&mut registry);
     naaf_openspec::register_workflow_steps(&mut registry);
 
     let workflow = match build_workflow(&package.package, &registry) {
@@ -410,7 +443,101 @@ fn list_workflows(paths: &HostPaths) -> Result<()> {
         if !package.package.summary.is_empty() {
             println!("    {}", package.package.summary);
         }
+        println!("    Entry: {}", package.package.entry);
+        if let Some(llm) = &package.package.runtime.llm {
+            let provider_str = if llm.providers.is_empty() {
+                "default".to_string()
+            } else {
+                llm.providers.join(", ")
+            };
+            println!("    LLM: {}", provider_str);
+        } else {
+            println!("    LLM: not required");
+        }
+        if !package.package.ui.execution_guidance.is_empty() {
+            println!("    Guidance: {}", package.package.ui.execution_guidance);
+        }
+        if !package.package.ui.primary_outputs.is_empty() {
+            println!(
+                "    Outputs: {}",
+                package.package.ui.primary_outputs.join(", ")
+            );
+        }
         println!();
+    }
+
+    Ok(())
+}
+
+fn show_workflow(paths: &HostPaths, workflow_id: &str) -> Result<()> {
+    let packages = load_workflow_packages(paths)?;
+    let package = find_workflow(&packages, workflow_id)?;
+
+    println!("Workflow: {}", package.package.name);
+    println!("ID: {}", package.package.id);
+    println!();
+    println!("Summary: {}", package.package.summary);
+    println!();
+
+    println!("Entry: {}", package.package.entry);
+    println!("Input artifact: {}", package.package.ui.input_artifact);
+    println!("Input prompt: {}", package.package.ui.input_prompt);
+
+    if let Some(llm) = &package.package.runtime.llm {
+        println!();
+        println!("LLM Configuration:");
+        if !llm.providers.is_empty() {
+            println!("  Providers: {}", llm.providers.join(", "));
+        } else {
+            println!("  Providers: default");
+        }
+    } else {
+        println!();
+        println!("LLM Configuration: Not required");
+    }
+
+    if !package.package.ui.execution_guidance.is_empty() {
+        println!();
+        println!("Execution Guidance:");
+        println!("  {}", package.package.ui.execution_guidance);
+    }
+
+    if !package.package.ui.primary_outputs.is_empty() {
+        println!();
+        println!("Primary Outputs:");
+        for output in &package.package.ui.primary_outputs {
+            println!("  - {}", output);
+        }
+    }
+
+    if !package.package.runtime.inputs.is_empty() {
+        println!();
+        println!("Execution Inputs:");
+        for input in &package.package.runtime.inputs {
+            print!("  - {} ({})", input.id, input.artifact);
+            if input.required {
+                print!(" [required]");
+            }
+            println!();
+            if !input.label.is_empty() {
+                println!("    Label: {}", input.label);
+            }
+            if !input.prompt.is_empty() {
+                println!("    Prompt: {}", input.prompt);
+            }
+        }
+    }
+
+    println!();
+    println!("Nodes ({}):", package.package.nodes.len());
+    for node in &package.package.nodes {
+        println!("  - {} [{:?}] -> {}", node.id, node.kind, node.step);
+    }
+
+    println!();
+    println!("Edges ({}):", package.package.edges.len());
+    for edge in &package.package.edges {
+        println!("  - {} -> {} [{:?}]", edge.from, edge.to, edge.kind);
     }
 
     Ok(())
@@ -855,7 +982,7 @@ fn format_artifact_value(value: &ArtifactValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::workflow_package::{WorkflowPackage, WorkflowPackageUi};
+    use naaf_core::workflow_package::{WorkflowPackage, WorkflowPackageRuntime, WorkflowPackageUi};
     use tempfile::tempdir;
 
     fn demo_package(id: &str) -> DiscoveredWorkflowPackage {
@@ -867,9 +994,12 @@ mod tests {
                 name: format!("{id} workflow"),
                 summary: "summary".to_string(),
                 entry: "start".to_string(),
+                runtime: WorkflowPackageRuntime::default(),
                 ui: WorkflowPackageUi {
                     input_artifact: "input".to_string(),
                     input_prompt: "Describe the request".to_string(),
+                    execution_guidance: String::new(),
+                    primary_outputs: vec![],
                 },
                 nodes: vec![],
                 edges: vec![],
@@ -1060,9 +1190,12 @@ mod tests {
                 name: "Broken workflow".to_string(),
                 summary: "summary".to_string(),
                 entry: "start".to_string(),
+                runtime: WorkflowPackageRuntime::default(),
                 ui: WorkflowPackageUi {
                     input_artifact: "input".to_string(),
                     input_prompt: "Describe the request".to_string(),
+                    execution_guidance: String::new(),
+                    primary_outputs: vec![],
                 },
                 nodes: vec![naaf_core::workflow_package::WorkflowPackageNode {
                     id: "start".to_string(),
@@ -1126,9 +1259,12 @@ mod tests {
                 name: "Runtime broken workflow".to_string(),
                 summary: "summary".to_string(),
                 entry: "normalize".to_string(),
+                runtime: WorkflowPackageRuntime::default(),
                 ui: WorkflowPackageUi {
                     input_artifact: "input".to_string(),
                     input_prompt: "Describe the request".to_string(),
+                    execution_guidance: String::new(),
+                    primary_outputs: vec![],
                 },
                 nodes: vec![naaf_core::workflow_package::WorkflowPackageNode {
                     id: "normalize".to_string(),

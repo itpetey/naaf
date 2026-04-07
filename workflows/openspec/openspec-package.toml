@@ -1,0 +1,218 @@
+id = "openspec-package"
+name = "OpenSpec Package"
+summary = "Full OpenSpec authoring workflow with LLM-powered drafting, review, remediation, and acceptance."
+entry = "propose"
+
+[ui]
+input_artifact = "input"
+input_prompt = "What would you like to propose? Describe the change you want to make."
+execution_guidance = "This workflow uses AI to draft, review, and refine your OpenSpec proposal. High-severity findings may require human escalation before acceptance."
+primary_outputs = ["current_proposal", "proposal_skeleton", "acceptance_criteria"]
+
+[runtime.llm]
+required = true
+model = "openai-gpt4"
+providers = []
+
+[[nodes]]
+id = "propose"
+kind = "transformer"
+step = "openspec.propose"
+
+[[nodes]]
+id = "classify_input"
+kind = "transformer"
+step = "openspec.classify_input"
+
+[[nodes]]
+id = "initial_decision"
+kind = "router"
+step = "openspec.input_classification_router"
+config = { greeting_route = "greeting_terminal", clarification_route = "clarification_terminal", actionable_route = "normalize" }
+
+[[nodes]]
+id = "greeting_terminal"
+kind = "transformer"
+step = "openspec.greeting_terminal"
+config = { response = "Hello! I'm here to help you craft an OpenSpec proposal. What would you like to propose?" }
+
+[[nodes]]
+id = "clarification_terminal"
+kind = "transformer"
+step = "openspec.escalation_terminal"
+config = { message = "This request is unclear. Please describe what you'd like to propose." }
+
+[[nodes]]
+id = "normalize"
+kind = "transformer"
+step = "openspec.package_llm_normalize"
+
+[[nodes]]
+id = "scope"
+kind = "transformer"
+step = "openspec.package_llm_scope"
+
+[[nodes]]
+id = "skeleton"
+kind = "transformer"
+step = "openspec.package_llm_skeleton"
+
+[[nodes]]
+id = "risk_review"
+kind = "transformer"
+step = "openspec.package_llm_risk_review"
+
+[[nodes]]
+id = "consistency_review"
+kind = "transformer"
+step = "openspec.package_llm_consistency_review"
+
+[[nodes]]
+id = "aggregate_findings"
+kind = "transformer"
+step = "openspec.package_findings_aggregator"
+
+[[nodes]]
+id = "review_decision"
+kind = "router"
+step = "openspec.package_review_findings_router"
+config = { accepted_route = "acceptance", remediation_route = "remediate" }
+
+[[nodes]]
+id = "remediate"
+kind = "transformer"
+step = "openspec.package_remediation_planner"
+
+[[nodes]]
+id = "remediation_decision"
+kind = "router"
+step = "openspec.package_remediation_plan_router"
+config = { remediate_route = "apply_patch", escalation_route = "escalate" }
+
+[[nodes]]
+id = "generate_patch"
+kind = "transformer"
+step = "openspec.package_llm_targeted_remediation"
+
+[[nodes]]
+id = "apply_patch"
+kind = "transformer"
+step = "openspec.package_apply_section_patch"
+
+[[nodes]]
+id = "escalate"
+kind = "transformer"
+step = "openspec.package_workflow_outcome"
+
+[[nodes]]
+id = "acceptance"
+kind = "transformer"
+step = "openspec.package_llm_acceptance"
+
+[[nodes]]
+id = "greeting_done"
+kind = "validator"
+step = "openspec.done_validator"
+
+[[nodes]]
+id = "clarification_done"
+kind = "validator"
+step = "openspec.done_validator"
+
+[[nodes]]
+id = "done"
+kind = "validator"
+step = "openspec.done_validator"
+
+[[nodes]]
+id = "escalation_done"
+kind = "validator"
+step = "openspec.done_validator"
+
+[[edges]]
+from = "propose"
+to = "classify_input"
+
+[[edges]]
+from = "classify_input"
+to = "initial_decision"
+
+[[edges]]
+from = "initial_decision"
+to = "greeting_terminal"
+
+[[edges]]
+from = "initial_decision"
+to = "clarification_terminal"
+
+[[edges]]
+from = "initial_decision"
+to = "normalize"
+
+[[edges]]
+from = "greeting_terminal"
+to = "greeting_done"
+
+[[edges]]
+from = "clarification_terminal"
+to = "clarification_done"
+
+[[edges]]
+from = "normalize"
+to = "scope"
+
+[[edges]]
+from = "scope"
+to = "skeleton"
+
+[[edges]]
+from = "skeleton"
+to = "risk_review"
+
+[[edges]]
+from = "risk_review"
+to = "consistency_review"
+
+[[edges]]
+from = "consistency_review"
+to = "aggregate_findings"
+
+[[edges]]
+from = "aggregate_findings"
+to = "review_decision"
+
+[[edges]]
+from = "review_decision"
+to = "acceptance"
+
+[[edges]]
+from = "review_decision"
+to = "remediate"
+
+[[edges]]
+from = "remediate"
+to = "remediation_decision"
+
+[[edges]]
+from = "remediation_decision"
+to = "generate_patch"
+
+[[edges]]
+from = "remediation_decision"
+to = "escalate"
+
+[[edges]]
+from = "generate_patch"
+to = "apply_patch"
+
+[[edges]]
+from = "apply_patch"
+to = "skeleton"
+
+[[edges]]
+from = "escalate"
+to = "escalation_done"
+
+[[edges]]
+from = "acceptance"
+to = "done"

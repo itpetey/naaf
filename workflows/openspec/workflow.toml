@@ -6,6 +6,13 @@ entry = "propose"
 [ui]
 input_artifact = "input"
 input_prompt = "Describe what you want to build or fix."
+execution_guidance = "This workflow uses a simple pattern-matching classifier without LLM support."
+primary_outputs = ["proposal", "scope", "plan", "acceptance_criteria"]
+
+[runtime.llm]
+required = false
+model = "default"
+providers = []
 
 [[nodes]]
 id = "propose"

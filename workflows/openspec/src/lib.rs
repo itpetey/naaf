@@ -40,7 +40,7 @@ pub use normalize::{NormalizeStep, NormalizedInput};
 pub use phase::Phase;
 pub use plan::{EffortLevel, Plan, PlanStep};
 pub use propose::{Proposal, ProposeStep};
-pub use registry::register_workflow_steps;
+pub use registry::{register_legacy_steps, register_workflow_steps};
 pub use routers::{ConfidenceThresholdRouter, InputClassificationRouter, NeedsHumanClarification};
 pub use scope::{Complexity, ScopeAnalysis, ScopeStep, ScopeType};
 pub use services::{LlmServiceError, LlmServices};

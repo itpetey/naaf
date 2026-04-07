@@ -109,6 +109,25 @@ impl Services for DummyServices {
     }
 }
 
+/// Production services that wraps a model provider for actual LLM calls.
+pub struct LlmServices<S: Services> {
+    provider: S,
+}
+
+impl<S: Services> LlmServices<S> {
+    pub fn new(provider: S) -> Self {
+        Self { provider }
+    }
+}
+
+impl<S: Services + Send + Sync> Services for LlmServices<S> {
+    type Error = S::Error;
+
+    async fn call(&self, service: &str, request: &[u8]) -> Result<Vec<u8>, Self::Error> {
+        self.provider.call(service, request).await
+    }
+}
+
 pub struct ExecCtx<S: Services> {
     pub run_id: RunId,
     pub budget: BudgetImpl,
