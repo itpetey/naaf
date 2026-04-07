@@ -1,16 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/builtins",
   "crates/cli",
-  "crates/model",
+  "crates/core",
+  "crates/llm",
   "crates/openspec",
-  "crates/orchestrator",
   "crates/providers",
+  "crates/schema",
   "crates/tui",
-  "crates/workflow-core",
-  "crates/workflow-schema",
-  "crates/workflow-llm",
-  "crates/workflow-builtins",
 ]
 
 [workspace.package]
@@ -21,24 +19,24 @@ license = "MPL-2.0"
 
 [workspace.dependencies]
 anyhow = { version = "1.0", default-features = false }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4", default-features = false }
 clap = { version = "4.6", default-features = false }
 httpmock = { version = "0.8", default-features = false }
 petgraph = { version = "0.8", default-features = false }
 reqwest = { version = "0.13", default-features = false }
-serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
-serde_json = { version = "1.0", default-features = false, features = ["std"] }
+serde = { version = "1.0", default-features = false }
+serde_json = { version = "1.0", default-features = false }
 tempfile = { version = "3.27", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 tokio = { version = "1.50", default-features = false }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
-uuid = { version = "1.23", default-features = false, features = ["v4", "std"] }
+uuid = { version = "1.23", default-features = false }
 
-naaf-model = { path = "crates/model" }
+naaf-builtins = { path = "crates/builtins" }
+naaf-core = { path = "crates/core" }
+naaf-llm = { path = "crates/llm" }
 naaf-openspec = { path = "crates/openspec" }
-workflow-core = { path = "crates/workflow-core" }
-workflow-schema = { path = "crates/workflow-schema" }
-workflow-llm = { path = "crates/workflow-llm" }
-workflow-builtins = { path = "crates/workflow-builtins" }
+naaf-providers = { path = "crates/providers" }
+naaf-schema = { path = "crates/schema" }

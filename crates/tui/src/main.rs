@@ -4,15 +4,15 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::Parser;
+use naaf_core::budget::DummyServices;
+use naaf_core::events::ExecutionEvent;
+use naaf_core::executor::Executor;
+use naaf_schema::artifacts::ArtifactKey;
+use naaf_schema::execution_status::ExecutionStatus;
+use naaf_schema::lineage::Lineage;
+use naaf_schema::state::{RunId, StateEnvelope, StateId};
+use naaf_schema::state_kind::StateKind;
 use tokio_util::sync::CancellationToken;
-use workflow_core::budget::DummyServices;
-use workflow_core::events::ExecutionEvent;
-use workflow_core::executor::Executor;
-use workflow_schema::artifacts::ArtifactKey;
-use workflow_schema::execution_status::ExecutionStatus;
-use workflow_schema::lineage::Lineage;
-use workflow_schema::state::{RunId, StateEnvelope, StateId};
-use workflow_schema::state_kind::StateKind;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -54,8 +54,8 @@ impl TuiEventSink {
     }
 }
 
-impl workflow_core::events::TraceSink for TuiEventSink {
-    fn emit(&self, event: ExecutionEvent) -> workflow_core::events::EventResult {
+impl naaf_core::events::TraceSink for TuiEventSink {
+    fn emit(&self, event: ExecutionEvent) -> naaf_core::events::EventResult {
         println!("{}", format_event(&event));
         self.events.lock().unwrap().push(event);
         Ok(())
@@ -168,7 +168,7 @@ async fn watch_workflow(input: String, workflow_name: &str) -> Result<()> {
     println!();
 
     let workflow = match workflow_name {
-        "draft-request" => workflow_builtins::draft_request_workflow()?,
+        "draft-request" => naaf_builtins::draft_request_workflow()?,
         _ => anyhow::bail!(
             "Unknown workflow: {}. Available: draft-request",
             workflow_name
@@ -185,11 +185,11 @@ async fn watch_workflow(input: String, workflow_name: &str) -> Result<()> {
     );
     state.artifacts.insert(
         ArtifactKey::new("input"),
-        workflow_schema::artifacts::ArtifactValue::text(&input),
+        naaf_schema::artifacts::ArtifactValue::text(&input),
     );
 
     let sink = TuiEventSink::new();
-    let mut ctx = workflow_core::budget::ExecCtx::new(RunId::new(), DummyServices)
+    let mut ctx = naaf_core::budget::ExecCtx::new(RunId::new(), DummyServices)
         .with_trace(Box::new(sink.clone()))
         .with_cancel(CancellationToken::new());
 
@@ -225,7 +225,7 @@ async fn watch_workflow(input: String, workflow_name: &str) -> Result<()> {
     Ok(())
 }
 
-fn format_artifact_value(value: &workflow_schema::artifacts::ArtifactValue) -> String {
+fn format_artifact_value(value: &naaf_schema::artifacts::ArtifactValue) -> String {
     if let Some(text) = value.as_text() {
         if text.len() > 60 {
             format!("{}...", &text[..57])
@@ -257,7 +257,7 @@ fn inspect_run(run_id: &str) -> Result<()> {
         anyhow::bail!("No events found for run: {}", run_id);
     }
 
-    let events = workflow_core::events::FilesystemEventStore::read_events(&event_file)?;
+    let events = naaf_core::events::FilesystemEventStore::read_events(&event_file)?;
 
     println!("╔══════════════════════════════════════════════════╗");
     println!("║         NAAF Run Inspector                        ║");

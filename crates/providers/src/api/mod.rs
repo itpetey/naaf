@@ -3,7 +3,7 @@
 mod anthropic;
 mod openai_chat;
 
-use naaf_model::{GenerationResponse, ProviderError};
+use crate::{GenerationResponse, ProviderCapabilities, ProviderError};
 
 pub use anthropic::AnthropicMessages;
 pub use openai_chat::OpenAiChatCompletions;
@@ -21,7 +21,7 @@ pub trait ApiSpec: Send + Sync {
     fn model(&self) -> &str;
 
     /// Returns the capabilities for this provider configuration.
-    fn capabilities() -> naaf_model::ProviderCapabilities;
+    fn capabilities() -> ProviderCapabilities;
 
     /// Parses a successful response body into a GenerationResponse.
     fn parse_response(&self, body: &str) -> Result<GenerationResponse, ProviderError>;

@@ -2,10 +2,10 @@
 
 use std::fmt::Display;
 
-use naaf_model::{GenerationResponse, ProviderCapabilities, ProviderError, Usage};
 use serde::{Deserialize, Serialize};
 
 use super::ApiSpec;
+use crate::{GenerationResponse, Message, ProviderCapabilities, ProviderError, Usage};
 
 /// Anthropic Messages API specification.
 ///
@@ -99,8 +99,8 @@ pub struct AnthropicMessage {
     pub content: String,
 }
 
-impl From<naaf_model::Message> for AnthropicMessage {
-    fn from(msg: naaf_model::Message) -> Self {
+impl From<Message> for AnthropicMessage {
+    fn from(msg: Message) -> Self {
         Self {
             role: msg.role,
             content: msg.content,

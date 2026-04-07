@@ -5,17 +5,17 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use naaf_builtins::draft_request_workflow;
+use naaf_core::budget::{DummyServices, ExecCtx};
+use naaf_core::events::ExecutionEvent;
+use naaf_core::executor::Executor;
+use naaf_core::state_store::StateStore;
+use naaf_schema::artifacts::{ArtifactKey, ArtifactValue};
+use naaf_schema::execution_status::ExecutionStatus;
+use naaf_schema::lineage::Lineage;
+use naaf_schema::state::{RunId, StateEnvelope, StateId};
+use naaf_schema::state_kind::StateKind;
 use tokio_util::sync::CancellationToken;
-use workflow_builtins::draft_request_workflow;
-use workflow_core::budget::{DummyServices, ExecCtx};
-use workflow_core::events::ExecutionEvent;
-use workflow_core::executor::Executor;
-use workflow_core::state_store::StateStore;
-use workflow_schema::artifacts::{ArtifactKey, ArtifactValue};
-use workflow_schema::execution_status::ExecutionStatus;
-use workflow_schema::lineage::Lineage;
-use workflow_schema::state::{RunId, StateEnvelope, StateId};
-use workflow_schema::state_kind::StateKind;
 
 const RUNS_DIR: &str = ".runs";
 
@@ -124,7 +124,7 @@ async fn run_once(workflow_name: &str, input: &str) -> Result<RunSummary> {
     std::fs::create_dir_all(&run_dir)?;
 
     let event_file = run_dir.join("events.log");
-    let event_sink = workflow_core::events::FilesystemEventStore::new(&event_file)?;
+    let event_sink = naaf_core::events::FilesystemEventStore::new(&event_file)?;
 
     println!("Running workflow: {}", workflow_name);
     println!("Run ID: {}", run_id);
@@ -283,7 +283,7 @@ fn list_runs() -> Result<()> {
             continue;
         }
 
-        let events = workflow_core::events::FilesystemEventStore::read_events(&event_file)?;
+        let events = naaf_core::events::FilesystemEventStore::read_events(&event_file)?;
 
         let first_event = events.first();
         let last_event = events.last();
@@ -334,7 +334,7 @@ fn trace_run(run_id: &str) -> Result<()> {
         anyhow::bail!("No events found for run: {}", run_id);
     }
 
-    let events = workflow_core::events::FilesystemEventStore::read_events(&event_file)?;
+    let events = naaf_core::events::FilesystemEventStore::read_events(&event_file)?;
 
     if events.is_empty() {
         println!("No events in run");
@@ -461,7 +461,7 @@ fn inspect_run(run_id: &str) -> Result<()> {
         anyhow::bail!("No events found for run: {}", run_id);
     }
 
-    let events = workflow_core::events::FilesystemEventStore::read_events(&event_file)?;
+    let events = naaf_core::events::FilesystemEventStore::read_events(&event_file)?;
 
     println!("Run: {}", run_id);
     println!("Directory: {}", run_dir.display());

@@ -2,14 +2,14 @@
 //!
 //! **DEPRECATED - MIGRATION IN PROGRESS**
 //!
-//! Artifact schemas have been migrated to `workflow_schema`.
-//! LLM prompts have been migrated to `workflow_llm`.
+//! Artifact schemas have been migrated to `naaf_schema`.
+//! LLM prompts have been migrated to `naaf_llm`.
 //!
 //! # Migration Status
 //!
 //! ## Migrated
 //! - All artifact types (re-exported here for backward compatibility)
-//! - LLM prompt constants (now in `workflow_llm::prompts`)
+//! - LLM prompt constants (now in `naaf_llm::prompts`)
 //!
 //! ## Legacy Components Remaining
 //! - `WorkflowDefinition` - Legacy workflow structure
@@ -20,10 +20,10 @@
 //! # New Runtime Components
 //!
 //! For new development, use:
-//! - `workflow_core::builder::WorkflowBuilder` - Modern workflow definition
-//! - `workflow_schema` - Artifacts and state management
-//! - `workflow_builtins` - Step implementations
-//! - `workflow_llm::prompts` - LLM prompt templates
+//! - `naaf_core::builder::WorkflowBuilder` - Modern workflow definition
+//! - `naaf_schema` - Artifacts and state management
+//! - `naaf_builtins` - Step implementations
+//! - `naaf_llm::prompts` - LLM prompt templates
 //!
 //! See `LEGACY.md` and `MIGRATION.md` for migration details.
 
@@ -33,8 +33,8 @@ pub mod phase;
 pub mod workers;
 pub mod workflow;
 
-// Re-export artifacts from workflow_schema for backward compatibility
-pub use workflow_schema::{
+// Re-export artifacts from naaf_schema for backward compatibility
+pub use naaf_schema::{
     AcceptanceCriteriaSet, ConsistencyFinding, Criterion, Finding, FindingSet, FindingSeverity,
     NormalizedSpec, ProposalSkeleton, ReadinessDecision, RemediationPlan, RiskFinding, ScopeReport,
     SectionPatch,

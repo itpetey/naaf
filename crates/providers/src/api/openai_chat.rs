@@ -2,10 +2,10 @@
 
 use std::fmt::Display;
 
-use naaf_model::{GenerationResponse, ProviderCapabilities, ProviderError, Usage};
 use serde::{Deserialize, Serialize};
 
 use super::ApiSpec;
+use crate::{GenerationResponse, Message, ProviderCapabilities, ProviderError, Usage};
 
 /// OpenAI Chat Completions API specification.
 ///
@@ -85,7 +85,7 @@ impl ApiSpec for OpenAiChatCompletions {
 #[derive(Serialize)]
 pub struct OpenAiRequest {
     pub model: String,
-    pub messages: Vec<naaf_model::Message>,
+    pub messages: Vec<Message>,
     pub temperature: f32,
     pub max_tokens: u32,
 }

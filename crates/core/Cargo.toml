@@ -1,13 +1,17 @@
 [package]
-name = "naaf-openspec"
+name = "naaf-core"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
 
 [dependencies]
-naaf-llm.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
 naaf-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true

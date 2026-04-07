@@ -1,9 +1,48 @@
 //! Generic provider composition.
 
-use naaf_model::{GenerationRequest, GenerationResponse, ModelProvider, ProviderCapabilities};
+use std::error::Error;
+use std::fmt;
+
+use crate::types::{GenerationRequest, GenerationResponse, ProviderCapabilities};
 
 use crate::api::ApiSpec;
 use crate::auth::Auth;
+
+#[derive(Debug)]
+pub enum ProviderError {
+    Authentication(String),
+    RateLimited(String),
+    ModelNotFound(String),
+    InvalidRequest(String),
+    NetworkError(String),
+    ParseError(String),
+}
+
+impl fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Authentication(msg) => write!(f, "Authentication error: {}", msg),
+            Self::RateLimited(msg) => write!(f, "Rate limited: {}", msg),
+            Self::ModelNotFound(msg) => write!(f, "Model not found: {}", msg),
+            Self::InvalidRequest(msg) => write!(f, "Invalid request: {}", msg),
+            Self::NetworkError(msg) => write!(f, "Network error: {}", msg),
+            Self::ParseError(msg) => write!(f, "Parse error: {}", msg),
+        }
+    }
+}
+
+impl Error for ProviderError {}
+
+pub type Result<T> = std::result::Result<T, ProviderError>;
+
+pub trait ModelProvider: Send + Sync {
+    fn generate(
+        &self,
+        request: GenerationRequest,
+    ) -> impl Future<Output = Result<GenerationResponse>> + Send;
+
+    fn capabilities(&self) -> impl Future<Output = ProviderCapabilities> + Send;
+}
 
 /// A generic LLM provider that composes authentication and API specification.
 ///
@@ -47,7 +86,7 @@ impl<A: Auth + Send + Sync, S: ApiSpec + Send + Sync> ModelProvider for Provider
     async fn generate(
         &self,
         request: GenerationRequest,
-    ) -> Result<GenerationResponse, naaf_model::ProviderError> {
+    ) -> Result<GenerationResponse> {
         let url = format!("{}{}", self.auth.base_url(), self.api.endpoint());
 
         let response = reqwest::Client::new()
@@ -57,13 +96,13 @@ impl<A: Auth + Send + Sync, S: ApiSpec + Send + Sync> ModelProvider for Provider
             .json(&request)
             .send()
             .await
-            .map_err(|e| naaf_model::ProviderError::NetworkError(e.to_string()))?;
+            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
 
         let status = response.status();
         let body = response
             .text()
             .await
-            .map_err(|e| naaf_model::ProviderError::ParseError(e.to_string()))?;
+            .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
         if !status.is_success() {
             return Err(self.api.parse_error(status.as_u16(), &body));
@@ -106,7 +145,7 @@ mod integration {
     use super::*;
     use crate::api::OpenAiChatCompletions;
     use crate::auth::OpenAiAuth;
-    use naaf_model::Message;
+    use crate::Message;
 
     #[tokio::test]
     async fn test_provider_generate_success() {

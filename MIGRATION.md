@@ -1,18 +1,18 @@
 # Migration Guide: Legacy to New Runtime
 
-This guide helps contributors migrate from the legacy orchestrator runtime to the new workflow runtime.
+This guide helps contributors migrate legacy concepts to the workflow runtime.
 
 ## Overview
 
 The migration involves moving from:
-- **Legacy**: Artifact pipeline with transitions (`orchestrator` + `openspec` crates)
+- **Legacy**: Artifact pipeline with transitions (historically `orchestrator` + `openspec` crates)
 - **New**: State-based workflow with transformers (`workflow-core` + `workflow-schema` + `workflow-builtins`)
 
 ## What Has Been Migrated
 
 ### Artifact Schemas
 
-All domain-specific artifact types have been moved from `openspec::artifacts` to `workflow_schema::artifacts`:
+All domain-specific artifact types have been moved from `openspec::artifacts` to `naaf_schema::artifacts`:
 
 - `NormalizedSpec`
 - `ScopeReport`  
@@ -29,15 +29,15 @@ use naaf_openspec::{NormalizedSpec, ScopeReport};
 
 **New Import:**
 ```rust
-use workflow_schema::{NormalizedSpec, ScopeReport};
+use naaf_schema::{NormalizedSpec, ScopeReport};
 
 // Or for backward compatibility:
-use naaf_openspec::{NormalizedSpec, ScopeReport}; // Re-exported from workflow_schema
+use naaf_openspec::{NormalizedSpec, ScopeReport}; // Re-exported from naaf_schema
 ```
 
 ### LLM Prompts
 
-All LLM prompt templates have been moved from `openspec::workers` to `workflow_llm::prompts`:
+All LLM prompt templates have been moved from `openspec::workers` to `naaf_llm::prompts`:
 
 - `REQUEST_NORMALIZER_PROMPT`
 - `SCOPE_ANALYST_PROMPT`
@@ -54,7 +54,7 @@ use crate::workers::REQUEST_NORMALIZER_PROMPT;
 
 **New Usage:**
 ```rust
-use workflow_llm::prompts::REQUEST_NORMALIZER_PROMPT;
+use naaf_llm::prompts::REQUEST_NORMALIZER_PROMPT;
 ```
 
 ## Using LLM-Powered Steps
@@ -62,10 +62,10 @@ use workflow_llm::prompts::REQUEST_NORMALIZER_PROMPT;
 The new runtime provides LLM-powered transformer steps in `workflow-builtins`:
 
 ```rust
-use workflow_builtins::{LlmNormalizeStep, LlmScopeStep, LlmSkeletonStep, LlmAcceptanceStep};
-use workflow_core::budget::ExecCtx;
-use workflow_core::steps::Transformer;
-use workflow_llm::LlmServices;
+use naaf_builtins::{LlmNormalizeStep, LlmScopeStep, LlmSkeletonStep, LlmAcceptanceStep};
+use naaf_core::budget::ExecCtx;
+use naaf_core::steps::Transformer;
+use naaf_llm::LlmServices;
 use std::sync::Arc;
 
 // Create LLM services
@@ -88,7 +88,7 @@ let result = normalize_step.transform(&mut ctx, state)?;
 ```rust
 // Legacy: Transition-based workflow
 let workflow = openspec_happy_path();
-// Uses orchestrator execution engine
+// Historically used the orchestrator execution engine
 engine.execute_transition(&mut run, &spec).await?;
 ```
 
@@ -96,8 +96,8 @@ engine.execute_transition(&mut run, &spec).await?;
 
 ```rust
 // New: State-based workflow with transformers
-use workflow_core::builder::WorkflowBuilder;
-use workflow_core::steps::BoxedTransformer;
+use naaf_core::builder::WorkflowBuilder;
+use naaf_core::steps::BoxedTransformer;
 
 let workflow = WorkflowBuilder::new("my_workflow")
     .step("normalize", BoxedTransformer::new(normalize_step))
@@ -123,18 +123,13 @@ let workflow = WorkflowBuilder::new("my_workflow")
 
 ## What Remains Legacy
 
-The following components are still in the legacy runtime:
+The following components still reflect legacy design:
 
-1. **Orchestrator crate** (`crates/orchestrator`)
-   - Legacy execution engine (`DefaultExecutionEngine`)
-   - Artifact store and journal
-   - Run management
-
-2. **Workflow definitions** (`openspec/workflow.rs`)
+1. **Workflow definitions** (`openspec/workflow.rs`)
    - `openspec_happy_path()` - Not yet migrated  
    - `review_workflow()` - Not yet migrated
 
-3. **Worker specifications** (`openspec/workers.rs`)
+2. **Worker specifications** (`openspec/workers.rs`)
    - `WorkerSpec` structs (prompts migrated, specs remain)
 
 ## Migration Checklist
@@ -165,7 +160,7 @@ The `naaf-openspec` crate re-exports migrated types for backward compatibility:
 use naaf_openspec::NormalizedSpec;
 
 // Behind the scenes, it's now:
-pub use workflow_schema::NormalizedSpec;
+pub use naaf_schema::NormalizedSpec;
 ```
 
-New code should prefer direct imports from `workflow_schema` and `workflow_llm`.
+New code should prefer direct imports from `naaf_schema` and `naaf_llm`.

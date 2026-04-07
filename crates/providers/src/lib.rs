@@ -1,6 +1,7 @@
 //! LLM Providers
 //!
 //! This crate provides provider implementations for various LLM APIs.
+//! It also defines the shared model provider trait and request/response types.
 //! The architecture separates authentication from API wire formats:
 //!
 //! - [`Auth`] trait: Base URL and authentication headers
@@ -22,6 +23,7 @@
 pub mod api;
 pub mod auth;
 pub mod provider;
+pub mod types;
 
 #[cfg(feature = "openai")]
 pub mod openai;
@@ -31,4 +33,5 @@ pub mod opencode_go;
 
 pub use api::ApiSpec;
 pub use auth::Auth;
-pub use provider::Provider;
+pub use provider::{ModelProvider, Provider, ProviderError, Result};
+pub use types::{GenerationRequest, GenerationResponse, Message, ProviderCapabilities, Usage};

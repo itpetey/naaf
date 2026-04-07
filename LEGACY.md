@@ -4,7 +4,7 @@ This directory contains the original NAAF prototype runtime. This implementation
 
 ## Status
 
-**DEPRECATED - MIGRATION IN PROGRESS** - Artifact schemas and prompts have been migrated to the new runtime. The legacy orchestrator and workflow definitions remain for reference.
+**RETIRED** - The legacy orchestrator crate has been removed from the active workspace. Archived references remain for migration history.
 
 ## Migration Status
 
@@ -25,18 +25,17 @@ This directory contains the original NAAF prototype runtime. This implementation
 
 ### Remaining Legacy Components
 
-- **Orchestrator crate** (`crates/orchestrator`) - Legacy execution engine
-- **Workflow definitions** (`openspec/workflow.rs`) - Legacy `openspec_happy_path()` and `review_workflow()`  
+- **Workflow definitions** (`openspec/workflow.rs`) - Legacy `openspec_happy_path()` and `review_workflow()`
 - **Worker specs** (`openspec/workers.rs`) - Legacy worker specifications (prompts moved, specs remain)
 
 ## Migration Policy
 
 - **Do not build new features on this runtime.** The architecture cannot support required features like explicit routing, ambiguity handling, human escalation, fan-out/fan-in, and workflow composition.
 - **Use new runtime components:**
-  - Artifacts: Import from `workflow_schema` (re-exported via `naaf_openspec` for backward compatibility)
-  - Prompts: Import from `workflow_llm::prompts`
-  - LLM Steps: Import from `workflow_builtins::{LlmNormalizeStep, LlmScopeStep, ...}`
-- **This code is preserved for reference** and can be used for rollback if needed.
+  - Artifacts: Import from `naaf_schema` (re-exported via `naaf_openspec` for backward compatibility)
+  - Prompts: Import from `naaf_llm::prompts`
+  - LLM Steps: Import from `naaf_builtins::{LlmNormalizeStep, LlmScopeStep, ...}`
+- **Archived history is preserved for reference** and can be used for rollback if needed.
 
 ## Preservation
 

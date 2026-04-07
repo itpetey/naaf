@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use workflow_schema::{
+use naaf_schema::{
     AcceptanceCriteriaSet, ConsistencyFinding, FindingSet, NormalizedSpec, ProposalSkeleton,
     ReadinessDecision, RemediationPlan, RiskFinding, ScopeReport, SectionPatch,
 };

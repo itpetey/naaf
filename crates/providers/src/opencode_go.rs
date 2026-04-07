@@ -102,7 +102,7 @@ mod tests {
 #[cfg(test)]
 mod integration {
     use super::*;
-    use naaf_model::{GenerationRequest, Message, ModelProvider};
+    use crate::{GenerationRequest, Message, ModelProvider};
 
     #[tokio::test]
     async fn test_glm5_generate_success() {
