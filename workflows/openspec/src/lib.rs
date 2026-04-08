@@ -6,9 +6,11 @@ pub mod classify_input;
 pub mod decode;
 pub mod keys;
 pub mod kind;
+mod llm_json;
 pub mod llm_steps;
 pub mod mock_llm;
 pub mod normalize;
+pub mod package_steps;
 pub mod phase;
 pub mod plan;
 pub mod prompts;
@@ -22,6 +24,9 @@ pub mod validators;
 pub mod workers;
 pub mod workflow;
 pub mod workflows;
+
+#[cfg(test)]
+pub(crate) mod test_services;
 
 pub use accept::{AcceptStep, Acceptance};
 pub use artifacts::{
@@ -37,6 +42,12 @@ pub use kind::ArtifactKind;
 pub use llm_steps::{LlmAcceptanceStep, LlmNormalizeStep, LlmScopeStep, LlmSkeletonStep};
 pub use mock_llm::MockLlmServices;
 pub use normalize::{NormalizeStep, NormalizedInput};
+pub use package_steps::{
+    ApplySectionPatchStep, FindingsAggregatorStep, PackageLlmAcceptanceStep,
+    PackageLlmConsistencyReviewStep, PackageLlmNormalizeStep, PackageLlmRiskReviewStep,
+    PackageLlmScopeStep, PackageLlmSkeletonStep, PackageLlmTargetedRemediationStep,
+    RemediationPlanRouter, RemediationPlannerStep, ReviewFindingsRouter, WorkflowOutcomeStep,
+};
 pub use phase::Phase;
 pub use plan::{EffortLevel, Plan, PlanStep};
 pub use propose::{Proposal, ProposeStep};

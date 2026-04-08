@@ -17,7 +17,9 @@
 //! // Transform state with "normalized" artifact to get "scope" artifact
 //! ```
 
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
 use naaf_schema::adapters::{AdapterError, IntoState, TryFromState, get_typed, put_typed};
@@ -25,6 +27,7 @@ use naaf_schema::artifacts::ArtifactKey;
 use naaf_schema::state::StateEnvelope;
 use serde::{Deserialize, Serialize};
 
+use crate::llm_json::call_json;
 use crate::normalize::NormalizedInput;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -67,16 +70,18 @@ pub enum Complexity {
     High,
 }
 
-pub struct ScopeStep {
+pub struct ScopeStep<S: Services> {
     input_key: ArtifactKey,
     output_key: ArtifactKey,
+    _phantom: PhantomData<S>,
 }
 
-impl ScopeStep {
+impl<S: Services> ScopeStep<S> {
     pub fn new() -> Self {
         Self {
             input_key: ArtifactKey::new("normalized"),
             output_key: ArtifactKey::new("scope"),
+            _phantom: PhantomData,
         }
     }
 
@@ -84,109 +89,19 @@ impl ScopeStep {
         Self {
             input_key: ArtifactKey::new(input_key),
             output_key: ArtifactKey::new(output_key),
-        }
-    }
-
-    fn analyze_scope(normalized: &str) -> ScopeAnalysis {
-        let keywords = Self::extract_keywords(normalized);
-        let scope_type = Self::determine_scope_type(&keywords);
-        let estimated_complexity = Self::estimate_complexity(normalized, &keywords);
-
-        ScopeAnalysis {
-            scope_type,
-            keywords,
-            estimated_complexity,
-        }
-    }
-
-    fn extract_keywords(input: &str) -> Vec<String> {
-        let stop_words = [
-            "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has",
-            "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "must",
-            "shall", "can", "need", "to", "in", "on", "at", "for", "with", "by", "from", "as",
-            "into", "through",
-        ];
-
-        input
-            .split_whitespace()
-            .filter(|word| !stop_words.contains(&word.to_lowercase().as_str()))
-            .filter(|word| word.len() > 2)
-            .map(|s| s.to_string())
-            .collect()
-    }
-
-    fn determine_scope_type(keywords: &[String]) -> ScopeType {
-        let file_keywords = [
-            "file",
-            "create",
-            "read",
-            "write",
-            "delete",
-            "directory",
-            "folder",
-        ];
-        let code_keywords = [
-            "function",
-            "class",
-            "method",
-            "variable",
-            "refactor",
-            "implement",
-            "bug",
-            "fix",
-        ];
-        let test_keywords = ["test", "testing", "spec", "verify", "check", "assert"];
-        let doc_keywords = ["document", "documentation", "readme", "comment", "explain"];
-
-        let all_keywords_lower: Vec<String> = keywords.iter().map(|k| k.to_lowercase()).collect();
-
-        if all_keywords_lower
-            .iter()
-            .any(|k| test_keywords.contains(&k.as_str()))
-        {
-            ScopeType::Testing
-        } else if all_keywords_lower
-            .iter()
-            .any(|k| file_keywords.contains(&k.as_str()))
-        {
-            ScopeType::FileSystem
-        } else if all_keywords_lower
-            .iter()
-            .any(|k| code_keywords.contains(&k.as_str()))
-        {
-            ScopeType::CodeAnalysis
-        } else if all_keywords_lower
-            .iter()
-            .any(|k| doc_keywords.contains(&k.as_str()))
-        {
-            ScopeType::Documentation
-        } else {
-            ScopeType::General
-        }
-    }
-
-    fn estimate_complexity(input: &str, keywords: &[String]) -> Complexity {
-        let word_count = input.split_whitespace().count();
-        let keyword_count = keywords.len();
-
-        if word_count <= 5 && keyword_count <= 3 {
-            Complexity::Low
-        } else if word_count <= 15 && keyword_count <= 8 {
-            Complexity::Medium
-        } else {
-            Complexity::High
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Default for ScopeStep {
+impl<S: Services> Default for ScopeStep<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Transformer for ScopeStep {
-    type Services = DummyServices;
+impl<S: Services> Transformer for ScopeStep<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "scope"
@@ -194,7 +109,7 @@ impl Transformer for ScopeStep {
 
     fn transform(
         &self,
-        _ctx: &mut ExecCtx<Self::Services>,
+        ctx: &mut ExecCtx<Self::Services>,
         mut state: StateEnvelope,
     ) -> Result<StateEnvelope, StepError> {
         let normalized_input: NormalizedInput =
@@ -208,7 +123,14 @@ impl Transformer for ScopeStep {
                 )
             })?;
 
-        let scope_analysis = Self::analyze_scope(&normalized_input.normalized);
+        let scope_analysis: ScopeAnalysis = call_json(
+            ctx,
+            self.name(),
+            format!(
+                "Return JSON only with keys 'scope_type', 'keywords', and 'estimated_complexity'. Use one of FileSystem, CodeAnalysis, Testing, Documentation, or General for scope_type, and one of Low, Medium, or High for estimated_complexity. Analyse this request: {}",
+                normalized_input.normalized
+            ),
+        )?;
 
         put_typed(self.output_key.clone(), scope_analysis, &mut state);
 
@@ -219,7 +141,7 @@ impl Transformer for ScopeStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::DummyServices;
+    use crate::test_services::{JsonSequenceServices, NoopServices};
     use naaf_schema::artifacts::ArtifactValue;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
@@ -244,14 +166,16 @@ mod tests {
         state
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx(response: &'static str) -> ExecCtx<JsonSequenceServices> {
+        ExecCtx::new(RunId::new(), JsonSequenceServices::from_json([response]))
     }
 
-    #[test]
-    fn test_scope_analyzes_file_operations() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_scope_analyzes_file_operations() {
         let scope = ScopeStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"scope_type":"FileSystem","keywords":["create","file"],"estimated_complexity":"Low"}"#,
+        );
         let state = make_state_with_normalized("create file");
 
         let result = scope.transform(&mut ctx, state).unwrap();
@@ -259,10 +183,12 @@ mod tests {
         assert_eq!(analysis.scope_type, ScopeType::FileSystem);
     }
 
-    #[test]
-    fn test_scope_analyzes_code_operations() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_scope_analyzes_code_operations() {
         let scope = ScopeStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"scope_type":"CodeAnalysis","keywords":["implement","function"],"estimated_complexity":"Medium"}"#,
+        );
         let state = make_state_with_normalized("implement function");
 
         let result = scope.transform(&mut ctx, state).unwrap();
@@ -270,10 +196,12 @@ mod tests {
         assert_eq!(analysis.scope_type, ScopeType::CodeAnalysis);
     }
 
-    #[test]
-    fn test_scope_analyzes_test_operations() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_scope_analyzes_test_operations() {
         let scope = ScopeStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"scope_type":"Testing","keywords":["write","test"],"estimated_complexity":"Medium"}"#,
+        );
         let state = make_state_with_normalized("write test");
 
         let result = scope.transform(&mut ctx, state).unwrap();
@@ -281,17 +209,21 @@ mod tests {
         assert_eq!(analysis.scope_type, ScopeType::Testing);
     }
 
-    #[test]
-    fn test_scope_estimates_complexity() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_scope_estimates_complexity() {
         let scope = ScopeStep::new();
 
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"scope_type":"FileSystem","keywords":["create","file"],"estimated_complexity":"Low"}"#,
+        );
         let state = make_state_with_normalized("create file");
         let result = scope.transform(&mut ctx, state).unwrap();
         let analysis: ScopeAnalysis = get_typed(&ArtifactKey::new("scope"), &result).unwrap();
         assert_eq!(analysis.estimated_complexity, Complexity::Low);
 
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"scope_type":"CodeAnalysis","keywords":["implement","function","processes","data","handles","errors"],"estimated_complexity":"Medium"}"#,
+        );
         let state = make_state_with_normalized(
             "implement a function that processes data and handles errors",
         );
@@ -300,8 +232,8 @@ mod tests {
         assert_eq!(analysis.estimated_complexity, Complexity::Medium);
     }
 
-    #[test]
-    fn test_scope_custom_keys() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_scope_custom_keys() {
         let scope = ScopeStep::with_keys("norm", "result");
         let normalized_input = NormalizedInput {
             original: "Test input".to_string(),
@@ -318,10 +250,22 @@ mod tests {
             ArtifactValue::json(serde_json::json!(normalized_input)),
         );
 
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"scope_type":"General","keywords":["test","input"],"estimated_complexity":"Low"}"#,
+        );
         let result = scope.transform(&mut ctx, state).unwrap();
 
         let analysis: ScopeAnalysis = get_typed(&ArtifactKey::new("result"), &result).unwrap();
         assert!(!analysis.keywords.is_empty());
+    }
+
+    #[test]
+    fn test_scope_missing_runtime_fails() {
+        let scope = ScopeStep::new();
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
+        let state = make_state_with_normalized("create file");
+
+        let result = scope.transform(&mut ctx, state);
+        assert!(result.is_err());
     }
 }

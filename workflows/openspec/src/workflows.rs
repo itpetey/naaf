@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use naaf_core::budget::DummyServices;
+use naaf_core::budget::Services;
 use naaf_core::builder::WorkflowBuilder;
 use naaf_core::errors::Result;
 use naaf_core::graph::CompiledWorkflow;
@@ -23,28 +23,30 @@ use crate::services::LlmServices;
 use crate::terminal::{EscalationTerminal, GreetingTerminal};
 use crate::validators::DoneValidator;
 
-pub fn draft_request_workflow() -> Result<CompiledWorkflow<DummyServices>> {
-    let propose_step: BoxedTransformer<DummyServices> = BoxedTransformer::new(ProposeStep::new());
-    let classify_step: BoxedTransformer<DummyServices> =
-        BoxedTransformer::new(ClassifyInput::new());
-    let normalize_step: BoxedTransformer<DummyServices> =
-        BoxedTransformer::new(NormalizeStep::new());
-    let scope_step: BoxedTransformer<DummyServices> = BoxedTransformer::new(ScopeStep::new());
-    let plan_step: BoxedTransformer<DummyServices> = BoxedTransformer::new(PlanStep::new());
-    let accept_step: BoxedTransformer<DummyServices> = BoxedTransformer::new(AcceptStep::new());
+pub fn draft_request_workflow<S: Services + 'static>() -> Result<CompiledWorkflow<S>> {
+    let propose_step: BoxedTransformer<S> = BoxedTransformer::new(ProposeStep::<S>::new());
+    let classify_step: BoxedTransformer<S> = BoxedTransformer::new(ClassifyInput::<S>::new());
+    let normalize_step: BoxedTransformer<S> = BoxedTransformer::new(NormalizeStep::<S>::new());
+    let scope_step: BoxedTransformer<S> = BoxedTransformer::new(ScopeStep::<S>::new());
+    let plan_step: BoxedTransformer<S> = BoxedTransformer::new(PlanStep::<S>::new());
+    let accept_step: BoxedTransformer<S> = BoxedTransformer::new(AcceptStep::<S>::new());
 
-    let greeting_terminal: BoxedTransformer<DummyServices> =
-        BoxedTransformer::new(GreetingTerminal::new("Hello! How can I help you today?"));
-    let clarification_terminal: BoxedTransformer<DummyServices> =
-        BoxedTransformer::new(EscalationTerminal::new("This request needs clarification"));
-
-    let input_router: BoxedRouter<DummyServices> = BoxedRouter::new(
-        InputClassificationRouter::new("greeting_terminal", "clarification_terminal", "normalize"),
+    let greeting_terminal: BoxedTransformer<S> = BoxedTransformer::new(GreetingTerminal::<S>::new(
+        "Hello! How can I help you today?",
+    ));
+    let clarification_terminal: BoxedTransformer<S> = BoxedTransformer::new(
+        EscalationTerminal::<S>::new("This request needs clarification"),
     );
 
-    let done_validator1: BoxedValidator<DummyServices> = BoxedValidator::new(DoneValidator::new());
-    let done_validator2: BoxedValidator<DummyServices> = BoxedValidator::new(DoneValidator::new());
-    let done_validator3: BoxedValidator<DummyServices> = BoxedValidator::new(DoneValidator::new());
+    let input_router: BoxedRouter<S> = BoxedRouter::new(InputClassificationRouter::<S>::new(
+        "greeting_terminal",
+        "clarification_terminal",
+        "normalize",
+    ));
+
+    let done_validator1: BoxedValidator<S> = BoxedValidator::new(DoneValidator::<S>::new());
+    let done_validator2: BoxedValidator<S> = BoxedValidator::new(DoneValidator::<S>::new());
+    let done_validator3: BoxedValidator<S> = BoxedValidator::new(DoneValidator::<S>::new());
 
     let workflow = WorkflowBuilder::new("draft_request")
         .step("propose", propose_step)
@@ -160,8 +162,9 @@ pub fn openspec_happy_path_mock(
 mod tests {
     use super::*;
     use crate::mock_llm::MockLlmServices;
+    use crate::test_services::{JsonSequenceServices, NoopServices};
     use crate::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
-    use naaf_core::budget::{DummyServices, ExecCtx};
+    use naaf_core::budget::ExecCtx;
     use naaf_core::executor::Executor;
     use naaf_schema::artifacts::{ArtifactKey, ArtifactValue};
     use naaf_schema::execution_status::ExecutionStatus;
@@ -182,13 +185,25 @@ mod tests {
         state
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx() -> ExecCtx<NoopServices> {
+        ExecCtx::new(RunId::new(), NoopServices)
+    }
+
+    fn make_llm_ctx() -> ExecCtx<JsonSequenceServices> {
+        ExecCtx::new(
+            RunId::new(),
+            JsonSequenceServices::from_json([
+                r#"{"original":"Create a file","normalized":"create a file"}"#,
+                r#"{"scope_type":"FileSystem","keywords":["create","file"],"estimated_complexity":"Low"}"#,
+                r#"{"steps":["Validate file path","Check permissions"],"estimated_effort":"Trivial","dependencies":["filesystem access"]}"#,
+                r#"{"accepted":true,"reason":"Plan is straightforward and can proceed immediately","plan_summary":"2 steps: Validate file path → Check permissions"}"#,
+            ]),
+        )
     }
 
     #[test]
     fn test_draft_request_workflow_compiles() {
-        let workflow = draft_request_workflow();
+        let workflow = draft_request_workflow::<NoopServices>();
         if workflow.is_err() {
             let err = workflow.as_ref().err().unwrap();
             eprintln!("Workflow compilation error: {}", err);
@@ -213,7 +228,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_greeting_input() {
-        let workflow = draft_request_workflow().unwrap();
+        let workflow = draft_request_workflow::<NoopServices>().unwrap();
         let executor = Executor::new(workflow).unwrap();
         let mut ctx = make_ctx();
         let state = make_state_with_input("Hi");
@@ -239,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ambiguous_input() {
-        let workflow = draft_request_workflow().unwrap();
+        let workflow = draft_request_workflow::<NoopServices>().unwrap();
         let executor = Executor::new(workflow).unwrap();
         let mut ctx = make_ctx();
         let state = make_state_with_input("Could you help?");
@@ -262,11 +277,11 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_actionable_input() {
-        let workflow = draft_request_workflow().unwrap();
+        let workflow = draft_request_workflow::<JsonSequenceServices>().unwrap();
         let executor = Executor::new(workflow).unwrap();
-        let mut ctx = make_ctx();
+        let mut ctx = make_llm_ctx();
         let state = make_state_with_input("Create a file");
 
         let result = executor.execute(&mut ctx, state).await;
@@ -286,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unicode_input() {
-        let workflow = draft_request_workflow().unwrap();
+        let workflow = draft_request_workflow::<NoopServices>().unwrap();
         let executor = Executor::new(workflow).unwrap();
         let mut ctx = make_ctx();
         let state = make_state_with_input("你好世界");
@@ -305,7 +320,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_input() {
-        let workflow = draft_request_workflow().unwrap();
+        let workflow = draft_request_workflow::<NoopServices>().unwrap();
         let executor = Executor::new(workflow).unwrap();
         let mut ctx = make_ctx();
         let state = make_state_with_input("");
@@ -323,7 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_whitespace_only_input() {
-        let workflow = draft_request_workflow().unwrap();
+        let workflow = draft_request_workflow::<NoopServices>().unwrap();
         let executor = Executor::new(workflow).unwrap();
         let mut ctx = make_ctx();
         let state = make_state_with_input("   \t\n   ");
@@ -338,11 +353,11 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_long_input() {
-        let workflow = draft_request_workflow().unwrap();
+        let workflow = draft_request_workflow::<JsonSequenceServices>().unwrap();
         let executor = Executor::new(workflow).unwrap();
-        let mut ctx = make_ctx();
+        let mut ctx = make_llm_ctx();
         let long_input = "Create a file ".repeat(1000);
         let state = make_state_with_input(&long_input);
 
@@ -357,11 +372,11 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_mixed_case_action_verbs() {
-        let workflow = draft_request_workflow().unwrap();
+        let workflow = draft_request_workflow::<JsonSequenceServices>().unwrap();
         let executor = Executor::new(workflow).unwrap();
-        let mut ctx = make_ctx();
+        let mut ctx = make_llm_ctx();
         let state = make_state_with_input("IMPLEMENT a new feature");
 
         let result = executor.execute(&mut ctx, state).await;
@@ -377,6 +392,33 @@ mod tests {
             naaf_schema::adapters::get_typed(&ArtifactKey::new("acceptance"), &final_state)
                 .expect("Should have acceptance artifact");
         assert!(acceptance.accepted);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_actionable_input_uses_llm_service_when_available() {
+        let workflow = draft_request_workflow::<JsonSequenceServices>().unwrap();
+        let executor = Executor::new(workflow).unwrap();
+        let mut ctx = ExecCtx::new(
+            RunId::new(),
+            JsonSequenceServices::from_json([
+                r#"{"original":"Create a file","normalized":"llm-normalized"}"#,
+                r#"{"scope_type":"CodeAnalysis","keywords":["llm","file"],"estimated_complexity":"High"}"#,
+                r#"{"steps":["LLM step"],"estimated_effort":"Significant","dependencies":["provider"]}"#,
+                r#"{"accepted":true,"reason":"Approved by LLM","plan_summary":"LLM summary"}"#,
+            ]),
+        );
+        let state = make_state_with_input("Create a file");
+
+        let final_state = executor.execute(&mut ctx, state).await.unwrap();
+        let normalized: crate::normalize::NormalizedInput =
+            naaf_schema::adapters::get_typed(&ArtifactKey::new("normalized"), &final_state)
+                .unwrap();
+        let acceptance: crate::accept::Acceptance =
+            naaf_schema::adapters::get_typed(&ArtifactKey::new("acceptance"), &final_state)
+                .unwrap();
+
+        assert_eq!(normalized.normalized, "llm-normalized");
+        assert_eq!(acceptance.reason, "Approved by LLM");
     }
 
     #[tokio::test(flavor = "multi_thread")]

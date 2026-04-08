@@ -1,4 +1,6 @@
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
 use naaf_schema::adapters::{get_typed, put_typed};
@@ -11,13 +13,14 @@ use crate::classify_input::{Classification, InputClass};
 ///
 /// Produces a response for inputs that have been classified as greetings.
 /// Validates that the input is actually a greeting before responding.
-pub struct GreetingTerminal {
+pub struct GreetingTerminal<S: Services> {
     classification_key: ArtifactKey,
     response_key: ArtifactKey,
     response: String,
+    _phantom: PhantomData<S>,
 }
 
-impl GreetingTerminal {
+impl<S: Services> GreetingTerminal<S> {
     /// Creates a new GreetingTerminal with default artifact keys.
     ///
     /// Uses "classification" as the input key and "response" as the output key.
@@ -26,6 +29,7 @@ impl GreetingTerminal {
             classification_key: ArtifactKey::new("classification"),
             response_key: ArtifactKey::new("response"),
             response: response.into(),
+            _phantom: PhantomData,
         }
     }
 
@@ -39,12 +43,13 @@ impl GreetingTerminal {
             classification_key: ArtifactKey::new(classification_key),
             response_key: ArtifactKey::new(response_key),
             response: response.into(),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Transformer for GreetingTerminal {
-    type Services = DummyServices;
+impl<S: Services> Transformer for GreetingTerminal<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "greeting_terminal"
@@ -86,13 +91,14 @@ impl Transformer for GreetingTerminal {
 ///
 /// Captures escalation metadata including the classification, confidence,
 /// and a custom message for human review.
-pub struct EscalationTerminal {
+pub struct EscalationTerminal<S: Services> {
     classification_key: ArtifactKey,
     escalation_key: ArtifactKey,
     message: String,
+    _phantom: PhantomData<S>,
 }
 
-impl EscalationTerminal {
+impl<S: Services> EscalationTerminal<S> {
     /// Creates a new EscalationTerminal with default artifact keys.
     ///
     /// Uses "classification" as the input key and "escalation" as the output key.
@@ -101,6 +107,7 @@ impl EscalationTerminal {
             classification_key: ArtifactKey::new("classification"),
             escalation_key: ArtifactKey::new("escalation"),
             message: message.into(),
+            _phantom: PhantomData,
         }
     }
 
@@ -114,12 +121,13 @@ impl EscalationTerminal {
             classification_key: ArtifactKey::new(classification_key),
             escalation_key: ArtifactKey::new(escalation_key),
             message: message.into(),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Transformer for EscalationTerminal {
-    type Services = DummyServices;
+impl<S: Services> Transformer for EscalationTerminal<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "escalation_terminal"
@@ -157,7 +165,7 @@ impl Transformer for EscalationTerminal {
 mod tests {
     use super::*;
     use crate::classify_input::InputClass;
-    use naaf_core::budget::DummyServices;
+    use crate::test_services::NoopServices;
     use naaf_schema::artifacts::ArtifactValue;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
@@ -179,8 +187,8 @@ mod tests {
         state
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx() -> ExecCtx<NoopServices> {
+        ExecCtx::new(RunId::new(), NoopServices)
     }
 
     #[test]

@@ -926,6 +926,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "httpmock",
+ "naaf-providers",
  "naaf-schema",
  "serde",
  "serde_json",

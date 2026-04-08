@@ -3,7 +3,9 @@
 //! This module provides tools for classifying user input into categories
 //! (greeting, actionable, ambiguous) with confidence scores.
 
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
 use naaf_schema::adapters::{AdapterError, IntoState, TryFromState, get_typed, put_typed};
@@ -97,12 +99,13 @@ impl IntoState for Classification {
 /// let classifier = ClassifyInput::new();
 /// // Transform state with "input" artifact to get "classification" artifact
 /// ```
-pub struct ClassifyInput {
+pub struct ClassifyInput<S: Services> {
     input_key: ArtifactKey,
     output_key: ArtifactKey,
+    _phantom: PhantomData<S>,
 }
 
-impl ClassifyInput {
+impl<S: Services> ClassifyInput<S> {
     /// Creates a new ClassifyInput transformer with default artifact keys.
     ///
     /// Uses `"input"` as the input key and `"classification"` as the output key.
@@ -110,6 +113,7 @@ impl ClassifyInput {
         Self {
             input_key: ArtifactKey::new("input"),
             output_key: ArtifactKey::new("classification"),
+            _phantom: PhantomData,
         }
     }
 
@@ -118,6 +122,7 @@ impl ClassifyInput {
         Self {
             input_key: ArtifactKey::new(input_key),
             output_key: ArtifactKey::new(output_key),
+            _phantom: PhantomData,
         }
     }
 
@@ -231,14 +236,14 @@ impl ClassifyInput {
     }
 }
 
-impl Default for ClassifyInput {
+impl<S: Services> Default for ClassifyInput<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Transformer for ClassifyInput {
-    type Services = DummyServices;
+impl<S: Services> Transformer for ClassifyInput<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "classify_input"
@@ -270,7 +275,7 @@ impl Transformer for ClassifyInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::DummyServices;
+    use crate::test_services::NoopServices;
     use naaf_schema::artifacts::ArtifactValue;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
@@ -299,8 +304,8 @@ mod tests {
         )
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx() -> ExecCtx<NoopServices> {
+        ExecCtx::new(RunId::new(), NoopServices)
     }
 
     #[test]

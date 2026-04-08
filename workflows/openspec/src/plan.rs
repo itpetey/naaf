@@ -16,7 +16,9 @@
 //! // Transform state with "scope" artifact to get "plan" artifact
 //! ```
 
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
 use naaf_schema::adapters::{AdapterError, IntoState, TryFromState, get_typed, put_typed};
@@ -24,7 +26,8 @@ use naaf_schema::artifacts::ArtifactKey;
 use naaf_schema::state::StateEnvelope;
 use serde::{Deserialize, Serialize};
 
-use crate::scope::{Complexity, ScopeAnalysis, ScopeType};
+use crate::llm_json::call_json;
+use crate::scope::ScopeAnalysis;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Plan {
@@ -57,16 +60,18 @@ pub enum EffortLevel {
     Significant,
 }
 
-pub struct PlanStep {
+pub struct PlanStep<S: Services> {
     input_key: ArtifactKey,
     output_key: ArtifactKey,
+    _phantom: PhantomData<S>,
 }
 
-impl PlanStep {
+impl<S: Services> PlanStep<S> {
     pub fn new() -> Self {
         Self {
             input_key: ArtifactKey::new("scope"),
             output_key: ArtifactKey::new("plan"),
+            _phantom: PhantomData,
         }
     }
 
@@ -74,97 +79,19 @@ impl PlanStep {
         Self {
             input_key: ArtifactKey::new(input_key),
             output_key: ArtifactKey::new(output_key),
-        }
-    }
-
-    fn create_plan(scope: &ScopeAnalysis) -> Plan {
-        let steps = Self::generate_steps(scope);
-        let estimated_effort = Self::determine_effort(scope);
-        let dependencies = Self::identify_dependencies(scope);
-
-        Plan {
-            steps,
-            estimated_effort,
-            dependencies,
-        }
-    }
-
-    fn generate_steps(scope: &ScopeAnalysis) -> Vec<String> {
-        match scope.scope_type {
-            ScopeType::FileSystem => {
-                vec![
-                    "Validate file path".to_string(),
-                    "Check permissions".to_string(),
-                    "Execute file operation".to_string(),
-                    "Verify result".to_string(),
-                ]
-            }
-            ScopeType::CodeAnalysis => {
-                vec![
-                    "Parse code structure".to_string(),
-                    "Analyze dependencies".to_string(),
-                    "Identify changes needed".to_string(),
-                    "Generate modifications".to_string(),
-                    "Validate changes".to_string(),
-                ]
-            }
-            ScopeType::Testing => {
-                vec![
-                    "Identify test targets".to_string(),
-                    "Set up test environment".to_string(),
-                    "Execute tests".to_string(),
-                    "Report results".to_string(),
-                ]
-            }
-            ScopeType::Documentation => {
-                vec![
-                    "Gather source material".to_string(),
-                    "Structure documentation".to_string(),
-                    "Write content".to_string(),
-                    "Review and refine".to_string(),
-                ]
-            }
-            ScopeType::General => {
-                vec![
-                    "Understand request".to_string(),
-                    "Plan execution".to_string(),
-                    "Carry out steps".to_string(),
-                    "Verify completion".to_string(),
-                ]
-            }
-        }
-    }
-
-    fn determine_effort(scope: &ScopeAnalysis) -> EffortLevel {
-        match scope.estimated_complexity {
-            Complexity::Low => EffortLevel::Trivial,
-            Complexity::Medium => EffortLevel::Moderate,
-            Complexity::High => EffortLevel::Significant,
-        }
-    }
-
-    fn identify_dependencies(scope: &ScopeAnalysis) -> Vec<String> {
-        match scope.scope_type {
-            ScopeType::FileSystem => vec!["filesystem access".to_string()],
-            ScopeType::CodeAnalysis => vec![
-                "source code access".to_string(),
-                "language parser".to_string(),
-            ],
-            ScopeType::Testing => vec!["test framework".to_string(), "test data".to_string()],
-            ScopeType::Documentation => vec!["source context".to_string()],
-            ScopeType::General => vec![],
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Default for PlanStep {
+impl<S: Services> Default for PlanStep<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Transformer for PlanStep {
-    type Services = DummyServices;
+impl<S: Services> Transformer for PlanStep<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "plan"
@@ -172,7 +99,7 @@ impl Transformer for PlanStep {
 
     fn transform(
         &self,
-        _ctx: &mut ExecCtx<Self::Services>,
+        ctx: &mut ExecCtx<Self::Services>,
         mut state: StateEnvelope,
     ) -> Result<StateEnvelope, StepError> {
         let scope: ScopeAnalysis = get_typed(&self.input_key, &state).map_err(|e| {
@@ -185,7 +112,14 @@ impl Transformer for PlanStep {
             )
         })?;
 
-        let plan = Self::create_plan(&scope);
+        let plan: Plan = call_json(
+            ctx,
+            self.name(),
+            format!(
+                "Return JSON only with keys 'steps', 'estimated_effort', and 'dependencies'. Use one of Trivial, Moderate, or Significant for estimated_effort. Build a concise execution plan for this scope: {}",
+                serde_json::to_string(&scope).unwrap_or_default()
+            ),
+        )?;
 
         put_typed(self.output_key.clone(), plan, &mut state);
 
@@ -196,7 +130,8 @@ impl Transformer for PlanStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::DummyServices;
+    use crate::scope::{Complexity, ScopeType};
+    use crate::test_services::{JsonSequenceServices, NoopServices};
     use naaf_schema::artifacts::ArtifactValue;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
@@ -222,14 +157,16 @@ mod tests {
         state
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx(response: &'static str) -> ExecCtx<JsonSequenceServices> {
+        ExecCtx::new(RunId::new(), JsonSequenceServices::from_json([response]))
     }
 
-    #[test]
-    fn test_plan_creates_file_system_plan() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_plan_creates_file_system_plan() {
         let plan = PlanStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"steps":["Validate file path","Check permissions"],"estimated_effort":"Trivial","dependencies":["filesystem access"]}"#,
+        );
         let state = make_state_with_scope(ScopeType::FileSystem, Complexity::Low);
 
         let result = plan.transform(&mut ctx, state).unwrap();
@@ -242,10 +179,12 @@ mod tests {
         assert_eq!(plan_result.estimated_effort, EffortLevel::Trivial);
     }
 
-    #[test]
-    fn test_plan_creates_code_analysis_plan() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_plan_creates_code_analysis_plan() {
         let plan = PlanStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"steps":["Parse code structure","Analyze dependencies"],"estimated_effort":"Moderate","dependencies":["source code access"]}"#,
+        );
         let state = make_state_with_scope(ScopeType::CodeAnalysis, Complexity::Medium);
 
         let result = plan.transform(&mut ctx, state).unwrap();
@@ -258,10 +197,12 @@ mod tests {
         assert_eq!(plan_result.estimated_effort, EffortLevel::Moderate);
     }
 
-    #[test]
-    fn test_plan_creates_testing_plan() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_plan_creates_testing_plan() {
         let plan = PlanStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"steps":["Identify test targets","Execute tests"],"estimated_effort":"Significant","dependencies":["test framework"]}"#,
+        );
         let state = make_state_with_scope(ScopeType::Testing, Complexity::High);
 
         let result = plan.transform(&mut ctx, state).unwrap();
@@ -270,8 +211,8 @@ mod tests {
         assert_eq!(plan_result.estimated_effort, EffortLevel::Significant);
     }
 
-    #[test]
-    fn test_plan_custom_keys() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_plan_custom_keys() {
         let plan = PlanStep::with_keys("analysis", "result");
         let scope = ScopeAnalysis {
             scope_type: ScopeType::General,
@@ -289,10 +230,22 @@ mod tests {
             ArtifactValue::json(serde_json::json!(scope)),
         );
 
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"steps":["Do the thing"],"estimated_effort":"Trivial","dependencies":[]}"#,
+        );
         let result = plan.transform(&mut ctx, state).unwrap();
 
         let plan_result: Plan = get_typed(&ArtifactKey::new("result"), &result).unwrap();
         assert!(!plan_result.steps.is_empty());
+    }
+
+    #[test]
+    fn test_plan_missing_runtime_fails() {
+        let plan = PlanStep::new();
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
+        let state = make_state_with_scope(ScopeType::FileSystem, Complexity::Low);
+
+        let result = plan.transform(&mut ctx, state);
+        assert!(result.is_err());
     }
 }

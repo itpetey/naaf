@@ -60,7 +60,18 @@ where
     T: DeserializeOwned,
     S: Services + Send + Sync,
 {
-    let handle = Handle::current();
+    let handle = Handle::try_current().map_err(|err| {
+        StepError::transformer(step_name, format!("LLM runtime unavailable: {err}"))
+    })?;
+    if matches!(
+        handle.runtime_flavor(),
+        tokio::runtime::RuntimeFlavor::CurrentThread
+    ) {
+        return Err(StepError::transformer(
+            step_name,
+            "LLM-backed steps require a multi-thread Tokio runtime",
+        ));
+    }
     let response_bytes = tokio::task::block_in_place(|| {
         handle.block_on(async { ctx.services.call("llm", prompt.as_bytes()).await })
     })
@@ -813,7 +824,7 @@ impl<S: Services> PackageLlmAcceptanceStep<S> {
     pub fn new() -> Self {
         Self {
             spec_key: ArtifactKey::new("normalized_spec"),
-            proposal_key: ArtifactKey::new("current_proposal"),
+            proposal_key: ArtifactKey::new("proposal_skeleton"),
             output_key: ArtifactKey::new("acceptance_criteria"),
             _phantom: std::marker::PhantomData,
         }
@@ -841,9 +852,13 @@ impl<S: Services + Send + Sync> Transformer for PackageLlmAcceptanceStep<S> {
         let spec: NormalizedSpec = get_typed(&self.spec_key, &state).map_err(|err| {
             StepError::transformer(self.name(), format!("Failed to get normalized_spec: {err}"))
         })?;
-        let proposal: ProposalSkeleton = get_typed(&self.proposal_key, &state).map_err(|err| {
+        let proposal = current_proposal(&self.proposal_key, &state).map_err(|err| {
             StepError::transformer(self.name(), format!("Failed to get proposal: {err}"))
         })?;
+        let current_proposal_key = ArtifactKey::new("current_proposal");
+        if !state.artifacts.contains_key(&current_proposal_key) {
+            put_typed(current_proposal_key.clone(), proposal.clone(), &mut state);
+        }
 
         let prompt = prompts::ACCEPTANCE_CRITERIA_PROMPT
             .replace(
@@ -852,6 +867,13 @@ impl<S: Services + Send + Sync> Transformer for PackageLlmAcceptanceStep<S> {
             )
             .replace("{proposal_skeleton}", &proposal_to_json(&proposal));
         let criteria: AcceptanceCriteriaSet = call_and_decode(ctx, self.name(), prompt)?;
+        let mut final_proposal = proposal;
+        final_proposal.acceptance_criteria = criteria
+            .criteria
+            .iter()
+            .map(|criterion| criterion.statement.clone())
+            .collect();
+        put_typed(current_proposal_key, final_proposal, &mut state);
         put_typed(self.output_key.clone(), criteria, &mut state);
         Ok(state)
     }
@@ -906,7 +928,7 @@ impl<S: Services> Transformer for WorkflowOutcomeStep<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::DummyServices;
+    use crate::test_services::{JsonSequenceServices, NoopServices};
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
     use naaf_schema::state::{RunId, StateEnvelope, StateId};
@@ -950,7 +972,7 @@ mod tests {
             ])),
         );
 
-        let mut ctx = ExecCtx::new(RunId::new(), DummyServices);
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
         let result = FindingsAggregatorStep::new()
             .transform(&mut ctx, state)
             .unwrap();
@@ -989,7 +1011,7 @@ mod tests {
             })),
         );
 
-        let mut ctx = ExecCtx::new(RunId::new(), DummyServices);
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
         let result = ApplySectionPatchStep::new()
             .transform(&mut ctx, state)
             .unwrap();
@@ -1010,10 +1032,86 @@ mod tests {
             })),
         );
 
-        let mut ctx = ExecCtx::new(RunId::new(), DummyServices);
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
         let decision = ReviewFindingsRouter::new("accept", "remediate")
             .route(&mut ctx, &state)
             .unwrap();
         assert_eq!(decision, RouteDecision::next("remediate"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn acceptance_updates_current_proposal_with_generated_criteria() {
+        let mut state = make_state();
+        put_typed(
+            ArtifactKey::new("normalized_spec"),
+            NormalizedSpec {
+                problem_statement: "Problem".to_string(),
+                desired_outcome: "Outcome".to_string(),
+                explicit_constraints: vec![],
+                implied_constraints: vec![],
+                non_goals: vec![],
+                open_questions: vec![],
+                ambiguity_flags: vec![],
+                assumptions: vec![],
+            },
+            &mut state,
+        );
+        put_typed(
+            ArtifactKey::new("proposal_skeleton"),
+            ProposalSkeleton {
+                title: "Title".to_string(),
+                summary: "Summary".to_string(),
+                motivation: "Motivation".to_string(),
+                goals: vec![],
+                non_goals: vec![],
+                proposed_design: "Design".to_string(),
+                alternatives_considered: "Alternative".to_string(),
+                risks: "Risk".to_string(),
+                rollout_plan: "Rollout".to_string(),
+                open_questions: vec![],
+                acceptance_criteria: vec![],
+                todo_markers: vec![],
+            },
+            &mut state,
+        );
+
+        let mut ctx = ExecCtx::new(
+            RunId::new(),
+            JsonSequenceServices::from_json([
+                r#"{"criteria":[{"id":"AC-1","statement":"It works","traceability":[],"measurability":"observable"}],"gaps":[]}"#,
+            ]),
+        );
+
+        let result = PackageLlmAcceptanceStep::new()
+            .transform(&mut ctx, state)
+            .unwrap();
+
+        let proposal: ProposalSkeleton =
+            get_typed(&ArtifactKey::new("current_proposal"), &result).unwrap();
+        let acceptance: AcceptanceCriteriaSet =
+            get_typed(&ArtifactKey::new("acceptance_criteria"), &result).unwrap();
+
+        assert_eq!(proposal.acceptance_criteria, vec!["It works"]);
+        assert_eq!(acceptance.criteria.len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn package_llm_steps_fail_cleanly_on_current_thread_runtime() {
+        let mut state = make_state();
+        put_typed(
+            ArtifactKey::new("input"),
+            "draft this change".to_string(),
+            &mut state,
+        );
+
+        let mut ctx = ExecCtx::new(
+            RunId::new(),
+            JsonSequenceServices::from_json([
+                r#"{"problem_statement":"x","desired_outcome":"y","explicit_constraints":[],"implied_constraints":[],"non_goals":[],"open_questions":[],"ambiguity_flags":[],"assumptions":[]}"#,
+            ]),
+        );
+
+        let result = PackageLlmNormalizeStep::new().transform(&mut ctx, state);
+        assert!(result.is_err());
     }
 }

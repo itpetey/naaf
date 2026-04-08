@@ -10,9 +10,7 @@ execution_guidance = "This workflow uses AI to draft, review, and refine your Op
 primary_outputs = ["current_proposal", "proposal_skeleton", "acceptance_criteria"]
 
 [runtime.llm]
-required = true
-model = "openai-gpt4"
-providers = []
+providers = ["openai", "opencode-go"]
 
 [[nodes]]
 id = "propose"
@@ -87,7 +85,7 @@ step = "openspec.package_remediation_planner"
 id = "remediation_decision"
 kind = "router"
 step = "openspec.package_remediation_plan_router"
-config = { remediate_route = "apply_patch", escalation_route = "escalate" }
+config = { remediate_route = "generate_patch", escalation_route = "escalate" }
 
 [[nodes]]
 id = "generate_patch"
@@ -207,7 +205,7 @@ to = "apply_patch"
 
 [[edges]]
 from = "apply_patch"
-to = "skeleton"
+to = "acceptance"
 
 [[edges]]
 from = "escalate"

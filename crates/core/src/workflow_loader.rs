@@ -136,6 +136,9 @@ id = "demo"
 name = "Demo"
 entry = "start"
 
+[runtime.llm]
+providers = ["openai"]
+
 [[nodes]]
 id = "start"
 kind = "transformer"
@@ -162,6 +165,9 @@ id = "valid"
 name = "Valid"
 entry = "start"
 
+[runtime.llm]
+providers = ["openai"]
+
 [[nodes]]
 id = "start"
 kind = "transformer"
@@ -186,6 +192,9 @@ step = "demo.step"
 id = "demo"
 name = "Demo"
 entry = "start"
+
+[runtime.llm]
+providers = ["openai"]
 
 [[nodes]]
 id = "start"

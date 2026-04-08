@@ -16,7 +16,9 @@
 //! // Transform state with "plan" artifact to get "acceptance" artifact
 //! ```
 
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
 use naaf_schema::adapters::{AdapterError, IntoState, TryFromState, get_typed, put_typed};
@@ -24,7 +26,8 @@ use naaf_schema::artifacts::ArtifactKey;
 use naaf_schema::state::StateEnvelope;
 use serde::{Deserialize, Serialize};
 
-use crate::plan::{EffortLevel, Plan};
+use crate::llm_json::call_json;
+use crate::plan::Plan;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Acceptance {
@@ -50,16 +53,18 @@ impl IntoState for Acceptance {
     }
 }
 
-pub struct AcceptStep {
+pub struct AcceptStep<S: Services> {
     input_key: ArtifactKey,
     output_key: ArtifactKey,
+    _phantom: PhantomData<S>,
 }
 
-impl AcceptStep {
+impl<S: Services> AcceptStep<S> {
     pub fn new() -> Self {
         Self {
             input_key: ArtifactKey::new("plan"),
             output_key: ArtifactKey::new("acceptance"),
+            _phantom: PhantomData,
         }
     }
 
@@ -67,46 +72,19 @@ impl AcceptStep {
         Self {
             input_key: ArtifactKey::new(input_key),
             output_key: ArtifactKey::new(output_key),
+            _phantom: PhantomData,
         }
-    }
-
-    fn validate_plan(plan: &Plan) -> Acceptance {
-        let accepted = true;
-        let reason = Self::determine_acceptance_reason(plan);
-        let plan_summary = Self::summarize_plan(plan);
-
-        Acceptance {
-            accepted,
-            reason,
-            plan_summary,
-        }
-    }
-
-    fn determine_acceptance_reason(plan: &Plan) -> String {
-        match plan.estimated_effort {
-            EffortLevel::Trivial => {
-                "Plan is straightforward and can proceed immediately".to_string()
-            }
-            EffortLevel::Moderate => "Plan is clear and reasonable to execute".to_string(),
-            EffortLevel::Significant => {
-                "Plan requires significant effort but is achievable".to_string()
-            }
-        }
-    }
-
-    fn summarize_plan(plan: &Plan) -> String {
-        format!("{} steps: {}", plan.steps.len(), plan.steps.join(" → "))
     }
 }
 
-impl Default for AcceptStep {
+impl<S: Services> Default for AcceptStep<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Transformer for AcceptStep {
-    type Services = DummyServices;
+impl<S: Services> Transformer for AcceptStep<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "accept"
@@ -114,7 +92,7 @@ impl Transformer for AcceptStep {
 
     fn transform(
         &self,
-        _ctx: &mut ExecCtx<Self::Services>,
+        ctx: &mut ExecCtx<Self::Services>,
         mut state: StateEnvelope,
     ) -> Result<StateEnvelope, StepError> {
         let plan: Plan = get_typed(&self.input_key, &state).map_err(|e| {
@@ -127,7 +105,14 @@ impl Transformer for AcceptStep {
             )
         })?;
 
-        let acceptance = Self::validate_plan(&plan);
+        let acceptance: Acceptance = call_json(
+            ctx,
+            self.name(),
+            format!(
+                "Return JSON only with keys 'accepted', 'reason', and 'plan_summary'. Review this plan: {}",
+                serde_json::to_string(&plan).unwrap_or_default()
+            ),
+        )?;
 
         put_typed(self.output_key.clone(), acceptance, &mut state);
 
@@ -138,7 +123,8 @@ impl Transformer for AcceptStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::DummyServices;
+    use crate::plan::EffortLevel;
+    use crate::test_services::{JsonSequenceServices, NoopServices};
     use naaf_schema::artifacts::ArtifactValue;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
@@ -164,14 +150,16 @@ mod tests {
         state
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx(response: &'static str) -> ExecCtx<JsonSequenceServices> {
+        ExecCtx::new(RunId::new(), JsonSequenceServices::from_json([response]))
     }
 
-    #[test]
-    fn test_accept_validates_plan() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_accept_validates_plan() {
         let accept = AcceptStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"accepted":true,"reason":"Plan is straightforward and can proceed immediately","plan_summary":"2 steps: Step 1 → Step 2"}"#,
+        );
         let state = make_state_with_plan(EffortLevel::Trivial);
 
         let result = accept.transform(&mut ctx, state).unwrap();
@@ -180,10 +168,12 @@ mod tests {
         assert!(acceptance.reason.contains("straightforward"));
     }
 
-    #[test]
-    fn test_accept_moderate_effort() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_accept_moderate_effort() {
         let accept = AcceptStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"accepted":true,"reason":"Plan is clear and reasonable to execute","plan_summary":"2 steps: Step 1 → Step 2"}"#,
+        );
         let state = make_state_with_plan(EffortLevel::Moderate);
 
         let result = accept.transform(&mut ctx, state).unwrap();
@@ -192,10 +182,12 @@ mod tests {
         assert!(acceptance.reason.contains("clear"));
     }
 
-    #[test]
-    fn test_accept_significant_effort() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_accept_significant_effort() {
         let accept = AcceptStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"accepted":true,"reason":"Plan requires significant effort but is achievable","plan_summary":"2 steps: Step 1 → Step 2"}"#,
+        );
         let state = make_state_with_plan(EffortLevel::Significant);
 
         let result = accept.transform(&mut ctx, state).unwrap();
@@ -204,8 +196,8 @@ mod tests {
         assert!(acceptance.reason.contains("significant effort"));
     }
 
-    #[test]
-    fn test_accept_custom_keys() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_accept_custom_keys() {
         let accept = AcceptStep::with_keys("myplan", "result");
         let plan = Plan {
             steps: vec!["Test".to_string()],
@@ -223,21 +215,35 @@ mod tests {
             ArtifactValue::json(serde_json::json!(plan)),
         );
 
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"accepted":true,"reason":"Plan is straightforward and can proceed immediately","plan_summary":"1 steps: Test"}"#,
+        );
         let result = accept.transform(&mut ctx, state).unwrap();
 
         let acceptance: Acceptance = get_typed(&ArtifactKey::new("result"), &result).unwrap();
         assert!(acceptance.accepted);
     }
 
-    #[test]
-    fn test_acceptance_includes_plan_summary() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_acceptance_includes_plan_summary() {
         let accept = AcceptStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(
+            r#"{"accepted":true,"reason":"Plan is straightforward and can proceed immediately","plan_summary":"2 steps: Step 1 → Step 2"}"#,
+        );
         let state = make_state_with_plan(EffortLevel::Trivial);
 
         let result = accept.transform(&mut ctx, state).unwrap();
         let acceptance: Acceptance = get_typed(&ArtifactKey::new("acceptance"), &result).unwrap();
         assert!(acceptance.plan_summary.contains("2 steps"));
+    }
+
+    #[test]
+    fn test_accept_missing_runtime_fails() {
+        let accept = AcceptStep::new();
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
+        let state = make_state_with_plan(EffortLevel::Trivial);
+
+        let result = accept.transform(&mut ctx, state);
+        assert!(result.is_err());
     }
 }

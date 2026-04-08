@@ -105,9 +105,10 @@ pub struct WorkflowPackageRuntime {
 
 impl WorkflowPackageRuntime {
     fn validate(&self) -> Result<()> {
-        if let Some(llm) = &self.llm {
-            llm.validate()?;
-        }
+        let llm = self.llm.as_ref().ok_or_else(|| {
+            ValidationError::state("workflow runtime.llm configuration is required")
+        })?;
+        llm.validate()?;
 
         let mut input_ids = HashSet::new();
         for input in &self.inputs {
@@ -127,8 +128,6 @@ impl WorkflowPackageRuntime {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WorkflowPackageLlmRuntime {
-    #[serde(default)]
-    pub required: bool,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default)]
@@ -137,13 +136,7 @@ pub struct WorkflowPackageLlmRuntime {
 
 impl WorkflowPackageLlmRuntime {
     fn validate(&self) -> Result<()> {
-        // Either providers OR model must be specified for required=true workflows
-        // With no providers, host infers provider from model or user-configured API key
-        // With no model, host uses default provider
-        if self.required
-            && self.providers.is_empty()
-            && (self.model.is_empty() || self.model == "default")
-        {
+        if self.providers.is_empty() && (self.model.is_empty() || self.model == "default") {
             return Err(ValidationError::state(
                 "workflow runtime.llm requires provider or model to be specified",
             )
@@ -152,13 +145,14 @@ impl WorkflowPackageLlmRuntime {
 
         let mut providers = HashSet::new();
         for provider in &self.providers {
-            if provider.trim().is_empty() {
+            let provider = canonical_provider_name(provider)?;
+            if provider.is_empty() {
                 return Err(ValidationError::state(
                     "workflow runtime.llm providers must not be empty",
                 )
                 .into());
             }
-            if !providers.insert(provider.as_str()) {
+            if !providers.insert(provider) {
                 return Err(ValidationError::state(format!(
                     "duplicate workflow runtime provider '{}'",
                     provider
@@ -167,7 +161,46 @@ impl WorkflowPackageLlmRuntime {
             }
         }
 
+        if !self.model.is_empty() && self.model != "default" {
+            let model_provider = provider_for_model(&self.model)?;
+            if !providers.is_empty() && !providers.contains(model_provider) {
+                return Err(ValidationError::state(format!(
+                    "workflow runtime model '{}' is not compatible with configured providers",
+                    self.model
+                ))
+                .into());
+            }
+        }
+
         Ok(())
+    }
+}
+
+fn canonical_provider_name(provider: &str) -> Result<&'static str> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "openai" => Ok("openai"),
+        "opencode-go" | "opencode_go" | "opencode" => Ok("opencode-go"),
+        "" => Ok(""),
+        other => Err(ValidationError::state(format!(
+            "unsupported workflow runtime provider '{}'",
+            other
+        ))
+        .into()),
+    }
+}
+
+fn provider_for_model(model: &str) -> Result<&'static str> {
+    match model.trim().to_ascii_lowercase().as_str() {
+        "gpt-5" | "gpt-54" => Ok("openai"),
+        "glm-5" | "kimi-k2.5" | "minimax-m2.5" | "minimax-m2.7" => Ok("opencode-go"),
+        "" | "default" => {
+            Err(ValidationError::state("workflow runtime.llm model must not be empty").into())
+        }
+        other => Err(ValidationError::state(format!(
+            "unsupported workflow runtime model '{}'",
+            other
+        ))
+        .into()),
     }
 }
 
@@ -360,7 +393,7 @@ summary = "Structured request drafting"
 entry = "propose"
 
 [runtime.llm]
-providers = ["mock"]
+providers = ["openai"]
 
 [[runtime.inputs]]
 id = "repository_context"
@@ -391,7 +424,7 @@ to = "done"
         let package = WorkflowPackage::from_toml_str(manifest).unwrap();
         assert_eq!(package.id, "draft-request");
         assert_eq!(package.ui.input_artifact, "input");
-        assert_eq!(package.runtime.llm.unwrap().providers, vec!["mock"]);
+        assert_eq!(package.runtime.llm.unwrap().providers, vec!["openai"]);
         assert_eq!(package.runtime.inputs.len(), 1);
         assert_eq!(package.ui.primary_outputs, vec!["proposal", "acceptance"]);
     }
@@ -402,6 +435,9 @@ to = "done"
 id = "broken"
 name = "Broken"
 entry = "missing"
+
+[runtime.llm]
+providers = ["openai"]
 
 [[nodes]]
 id = "propose"
@@ -421,7 +457,6 @@ name = "Broken"
 entry = "start"
 
 [runtime.llm]
-required = true
 providers = []
 
 [[nodes]]
@@ -440,6 +475,9 @@ step = "demo.step"
 id = "broken"
 name = "Broken"
 entry = "start"
+
+[runtime.llm]
+providers = ["openai"]
 
 [ui]
 primary_outputs = ["result", "result"]
@@ -465,6 +503,9 @@ id = "broken"
 name = "Broken"
 entry = "start"
 
+[runtime.llm]
+providers = ["openai"]
+
 [[nodes]]
 id = "start"
 kind = "router"
@@ -483,5 +524,75 @@ kind = "join"
 
         let error = WorkflowPackage::from_toml_str(manifest).unwrap_err();
         assert!(error.to_string().contains("must target a reducer node"));
+    }
+
+    #[test]
+    fn rejects_missing_runtime_llm() {
+        let manifest = r#"
+id = "broken"
+name = "Broken"
+entry = "start"
+
+[[nodes]]
+id = "start"
+kind = "transformer"
+step = "demo.step"
+"#;
+
+        let error = WorkflowPackage::from_toml_str(manifest).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("runtime.llm configuration is required")
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_runtime_provider() {
+        let manifest = r#"
+id = "broken"
+name = "Broken"
+entry = "start"
+
+[runtime.llm]
+providers = ["made-up-provider"]
+
+[[nodes]]
+id = "start"
+kind = "transformer"
+step = "demo.step"
+"#;
+
+        let error = WorkflowPackage::from_toml_str(manifest).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported workflow runtime provider")
+        );
+    }
+
+    #[test]
+    fn rejects_model_provider_mismatch() {
+        let manifest = r#"
+id = "broken"
+name = "Broken"
+entry = "start"
+
+[runtime.llm]
+model = "gpt-5"
+providers = ["opencode-go"]
+
+[[nodes]]
+id = "start"
+kind = "transformer"
+step = "demo.step"
+"#;
+
+        let error = WorkflowPackage::from_toml_str(manifest).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("not compatible with configured providers")
+        );
     }
 }

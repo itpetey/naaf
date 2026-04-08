@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use naaf_core::budget::{DummyServices, ExecCtx};
+use naaf_core::budget::{ExecCtx, LlmServiceConfig, ProviderType, Services};
 use naaf_core::events::{ExecutionEvent, TraceSink};
 use naaf_core::executor::Executor;
 use naaf_core::state_store::StateStore;
@@ -41,6 +41,20 @@ struct Args {
         help = "Override the run storage directory"
     )]
     runs_dir: Option<PathBuf>,
+    #[arg(long, env = "OPENAI_API_KEY", help = "OpenAI API key for LLM calls")]
+    openai_api_key: Option<String>,
+    #[arg(
+        long,
+        env = "OPENCODE_API_KEY",
+        help = "OpenCode Go API key for LLM calls"
+    )]
+    opencode_api_key: Option<String>,
+    #[arg(long, help = "LLM provider type (openai, opencode-go)")]
+    provider: Option<String>,
+    #[arg(long, help = "LLM model to use (e.g., gpt-5, glm-5)")]
+    model: Option<String>,
+    #[arg(long, help = "Custom LLM endpoint URL")]
+    endpoint: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -49,6 +63,245 @@ struct Args {
 struct HostPaths {
     workflows_dir: PathBuf,
     runs_dir: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct RecordedLlmConfig {
+    provider: String,
+    model: String,
+    endpoint: Option<String>,
+}
+
+impl RecordedLlmConfig {
+    fn from_resolved(config: &ResolvedLlmConfig) -> Self {
+        Self {
+            provider: provider_name(config.provider).to_string(),
+            model: config.model.clone(),
+            endpoint: config.endpoint.clone(),
+        }
+    }
+
+    fn into_host_config(self, base: &HostLlmConfig) -> Result<HostLlmConfig> {
+        Ok(HostLlmConfig {
+            openai_api_key: base.openai_api_key.clone(),
+            opencode_api_key: base.opencode_api_key.clone(),
+            provider: Some(parse_provider_type(&self.provider)?),
+            model: Some(self.model),
+            endpoint: self.endpoint,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct HostLlmConfig {
+    openai_api_key: Option<String>,
+    opencode_api_key: Option<String>,
+    provider: Option<ProviderType>,
+    model: Option<String>,
+    endpoint: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedLlmConfig {
+    provider: ProviderType,
+    model: String,
+    endpoint: Option<String>,
+    service_config: LlmServiceConfig,
+}
+
+impl HostLlmConfig {
+    fn from_args(args: &Args) -> Result<Self> {
+        Ok(Self {
+            openai_api_key: args.openai_api_key.clone(),
+            opencode_api_key: args.opencode_api_key.clone(),
+            provider: args
+                .provider
+                .as_deref()
+                .map(parse_provider_type)
+                .transpose()?,
+            model: args.model.clone(),
+            endpoint: args.endpoint.clone(),
+        })
+    }
+
+    fn service_config_for(&self, package: &DiscoveredWorkflowPackage) -> Result<ResolvedLlmConfig> {
+        let runtime_llm = package.package.runtime.llm.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Workflow '{}' is missing runtime.llm configuration",
+                package.package.id
+            )
+        })?;
+        let allowed_providers = parse_allowed_providers(&runtime_llm.providers)?;
+        let model = self.model.clone().or_else(|| {
+            if runtime_llm.model.is_empty() || runtime_llm.model == "default" {
+                None
+            } else {
+                Some(runtime_llm.model.clone())
+            }
+        });
+
+        let provider = match self.provider {
+            Some(provider) => provider,
+            None => infer_provider_type(&allowed_providers, model.as_deref(), self)?,
+        };
+
+        if !allowed_providers.is_empty() && !allowed_providers.contains(&provider) {
+            return Err(anyhow::anyhow!(
+                "Workflow '{}' does not allow provider '{}'",
+                package.package.id,
+                provider_name(provider)
+            ));
+        }
+
+        let model = match model {
+            Some(model) => {
+                validate_model_for_provider(provider, &model)?;
+                model
+            }
+            None => default_model_for_provider(provider).to_string(),
+        };
+
+        let api_key = match provider {
+            ProviderType::OpenAi => self.openai_api_key.clone(),
+            ProviderType::OpenCodeGo => self.opencode_api_key.clone(),
+        }
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "No API key configured for provider '{}'. Use {} or the matching environment variable.",
+                provider_name(provider),
+                match provider {
+                    ProviderType::OpenAi => "--openai-api-key",
+                    ProviderType::OpenCodeGo => "--opencode-api-key",
+                }
+            )
+        })?;
+
+        let mut config = LlmServiceConfig::new()
+            .provider(provider)
+            .with_api_key(api_key);
+        config = config.with_model(model.clone());
+        if let Some(endpoint) = &self.endpoint {
+            config = config.with_endpoint(endpoint.clone());
+        }
+
+        Ok(ResolvedLlmConfig {
+            provider,
+            model,
+            endpoint: self.endpoint.clone(),
+            service_config: config,
+        })
+    }
+}
+
+fn default_model_for_provider(provider: ProviderType) -> &'static str {
+    match provider {
+        ProviderType::OpenAi => "gpt-5",
+        ProviderType::OpenCodeGo => "glm-5",
+    }
+}
+
+fn provider_name(provider: ProviderType) -> &'static str {
+    match provider {
+        ProviderType::OpenAi => "openai",
+        ProviderType::OpenCodeGo => "opencode-go",
+    }
+}
+
+fn parse_allowed_providers(providers: &[String]) -> Result<Vec<ProviderType>> {
+    providers
+        .iter()
+        .map(|provider| parse_provider_type(provider))
+        .collect()
+}
+
+fn parse_provider_type(value: &str) -> Result<ProviderType> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "openai" => Ok(ProviderType::OpenAi),
+        "opencode-go" | "opencode_go" | "opencode" => Ok(ProviderType::OpenCodeGo),
+        other => Err(anyhow::anyhow!(
+            "Unsupported provider '{}'. Use 'openai' or 'opencode-go'",
+            other
+        )),
+    }
+}
+
+fn infer_provider_type(
+    allowed_providers: &[ProviderType],
+    model: Option<&str>,
+    config: &HostLlmConfig,
+) -> Result<ProviderType> {
+    if let Some(model) = model {
+        let provider = provider_for_model(model)?;
+        if !allowed_providers.is_empty() && !allowed_providers.contains(&provider) {
+            return Err(anyhow::anyhow!(
+                "Model '{}' is not compatible with the workflow's allowed providers",
+                model
+            ));
+        }
+        return Ok(provider);
+    }
+
+    let mut candidates = Vec::new();
+    for provider in [ProviderType::OpenAi, ProviderType::OpenCodeGo] {
+        if !allowed_providers.is_empty() && !allowed_providers.contains(&provider) {
+            continue;
+        }
+        let configured = match provider {
+            ProviderType::OpenAi => config.openai_api_key.is_some(),
+            ProviderType::OpenCodeGo => config.opencode_api_key.is_some(),
+        };
+        if configured {
+            candidates.push(provider);
+        }
+    }
+
+    match candidates.as_slice() {
+        [provider] => Ok(*provider),
+        [] if allowed_providers.len() == 1 => Ok(allowed_providers[0]),
+        [] => Err(anyhow::anyhow!(
+            "Unable to determine LLM provider. Configure an API key, explicit provider, or workflow model."
+        )),
+        _ => Err(anyhow::anyhow!(
+            "Multiple LLM providers are configured. Use --provider to select one explicitly."
+        )),
+    }
+}
+
+fn provider_for_model(model: &str) -> Result<ProviderType> {
+    let model = model.trim().to_ascii_lowercase();
+    if model.starts_with("gpt-") {
+        return Ok(ProviderType::OpenAi);
+    }
+    if model.starts_with("glm-") || model.starts_with("kimi-") || model.starts_with("minimax-") {
+        return Ok(ProviderType::OpenCodeGo);
+    }
+
+    Err(anyhow::anyhow!(
+        "Unable to infer provider for model '{}'. Use --provider to specify one.",
+        model
+    ))
+}
+
+fn validate_model_for_provider(provider: ProviderType, model: &str) -> Result<()> {
+    let is_supported = match provider {
+        ProviderType::OpenAi => matches!(model, "gpt-5" | "gpt-54"),
+        ProviderType::OpenCodeGo => {
+            matches!(
+                model,
+                "glm-5" | "kimi-k2.5" | "minimax-m2.5" | "minimax-m2.7"
+            )
+        }
+    };
+
+    if !is_supported {
+        return Err(anyhow::anyhow!(
+            "Model '{}' is not supported by provider '{}'.",
+            model,
+            provider_name(provider)
+        ));
+    }
+
+    Ok(())
 }
 
 #[derive(Parser, Debug)]
@@ -118,6 +371,8 @@ impl naaf_core::events::TraceSink for HostTraceSink {
 struct RunRecord {
     workflow: String,
     input: String,
+    #[serde(default)]
+    llm: Option<RecordedLlmConfig>,
 }
 
 struct RunSummary {
@@ -225,14 +480,17 @@ fn search_ancestors_for_workflows(start: &Path) -> Option<PathBuf> {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let paths = resolve_host_paths(&args)?;
+    let llm_config = HostLlmConfig::from_args(&args)?;
 
     match args.command {
         Command::Workflows => list_workflows(&paths)?,
         Command::Show { workflow } => show_workflow(&paths, &workflow)?,
-        Command::Run { workflow, input } => run_workflow_host(&paths, &workflow, input).await?,
+        Command::Run { workflow, input } => {
+            run_workflow_host(&paths, &llm_config, &workflow, input, true).await?
+        }
         Command::Runs => list_runs(&paths)?,
         Command::Inspect { run_id } => inspect_run(&paths, &run_id)?,
-        Command::Replay { run_id } => replay_run(&paths, &run_id).await?,
+        Command::Replay { run_id } => replay_run(&paths, &llm_config, &run_id).await?,
     }
 
     Ok(())
@@ -240,35 +498,31 @@ async fn main() -> Result<()> {
 
 async fn run_workflow_host(
     paths: &HostPaths,
+    llm_config: &HostLlmConfig,
     workflow_id: &str,
     input: Option<String>,
+    allow_clarification: bool,
 ) -> Result<()> {
     let packages = load_workflow_packages(paths)?;
     let package = find_workflow(&packages, workflow_id)?;
 
     if let Some(llm) = &package.package.runtime.llm {
-        if llm.required {
-            if llm.providers.is_empty() {
-                println!(
-                    "Workflow '{}' requires LLM but has no declared providers.",
-                    workflow_id
-                );
-                println!(
-                    "The host will attempt to use your configured API key or OPENAI_API_KEY environment variable."
-                );
-            } else {
-                println!(
-                    "Workflow '{}' requires LLM provider(s): {}",
-                    workflow_id,
-                    llm.providers.join(", ")
-                );
-            }
-            if !llm.model.is_empty() && llm.model != "default" {
-                println!("Model: {}", llm.model);
-            }
-            println!();
-            let _ = prompt_for_input("Press Enter to continue (Ctrl+C to abort)...")?;
+        if llm.providers.is_empty() {
+            println!(
+                "Workflow '{}' is LLM-backed but has no declared providers.",
+                workflow_id
+            );
+        } else {
+            println!(
+                "Workflow '{}' uses LLM provider(s): {}",
+                workflow_id,
+                llm.providers.join(", ")
+            );
         }
+        if !llm.model.is_empty() && llm.model != "default" {
+            println!("Model: {}", llm.model);
+        }
+        println!();
     }
 
     let input = match input {
@@ -277,8 +531,9 @@ async fn run_workflow_host(
             .ok_or_else(|| anyhow::anyhow!("No input provided"))?,
     };
 
-    let interactive_clarification = io::stdin().is_terminal() && io::stdout().is_terminal();
-    let initial_run = run_once(paths, package, &input).await?;
+    let interactive_clarification =
+        allow_clarification && io::stdin().is_terminal() && io::stdout().is_terminal();
+    let initial_run = run_once(paths, llm_config, package, &input).await?;
     if !interactive_clarification || !initial_run.ambiguous_escalation {
         return Ok(());
     }
@@ -293,7 +548,7 @@ async fn run_workflow_host(
 
     let clarified_input = compose_clarified_input(&input, &clarification);
     println!("\nStarting clarified follow-up run...");
-    let follow_up_run = run_once(paths, package, &clarified_input).await?;
+    let follow_up_run = run_once(paths, llm_config, package, &clarified_input).await?;
 
     println!("\nOriginal ambiguous run: {}", initial_run.run_id);
     println!("Clarified follow-up run: {}", follow_up_run.run_id);
@@ -303,8 +558,28 @@ async fn run_workflow_host(
 
 async fn run_once(
     paths: &HostPaths,
+    llm_config: &HostLlmConfig,
     package: &DiscoveredWorkflowPackage,
     input: &str,
+) -> Result<RunSummary> {
+    let resolved = llm_config.service_config_for(package)?;
+    let services = naaf_core::budget::LlmService::from_config(resolved.service_config.clone())?;
+    run_once_with_services(
+        paths,
+        package,
+        input,
+        RecordedLlmConfig::from_resolved(&resolved),
+        services,
+    )
+    .await
+}
+
+async fn run_once_with_services<S: Services + 'static>(
+    paths: &HostPaths,
+    package: &DiscoveredWorkflowPackage,
+    input: &str,
+    recorded_llm: RecordedLlmConfig,
+    services: S,
 ) -> Result<RunSummary> {
     std::fs::create_dir_all(&paths.runs_dir)?;
 
@@ -317,6 +592,7 @@ async fn run_once(
         &RunRecord {
             workflow: package.package.id.clone(),
             input: input.to_string(),
+            llm: Some(recorded_llm),
         },
     )?;
 
@@ -340,7 +616,7 @@ async fn run_once(
     let input_artifact = ArtifactKey::new(&package.package.ui.input_artifact);
     let initial_state = make_initial_state(run_id, input_artifact, input);
 
-    let mut registry = WorkflowRegistry::<DummyServices>::new();
+    let mut registry = WorkflowRegistry::<S>::new();
     naaf_openspec::register_legacy_steps(&mut registry);
     naaf_openspec::register_workflow_steps(&mut registry);
 
@@ -370,7 +646,7 @@ async fn run_once(
     };
 
     let sink = TuiEventSink::new();
-    let mut ctx = ExecCtx::new(run_id, DummyServices)
+    let mut ctx = ExecCtx::new(run_id, services)
         .with_trace(Box::new(HostTraceSink {
             console: sink.clone(),
             file: event_sink,
@@ -452,7 +728,7 @@ fn list_workflows(paths: &HostPaths) -> Result<()> {
             };
             println!("    LLM: {}", provider_str);
         } else {
-            println!("    LLM: not required");
+            println!("    LLM: invalid configuration");
         }
         if !package.package.ui.execution_guidance.is_empty() {
             println!("    Guidance: {}", package.package.ui.execution_guidance);
@@ -483,17 +759,16 @@ fn show_workflow(paths: &HostPaths, workflow_id: &str) -> Result<()> {
     println!("Input artifact: {}", package.package.ui.input_artifact);
     println!("Input prompt: {}", package.package.ui.input_prompt);
 
+    println!();
+    println!("LLM Configuration:");
     if let Some(llm) = &package.package.runtime.llm {
-        println!();
-        println!("LLM Configuration:");
         if !llm.providers.is_empty() {
             println!("  Providers: {}", llm.providers.join(", "));
         } else {
             println!("  Providers: default");
         }
     } else {
-        println!();
-        println!("LLM Configuration: Not required");
+        println!("  Invalid or missing runtime.llm configuration");
     }
 
     if !package.package.ui.execution_guidance.is_empty() {
@@ -716,7 +991,7 @@ fn inspect_run_in(runs_dir: &Path, run_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn replay_run(paths: &HostPaths, run_id: &str) -> Result<()> {
+async fn replay_run(paths: &HostPaths, llm_config: &HostLlmConfig, run_id: &str) -> Result<()> {
     let _run_uuid: uuid::Uuid = run_id.parse().context("Invalid run ID")?;
 
     let run_dir = paths.runs_dir.join(run_id);
@@ -731,7 +1006,19 @@ async fn replay_run(paths: &HostPaths, run_id: &str) -> Result<()> {
     println!("Original input: {}", record.input);
     println!();
 
-    run_workflow_host(paths, &record.workflow, Some(record.input)).await
+    let replay_llm_config = match record.llm {
+        Some(recorded) => recorded.into_host_config(llm_config)?,
+        None => llm_config.clone(),
+    };
+
+    run_workflow_host(
+        paths,
+        &replay_llm_config,
+        &record.workflow,
+        Some(record.input),
+        false,
+    )
+    .await
 }
 
 fn load_workflow_packages(paths: &HostPaths) -> Result<Vec<DiscoveredWorkflowPackage>> {
@@ -994,7 +1281,13 @@ mod tests {
                 name: format!("{id} workflow"),
                 summary: "summary".to_string(),
                 entry: "start".to_string(),
-                runtime: WorkflowPackageRuntime::default(),
+                runtime: WorkflowPackageRuntime {
+                    llm: Some(naaf_core::workflow_package::WorkflowPackageLlmRuntime {
+                        model: "gpt-5".to_string(),
+                        providers: vec!["openai".to_string()],
+                    }),
+                    inputs: vec![],
+                },
                 ui: WorkflowPackageUi {
                     input_artifact: "input".to_string(),
                     input_prompt: "Describe the request".to_string(),
@@ -1070,12 +1363,18 @@ mod tests {
         let record = RunRecord {
             workflow: "draft-request".to_string(),
             input: "create a file".to_string(),
+            llm: Some(RecordedLlmConfig {
+                provider: "openai".to_string(),
+                model: "gpt-5".to_string(),
+                endpoint: Some("https://example.invalid".to_string()),
+            }),
         };
 
         save_run_record(temp.path(), &record).unwrap();
         let loaded = load_run_record(temp.path()).unwrap();
         assert_eq!(loaded.workflow, record.workflow);
         assert_eq!(loaded.input, record.input);
+        assert_eq!(loaded.llm.unwrap().provider, "openai");
     }
 
     #[test]
@@ -1117,6 +1416,11 @@ mod tests {
             &RunRecord {
                 workflow: "draft-request".to_string(),
                 input: "inspect me".to_string(),
+                llm: Some(RecordedLlmConfig {
+                    provider: "openai".to_string(),
+                    model: "gpt-5".to_string(),
+                    endpoint: None,
+                }),
             },
         )
         .unwrap();
@@ -1182,6 +1486,13 @@ mod tests {
             workflows_dir: temp.path().join(DEFAULT_WORKFLOWS_DIR_NAME),
             runs_dir: temp.path().join(DEFAULT_RUNS_DIR_NAME),
         };
+        let llm_config = HostLlmConfig {
+            openai_api_key: Some("test-key".to_string()),
+            opencode_api_key: None,
+            provider: Some(ProviderType::OpenAi),
+            model: Some("gpt-5".to_string()),
+            endpoint: Some("http://127.0.0.1:9".to_string()),
+        };
         let broken_package = DiscoveredWorkflowPackage {
             root_dir: temp.path().join("broken"),
             manifest_path: temp.path().join("broken").join("workflow.toml"),
@@ -1190,7 +1501,13 @@ mod tests {
                 name: "Broken workflow".to_string(),
                 summary: "summary".to_string(),
                 entry: "start".to_string(),
-                runtime: WorkflowPackageRuntime::default(),
+                runtime: WorkflowPackageRuntime {
+                    llm: Some(naaf_core::workflow_package::WorkflowPackageLlmRuntime {
+                        model: "gpt-5".to_string(),
+                        providers: vec!["openai".to_string()],
+                    }),
+                    inputs: vec![],
+                },
                 ui: WorkflowPackageUi {
                     input_artifact: "input".to_string(),
                     input_prompt: "Describe the request".to_string(),
@@ -1207,7 +1524,7 @@ mod tests {
             },
         };
 
-        let result = run_once(&paths, &broken_package, "fail").await;
+        let result = run_once(&paths, &llm_config, &broken_package, "fail").await;
         assert!(result.is_err());
 
         let run_dirs = std::fs::read_dir(&paths.runs_dir)
@@ -1251,6 +1568,13 @@ mod tests {
             workflows_dir: temp.path().join(DEFAULT_WORKFLOWS_DIR_NAME),
             runs_dir: temp.path().join(DEFAULT_RUNS_DIR_NAME),
         };
+        let llm_config = HostLlmConfig {
+            openai_api_key: Some("test-key".to_string()),
+            opencode_api_key: None,
+            provider: Some(ProviderType::OpenAi),
+            model: Some("gpt-5".to_string()),
+            endpoint: Some("http://127.0.0.1:9".to_string()),
+        };
         let broken_package = DiscoveredWorkflowPackage {
             root_dir: temp.path().join("runtime-broken"),
             manifest_path: temp.path().join("runtime-broken").join("workflow.toml"),
@@ -1259,7 +1583,13 @@ mod tests {
                 name: "Runtime broken workflow".to_string(),
                 summary: "summary".to_string(),
                 entry: "normalize".to_string(),
-                runtime: WorkflowPackageRuntime::default(),
+                runtime: WorkflowPackageRuntime {
+                    llm: Some(naaf_core::workflow_package::WorkflowPackageLlmRuntime {
+                        model: "gpt-5".to_string(),
+                        providers: vec!["openai".to_string()],
+                    }),
+                    inputs: vec![],
+                },
                 ui: WorkflowPackageUi {
                     input_artifact: "input".to_string(),
                     input_prompt: "Describe the request".to_string(),
@@ -1276,7 +1606,7 @@ mod tests {
             },
         };
 
-        let result = run_once(&paths, &broken_package, "fail later").await;
+        let result = run_once(&paths, &llm_config, &broken_package, "fail later").await;
         assert!(result.is_err());
 
         let run_dirs = std::fs::read_dir(&paths.runs_dir)

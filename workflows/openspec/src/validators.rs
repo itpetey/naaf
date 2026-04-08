@@ -2,26 +2,32 @@
 //!
 //! This module provides validators that check state before allowing workflow progression.
 
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::steps::Validator;
 use naaf_schema::state::StateEnvelope;
 
-pub struct DoneValidator;
+pub struct DoneValidator<S: Services> {
+    _phantom: PhantomData<S>,
+}
 
-impl DoneValidator {
+impl<S: Services> DoneValidator<S> {
     pub fn new() -> Self {
-        Self
+        Self {
+            _phantom: PhantomData,
+        }
     }
 }
 
-impl Default for DoneValidator {
+impl<S: Services> Default for DoneValidator<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Validator for DoneValidator {
-    type Services = DummyServices;
+impl<S: Services> Validator for DoneValidator<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "done_validator"
@@ -39,14 +45,14 @@ impl Validator for DoneValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::DummyServices;
+    use crate::test_services::NoopServices;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
     use naaf_schema::state::{RunId, StateEnvelope, StateId};
     use naaf_schema::state_kind::StateKind;
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx() -> ExecCtx<NoopServices> {
+        ExecCtx::new(RunId::new(), NoopServices)
     }
 
     fn make_state() -> StateEnvelope {

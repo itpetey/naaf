@@ -3,7 +3,9 @@
 //! This module provides routers that make routing decisions based on
 //! input classification results.
 
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use naaf_core::route::RouteDecision;
 use naaf_core::steps::Router;
@@ -35,14 +37,15 @@ use crate::classify_input::{Classification, InputClass};
 /// let router = InputClassificationRouter::new("greeting_path", "clarify_path", "continue_path");
 /// // Routes based on input classification
 /// ```
-pub struct InputClassificationRouter {
+pub struct InputClassificationRouter<S: Services> {
     classification_key: ArtifactKey,
     greeting_route: String,
     clarification_route: String,
     actionable_route: String,
+    _phantom: PhantomData<S>,
 }
 
-impl InputClassificationRouter {
+impl<S: Services> InputClassificationRouter<S> {
     /// Creates a new router with default artifact key "classification".
     ///
     /// # Arguments
@@ -60,6 +63,7 @@ impl InputClassificationRouter {
             greeting_route: greeting_route.into(),
             clarification_route: clarification_route.into(),
             actionable_route: actionable_route.into(),
+            _phantom: PhantomData,
         }
     }
 
@@ -75,12 +79,13 @@ impl InputClassificationRouter {
             greeting_route: greeting_route.into(),
             clarification_route: clarification_route.into(),
             actionable_route: actionable_route.into(),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Router for InputClassificationRouter {
-    type Services = DummyServices;
+impl<S: Services> Router for InputClassificationRouter<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "input_classification_router"
@@ -132,12 +137,13 @@ impl Router for InputClassificationRouter {
 /// let router = NeedsHumanClarification::new("clarification_workflow");
 /// // Routes ambiguous inputs to clarification, terminal for others
 /// ```
-pub struct NeedsHumanClarification {
+pub struct NeedsHumanClarification<S: Services> {
     classification_key: ArtifactKey,
     clarification_route: String,
+    _phantom: PhantomData<S>,
 }
 
-impl NeedsHumanClarification {
+impl<S: Services> NeedsHumanClarification<S> {
     /// Creates a new router with default artifact key "classification".
     ///
     /// # Arguments
@@ -147,6 +153,7 @@ impl NeedsHumanClarification {
         Self {
             classification_key: ArtifactKey::new("classification"),
             clarification_route: clarification_route.into(),
+            _phantom: PhantomData,
         }
     }
 
@@ -158,12 +165,13 @@ impl NeedsHumanClarification {
         Self {
             classification_key: ArtifactKey::new(classification_key),
             clarification_route: clarification_route.into(),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Router for NeedsHumanClarification {
-    type Services = DummyServices;
+impl<S: Services> Router for NeedsHumanClarification<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "needs_human_clarification"
@@ -214,14 +222,15 @@ impl Router for NeedsHumanClarification {
 /// let router = ConfidenceThresholdRouter::new(0.8, "high_confidence", "low_confidence");
 /// // Routes based on confidence threshold of0.8
 /// ```
-pub struct ConfidenceThresholdRouter {
+pub struct ConfidenceThresholdRouter<S: Services> {
     classification_key: ArtifactKey,
     high_confidence_route: String,
     low_confidence_route: String,
     threshold: f64,
+    _phantom: PhantomData<S>,
 }
 
-impl ConfidenceThresholdRouter {
+impl<S: Services> ConfidenceThresholdRouter<S> {
     /// Creates a new confidence threshold router with default artifact key "classification".
     ///
     /// # Arguments
@@ -239,6 +248,7 @@ impl ConfidenceThresholdRouter {
             high_confidence_route: high_confidence_route.into(),
             low_confidence_route: low_confidence_route.into(),
             threshold,
+            _phantom: PhantomData,
         }
     }
 
@@ -254,12 +264,13 @@ impl ConfidenceThresholdRouter {
             high_confidence_route: high_confidence_route.into(),
             low_confidence_route: low_confidence_route.into(),
             threshold,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Router for ConfidenceThresholdRouter {
-    type Services = DummyServices;
+impl<S: Services> Router for ConfidenceThresholdRouter<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "confidence_threshold_router"
@@ -293,7 +304,7 @@ impl Router for ConfidenceThresholdRouter {
 mod tests {
     use super::*;
     use crate::classify_input::InputClass;
-    use naaf_core::budget::DummyServices;
+    use crate::test_services::NoopServices;
     use naaf_schema::artifacts::ArtifactValue;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
@@ -315,8 +326,8 @@ mod tests {
         state
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx() -> ExecCtx<NoopServices> {
+        ExecCtx::new(RunId::new(), NoopServices)
     }
 
     #[test]

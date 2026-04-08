@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Executor runs compiled workflow
 The system SHALL provide an Executor that executes a CompiledWorkflow from an initial StateEnvelope.

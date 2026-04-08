@@ -20,6 +20,14 @@ impl OpenCodeAuth {
     }
 
     /// Creates a new OpenCode Go authentication configuration with a custom base URL.
+    pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        Self {
+            api_key: api_key.into(),
+            base_url: base_url.into(),
+        }
+    }
+
+    /// Creates a new OpenCode Go authentication configuration with a custom base URL.
     ///
     /// This is primarily useful for testing with mock servers.
     #[cfg(test)]

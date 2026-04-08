@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: ExecCtx provides runtime context
 The system SHALL provide an ExecCtx with fields: run_id, budget, services, trace, cancel.

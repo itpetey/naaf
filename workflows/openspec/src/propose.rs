@@ -18,7 +18,9 @@
 //! // Transform state with "input" artifact to get "proposal" artifact
 //! ```
 
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
 use naaf_schema::adapters::{AdapterError, IntoState, TryFromState, get_typed, put_typed};
@@ -48,16 +50,18 @@ impl IntoState for Proposal {
     }
 }
 
-pub struct ProposeStep {
+pub struct ProposeStep<S: Services> {
     input_key: ArtifactKey,
     output_key: ArtifactKey,
+    _phantom: PhantomData<S>,
 }
 
-impl ProposeStep {
+impl<S: Services> ProposeStep<S> {
     pub fn new() -> Self {
         Self {
             input_key: ArtifactKey::new("input"),
             output_key: ArtifactKey::new("proposal"),
+            _phantom: PhantomData,
         }
     }
 
@@ -65,18 +69,19 @@ impl ProposeStep {
         Self {
             input_key: ArtifactKey::new(input_key),
             output_key: ArtifactKey::new(output_key),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Default for ProposeStep {
+impl<S: Services> Default for ProposeStep<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Transformer for ProposeStep {
-    type Services = DummyServices;
+impl<S: Services> Transformer for ProposeStep<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "propose"
@@ -110,7 +115,7 @@ impl Transformer for ProposeStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::DummyServices;
+    use crate::test_services::NoopServices;
     use naaf_schema::artifacts::ArtifactValue;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
@@ -130,8 +135,8 @@ mod tests {
         state
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx() -> ExecCtx<NoopServices> {
+        ExecCtx::new(RunId::new(), NoopServices)
     }
 
     #[test]

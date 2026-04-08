@@ -6,7 +6,9 @@
 //! - Reads from: `proposal` (Proposal artifact from ProposeStep)
 //! - Writes to: `normalized` (NormalizedInput artifact)
 
-use naaf_core::budget::{DummyServices, ExecCtx};
+use std::marker::PhantomData;
+
+use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
 use naaf_schema::adapters::{AdapterError, IntoState, TryFromState, get_typed, put_typed};
@@ -14,6 +16,7 @@ use naaf_schema::artifacts::ArtifactKey;
 use naaf_schema::state::StateEnvelope;
 use serde::{Deserialize, Serialize};
 
+use crate::llm_json::call_json;
 use crate::propose::Proposal;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -39,17 +42,19 @@ impl IntoState for NormalizedInput {
     }
 }
 
-pub struct NormalizeStep {
+pub struct NormalizeStep<S: Services> {
     input_key: ArtifactKey,
     output_key: ArtifactKey,
+    _phantom: PhantomData<S>,
 }
 
-impl NormalizeStep {
+impl<S: Services> NormalizeStep<S> {
     /// Creates a new NormalizeStep that reads from "proposal" and writes to "normalized".
     pub fn new() -> Self {
         Self {
             input_key: ArtifactKey::new("proposal"),
             output_key: ArtifactKey::new("normalized"),
+            _phantom: PhantomData,
         }
     }
 
@@ -57,23 +62,19 @@ impl NormalizeStep {
         Self {
             input_key: ArtifactKey::new(input_key),
             output_key: ArtifactKey::new(output_key),
+            _phantom: PhantomData,
         }
-    }
-
-    fn normalize(input: &str) -> String {
-        let trimmed = input.trim();
-        trimmed.to_lowercase()
     }
 }
 
-impl Default for NormalizeStep {
+impl<S: Services> Default for NormalizeStep<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Transformer for NormalizeStep {
-    type Services = DummyServices;
+impl<S: Services> Transformer for NormalizeStep<S> {
+    type Services = S;
 
     fn name(&self) -> &'static str {
         "normalize"
@@ -81,7 +82,7 @@ impl Transformer for NormalizeStep {
 
     fn transform(
         &self,
-        _ctx: &mut ExecCtx<Self::Services>,
+        ctx: &mut ExecCtx<Self::Services>,
         mut state: StateEnvelope,
     ) -> Result<StateEnvelope, StepError> {
         let proposal: Proposal = get_typed(&self.input_key, &state).map_err(|e| {
@@ -94,11 +95,14 @@ impl Transformer for NormalizeStep {
             )
         })?;
 
-        let normalized = Self::normalize(&proposal.input);
-        let normalized_input = NormalizedInput {
-            original: proposal.input.clone(),
-            normalized,
-        };
+        let normalized_input: NormalizedInput = call_json(
+            ctx,
+            self.name(),
+            format!(
+                "Return JSON only with keys 'original' and 'normalized'. Normalise this request while preserving its intent: {}",
+                proposal.input
+            ),
+        )?;
 
         put_typed(self.output_key.clone(), normalized_input, &mut state);
 
@@ -109,7 +113,7 @@ impl Transformer for NormalizeStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::DummyServices;
+    use crate::test_services::{JsonSequenceServices, NoopServices};
     use naaf_schema::artifacts::ArtifactValue;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
@@ -133,14 +137,14 @@ mod tests {
         state
     }
 
-    fn make_ctx() -> ExecCtx<DummyServices> {
-        ExecCtx::new(RunId::new(), DummyServices)
+    fn make_ctx(response: &'static str) -> ExecCtx<JsonSequenceServices> {
+        ExecCtx::new(RunId::new(), JsonSequenceServices::from_json([response]))
     }
 
-    #[test]
-    fn test_normalize_creates_normalized_input() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_normalize_creates_normalized_input() {
         let normalize = NormalizeStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(r#"{"original":"  CREATE A File  ","normalized":"create a file"}"#);
         let state = make_state_with_proposal("  CREATE A File  ");
 
         let result = normalize.transform(&mut ctx, state).unwrap();
@@ -150,8 +154,8 @@ mod tests {
         assert_eq!(normalized.normalized, "create a file");
     }
 
-    #[test]
-    fn test_normalize_custom_keys() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_normalize_custom_keys() {
         let normalize = NormalizeStep::with_keys("my_proposal", "result");
         let mut state = StateEnvelope::new(
             StateId::new(),
@@ -167,7 +171,7 @@ mod tests {
             ArtifactValue::json(serde_json::json!(proposal)),
         );
 
-        let mut ctx = make_ctx();
+        let mut ctx = make_ctx(r#"{"original":"Hello World","normalized":"hello world"}"#);
         let result = normalize.transform(&mut ctx, state).unwrap();
 
         let normalized: NormalizedInput = get_typed(&ArtifactKey::new("result"), &result).unwrap();
@@ -178,7 +182,7 @@ mod tests {
     #[test]
     fn test_normalize_missing_proposal() {
         let normalize = NormalizeStep::new();
-        let mut ctx = make_ctx();
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
         let state = StateEnvelope::new(
             StateId::new(),
             RunId::new(),

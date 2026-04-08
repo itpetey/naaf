@@ -302,7 +302,8 @@ impl<S: Services + Send + Sync> Transformer for LlmAcceptanceStep<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use naaf_core::budget::{DummyServices, ExecCtx};
+    use crate::test_services::NoopServices;
+    use naaf_core::budget::ExecCtx;
     use naaf_schema::execution_status::ExecutionStatus;
     use naaf_schema::lineage::Lineage;
     use naaf_schema::state::{RunId, StateEnvelope, StateId};
@@ -350,53 +351,53 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_llm_normalize_step_structure() {
-        let step = LlmNormalizeStep::new(DummyServices, Handle::current());
+        let step = LlmNormalizeStep::new(NoopServices, Handle::current());
         assert_eq!(step.name(), "llm_normalize");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_llm_scope_step_structure() {
-        let step = LlmScopeStep::new(DummyServices, Handle::current());
+        let step = LlmScopeStep::new(NoopServices, Handle::current());
         assert_eq!(step.name(), "llm_scope");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_llm_skeleton_step_structure() {
-        let step = LlmSkeletonStep::new(DummyServices, Handle::current());
+        let step = LlmSkeletonStep::new(NoopServices, Handle::current());
         assert_eq!(step.name(), "llm_skeleton");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_llm_acceptance_step_structure() {
-        let step = LlmAcceptanceStep::new(DummyServices, Handle::current());
+        let step = LlmAcceptanceStep::new(NoopServices, Handle::current());
         assert_eq!(step.name(), "llm_acceptance");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_llm_normalize_missing_input() {
-        let step = LlmNormalizeStep::new(DummyServices, Handle::current());
-        let mut ctx = ExecCtx::new(RunId::new(), DummyServices);
+        let step = LlmNormalizeStep::new(NoopServices, Handle::current());
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
         assert!(step.transform(&mut ctx, make_empty_state()).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_llm_scope_missing_input() {
-        let step = LlmScopeStep::new(DummyServices, Handle::current());
-        let mut ctx = ExecCtx::new(RunId::new(), DummyServices);
+        let step = LlmScopeStep::new(NoopServices, Handle::current());
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
         assert!(step.transform(&mut ctx, make_empty_state()).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_llm_skeleton_missing_input() {
-        let step = LlmSkeletonStep::new(DummyServices, Handle::current());
-        let mut ctx = ExecCtx::new(RunId::new(), DummyServices);
+        let step = LlmSkeletonStep::new(NoopServices, Handle::current());
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
         assert!(step.transform(&mut ctx, make_empty_state()).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_llm_acceptance_missing_input() {
-        let step = LlmAcceptanceStep::new(DummyServices, Handle::current());
-        let mut ctx = ExecCtx::new(RunId::new(), DummyServices);
+        let step = LlmAcceptanceStep::new(NoopServices, Handle::current());
+        let mut ctx = ExecCtx::new(RunId::new(), NoopServices);
         assert!(step.transform(&mut ctx, make_empty_state()).is_err());
     }
 }

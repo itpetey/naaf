@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+naaf-providers.workspace = true
 naaf-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -18,5 +19,11 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+httpmock.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+
+[features]
+default = ["openai", "opencode-go"]
+openai = ["naaf-providers/openai"]
+opencode-go = ["naaf-providers/opencode-go"]
