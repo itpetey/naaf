@@ -1,7 +1,5 @@
 //! LLM-powered workflow steps using OpenSpec prompts.
 
-use crate::prompts;
-use crate::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
 use naaf_core::budget::Services;
 use naaf_core::errors::StepError;
 use naaf_core::steps::Transformer;
@@ -11,40 +9,8 @@ use naaf_schema::state::StateEnvelope;
 use serde::de::DeserializeOwned;
 use tokio::runtime::Handle;
 
-fn extract_json(text: &str) -> Result<String, StepError> {
-    let object_start = text.find('{');
-    let array_start = text.find('[');
-
-    let (start_idx, end_char) = match (object_start, array_start) {
-        (Some(object), Some(array)) if object < array => (object, '}'),
-        (Some(_), Some(array)) => (array, ']'),
-        (Some(object), None) => (object, '}'),
-        (None, Some(array)) => (array, ']'),
-        (None, None) => {
-            return Err(StepError::transformer(
-                "extract_json",
-                "No JSON object or array found in response",
-            ));
-        }
-    };
-
-    let end_idx = text.rfind(end_char).ok_or_else(|| {
-        StepError::transformer(
-            "extract_json",
-            format!("No matching '{}' found for JSON", end_char),
-        )
-    })?;
-
-    let json = text[start_idx..=end_idx].to_string();
-    serde_json::from_str::<serde_json::Value>(&json).map_err(|e| {
-        StepError::transformer(
-            "extract_json",
-            format!("Extracted string is not valid JSON: {}", e),
-        )
-    })?;
-
-    Ok(json)
-}
+use crate::llm_json::parse_json;
+use crate::{AcceptanceCriteriaSet, NormalizedSpec, ProposalSkeleton, ScopeReport};
 
 fn call_and_decode<T, S>(
     handle: &Handle,
@@ -62,11 +28,154 @@ where
     .map_err(|e| StepError::transformer(step_name, format!("LLM call failed: {}", e)))?;
 
     let response = String::from_utf8_lossy(&response_bytes);
-    let json = extract_json(&response)?;
-
-    serde_json::from_str(&json)
-        .map_err(|e| StepError::transformer(step_name, format!("JSON parse error: {}", e)))
+    parse_json(step_name, &response)
 }
+
+const NORMALIZE_PROMPT: &str = r#"You are a proposal normalizer.
+
+Input:
+- A raw feature request or proposal seed.
+
+Task:
+Transform the request into a structured specification draft with these fields:
+- problem_statement
+- desired_outcome
+- explicit_constraints
+- implied_constraints
+- non_goals
+- open_questions
+- ambiguity_flags
+- assumptions
+
+Rules:
+- Do not invent product facts.
+- If information is missing, record it under open_questions or ambiguity_flags.
+- Preserve the original intent faithfully.
+- Prefer concise, concrete language.
+
+User Request:
+{user_prompt}
+
+Output:
+Return valid JSON only using the required schema."#;
+
+const SCOPE_PROMPT: &str = r#"You are a scope analyst.
+
+Task:
+Analyse the normalised specification and extract scope information.
+
+Input:
+{normalized_spec}
+
+Extract:
+- in_scope_items: What IS included in this request
+- out_of_scope_items: What is explicitly NOT included
+- dependencies: External systems or services this depends on
+- rollout_assumptions: Assumptions about deployment environment
+- risk_multipliers: Factors that could increase scope
+- inferred_scope_items: Items inferred from context but not explicit
+
+Rules:
+- Separate explicit scope from inferred scope.
+- Mark any inference as inferred.
+- Do not propose solutions yet.
+- Base findings only on the input specification.
+
+Output:
+Return valid JSON only using this schema:
+{
+  "in_scope_items": ["item1", "item2"],
+  "out_of_scope_items": ["item1"],
+  "dependencies": ["dep1"],
+  "rollout_assumptions": ["assumption1"],
+  "risk_multipliers": ["multiplier1"],
+  "inferred_scope_items": ["inferred1"]
+}"#;
+
+const SKELETON_PROMPT: &str = r#"You are a proposal structurer.
+
+Task:
+Produce an OpenSpec proposal skeleton from the normalised specification and scope analysis.
+
+Normalised Specification:
+{normalized_spec}
+
+Scope Analysis:
+{scope_report}
+
+Produce a proposal with these sections:
+- Title: A clear, concise title
+- Summary: One-line description
+- Motivation: Why this change is needed
+- Goals: Array of strings describing objectives
+- Non-Goals: Array of strings describing what is NOT included
+- Proposed Design: Detailed design description
+- Alternatives Considered: Other approaches evaluated
+- Risks: Potential issues and mitigations
+- Rollout Plan: How to deploy this change
+- Open Questions: Array of unresolved questions
+- Acceptance Criteria: Array of acceptance criteria
+- Todo Markers: Array of TODO items (use TODO(reason) format)
+
+Rules:
+- Use placeholders only where evidence is missing.
+- Mark every placeholder with TODO(<reason>).
+- Do not fabricate operational details.
+- Base content on the input specification and scope.
+
+Output:
+Return valid JSON only using this schema:
+{
+  "title": "string",
+  "summary": "string",
+  "motivation": "string",
+  "goals": ["goal1", "goal2"],
+  "non_goals": ["non-goal1"],
+  "proposed_design": "string",
+  "alternatives_considered": "string",
+  "risks": "string",
+  "rollout_plan": "string",
+  "open_questions": ["question1"],
+  "acceptance_criteria": ["criteria1"],
+  "todo_markers": ["TODO(reason)"]
+}"#;
+
+const ACCEPTANCE_PROMPT: &str = r#"You are an acceptance criteria author.
+
+Task:
+Write acceptance criteria for the proposal that are observable, testable, and traceable.
+
+Normalised Specification:
+{normalized_spec}
+
+Proposal Skeleton:
+{proposal_skeleton}
+
+Write acceptance criteria that are:
+- Observable: Can be verified by inspection or testing
+- Testable: Can be validated with concrete tests
+- Implementation-agnostic: Don't assume specific implementations
+- Traceable: Connect back to stated goals
+
+Rules:
+- Each criterion must be atomic (one thing).
+- Avoid vague terms like "fast", "robust", "user-friendly", or "works well".
+- Where measurable thresholds are unknown, create explicit placeholders.
+- Criteria should verify the solution meets its goals.
+
+Output:
+Return valid JSON only using this schema:
+{
+  "criteria": [
+    {
+      "id": "AC-1",
+      "statement": "The system must...",
+      "traceability": ["Goal-1"],
+      "measurability": "measurable"
+    }
+  ],
+  "gaps": ["Any unaddressed requirements"]
+}"#;
 
 pub struct LlmNormalizeStep<S: Services> {
     input_key: ArtifactKey,
@@ -100,7 +209,7 @@ impl<S: Services> LlmNormalizeStep<S> {
     }
 
     fn render_prompt(&self, input: &str) -> String {
-        prompts::REQUEST_NORMALIZER_PROMPT.replace("{user_prompt}", input)
+        NORMALIZE_PROMPT.replace("{user_prompt}", input)
     }
 }
 
@@ -161,7 +270,7 @@ impl<S: Services> LlmScopeStep<S> {
 
     fn render_prompt(&self, spec: &NormalizedSpec) -> String {
         let spec_json = serde_json::to_string_pretty(spec).unwrap_or_default();
-        prompts::SCOPE_ANALYST_PROMPT.replace("{normalized_spec}", &spec_json)
+        SCOPE_PROMPT.replace("{normalized_spec}", &spec_json)
     }
 }
 
@@ -211,7 +320,7 @@ impl<S: Services> LlmSkeletonStep<S> {
     fn render_prompt(&self, spec: &NormalizedSpec, scope: &ScopeReport) -> String {
         let spec_json = serde_json::to_string_pretty(spec).unwrap_or_default();
         let scope_json = serde_json::to_string_pretty(scope).unwrap_or_default();
-        prompts::SKELETON_BUILDER_PROMPT
+        SKELETON_PROMPT
             .replace("{normalized_spec}", &spec_json)
             .replace("{scope_report}", &scope_json)
     }
@@ -266,7 +375,7 @@ impl<S: Services> LlmAcceptanceStep<S> {
     fn render_prompt(&self, spec: &NormalizedSpec, skeleton: &ProposalSkeleton) -> String {
         let spec_json = serde_json::to_string_pretty(spec).unwrap_or_default();
         let skeleton_json = serde_json::to_string_pretty(skeleton).unwrap_or_default();
-        prompts::ACCEPTANCE_CRITERIA_PROMPT
+        ACCEPTANCE_PROMPT
             .replace("{normalized_spec}", &spec_json)
             .replace("{proposal_skeleton}", &skeleton_json)
     }
@@ -302,6 +411,7 @@ impl<S: Services + Send + Sync> Transformer for LlmAcceptanceStep<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm_json::extract_json;
     use crate::test_services::NoopServices;
     use naaf_core::budget::ExecCtx;
     use naaf_schema::execution_status::ExecutionStatus;

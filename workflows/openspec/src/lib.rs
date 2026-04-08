@@ -1,14 +1,15 @@
-//! OpenSpec workflows, steps, prompts, and domain artifacts.
+//! OpenSpec workflows, steps, and domain artifacts.
+//!
+//! This crate provides workflow definitions and step implementations
+//! for the OpenSpec proposal authoring workflow.
 
 pub mod accept;
 pub mod artifacts;
 pub mod classify_input;
 pub mod decode;
-pub mod keys;
 pub mod kind;
-mod llm_json;
+pub mod llm_json;
 pub mod llm_steps;
-pub mod mock_llm;
 pub mod normalize;
 pub mod package_steps;
 pub mod phase;
@@ -21,9 +22,6 @@ pub mod scope;
 pub mod services;
 pub mod terminal;
 pub mod validators;
-pub mod workers;
-pub mod workflow;
-pub mod workflows;
 
 #[cfg(test)]
 pub(crate) mod test_services;
@@ -37,17 +35,9 @@ pub use artifacts::{
 };
 pub use classify_input::{Classification, ClassifyInput, InputClass};
 pub use decode::{DecodeError, Result as DecodeResult};
-pub use keys::DraftRequestKeys;
 pub use kind::ArtifactKind;
 pub use llm_steps::{LlmAcceptanceStep, LlmNormalizeStep, LlmScopeStep, LlmSkeletonStep};
-pub use mock_llm::MockLlmServices;
 pub use normalize::{NormalizeStep, NormalizedInput};
-pub use package_steps::{
-    ApplySectionPatchStep, FindingsAggregatorStep, PackageLlmAcceptanceStep,
-    PackageLlmConsistencyReviewStep, PackageLlmNormalizeStep, PackageLlmRiskReviewStep,
-    PackageLlmScopeStep, PackageLlmSkeletonStep, PackageLlmTargetedRemediationStep,
-    RemediationPlanRouter, RemediationPlannerStep, ReviewFindingsRouter, WorkflowOutcomeStep,
-};
 pub use phase::Phase;
 pub use plan::{EffortLevel, Plan, PlanStep};
 pub use propose::{Proposal, ProposeStep};
@@ -56,11 +46,3 @@ pub use routers::{ConfidenceThresholdRouter, InputClassificationRouter, NeedsHum
 pub use scope::{Complexity, ScopeAnalysis, ScopeStep, ScopeType};
 pub use services::{LlmServiceError, LlmServices};
 pub use terminal::{EscalationTerminal, GreetingTerminal};
-pub use validators::DoneValidator;
-pub use workers::{WorkerId, WorkerSpec, all_worker_specs};
-pub use workflow::{TransitionSpec, WorkflowDefinition, openspec_happy_path, review_workflow};
-pub use workflows::{draft_request_workflow, openspec_happy_path_llm};
-
-// Backward compatibility alias
-#[deprecated(note = "Use DraftRequestKeys instead")]
-pub use keys::ClassificationKeys;

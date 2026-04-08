@@ -13,43 +13,9 @@ use crate::artifacts::{
     ConsistencyFinding, FindingSet, FindingSeverity, ProposalSkeleton, RemediationPlan,
     RiskFinding, SectionPatch,
 };
+use crate::llm_json::parse_json;
 use crate::prompts;
 use crate::{AcceptanceCriteriaSet, NormalizedSpec, ScopeReport};
-
-fn extract_json(text: &str) -> Result<String, StepError> {
-    let object_start = text.find('{');
-    let array_start = text.find('[');
-
-    let (start_idx, end_char) = match (object_start, array_start) {
-        (Some(object), Some(array)) if object < array => (object, '}'),
-        (Some(_), Some(array)) => (array, ']'),
-        (Some(object), None) => (object, '}'),
-        (None, Some(array)) => (array, ']'),
-        (None, None) => {
-            return Err(StepError::transformer(
-                "packaged_llm",
-                "No JSON object or array found in response",
-            ));
-        }
-    };
-
-    let end_idx = text.rfind(end_char).ok_or_else(|| {
-        StepError::transformer(
-            "packaged_llm",
-            format!("No matching '{}' found for JSON", end_char),
-        )
-    })?;
-
-    let json = text[start_idx..=end_idx].to_string();
-    serde_json::from_str::<serde_json::Value>(&json).map_err(|err| {
-        StepError::transformer(
-            "packaged_llm",
-            format!("Extracted string is not valid JSON: {err}"),
-        )
-    })?;
-
-    Ok(json)
-}
 
 fn call_and_decode<T, S>(
     ctx: &ExecCtx<S>,
@@ -78,9 +44,7 @@ where
     .map_err(|err| StepError::transformer(step_name, format!("LLM call failed: {err}")))?;
 
     let response = String::from_utf8_lossy(&response_bytes);
-    let json = extract_json(&response)?;
-    serde_json::from_str(&json)
-        .map_err(|err| StepError::transformer(step_name, format!("JSON parse error: {err}")))
+    parse_json(step_name, &response)
 }
 
 fn read_json_artifact<T>(

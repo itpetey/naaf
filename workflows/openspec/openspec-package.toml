@@ -108,22 +108,7 @@ kind = "transformer"
 step = "openspec.package_llm_acceptance"
 
 [[nodes]]
-id = "greeting_done"
-kind = "validator"
-step = "openspec.done_validator"
-
-[[nodes]]
-id = "clarification_done"
-kind = "validator"
-step = "openspec.done_validator"
-
-[[nodes]]
 id = "done"
-kind = "validator"
-step = "openspec.done_validator"
-
-[[nodes]]
-id = "escalation_done"
 kind = "validator"
 step = "openspec.done_validator"
 
@@ -149,11 +134,11 @@ to = "normalize"
 
 [[edges]]
 from = "greeting_terminal"
-to = "greeting_done"
+to = "acceptance"
 
 [[edges]]
 from = "clarification_terminal"
-to = "clarification_done"
+to = "acceptance"
 
 [[edges]]
 from = "normalize"
@@ -209,7 +194,7 @@ to = "acceptance"
 
 [[edges]]
 from = "escalate"
-to = "escalation_done"
+to = "acceptance"
 
 [[edges]]
 from = "acceptance"

@@ -61,16 +61,6 @@ kind = "transformer"
 step = "openspec.accept"
 
 [[nodes]]
-id = "greeting_done"
-kind = "validator"
-step = "openspec.done_validator"
-
-[[nodes]]
-id = "clarification_done"
-kind = "validator"
-step = "openspec.done_validator"
-
-[[nodes]]
 id = "done"
 kind = "validator"
 step = "openspec.done_validator"
@@ -94,14 +84,6 @@ to = "clarification_terminal"
 [[edges]]
 from = "initial_decision"
 to = "normalize"
-
-[[edges]]
-from = "greeting_terminal"
-to = "greeting_done"
-
-[[edges]]
-from = "clarification_terminal"
-to = "clarification_done"
 
 [[edges]]
 from = "normalize"

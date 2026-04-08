@@ -5,7 +5,9 @@ use naaf_core::errors::StepError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{AcceptanceCriteriaSet, Criterion, NormalizedSpec, ProposalSkeleton, ScopeReport};
+use naaf_openspec::{
+    AcceptanceCriteriaSet, Criterion, NormalizedSpec, ProposalSkeleton, ScopeReport,
+};
 
 #[derive(Debug)]
 pub struct MockLlmServices {

@@ -2,6 +2,64 @@ use naaf_core::budget::{ExecCtx, Services};
 use naaf_core::errors::StepError;
 use serde::de::DeserializeOwned;
 
+pub fn extract_json(text: &str) -> Result<String, StepError> {
+    let object_start = text.find('{');
+    let array_start = text.find('[');
+
+    let (start_idx, end_char) = match (object_start, array_start) {
+        (Some(object), Some(array)) if object < array => (object, '}'),
+        (Some(_), Some(array)) => (array, ']'),
+        (Some(object), None) => (object, '}'),
+        (None, Some(array)) => (array, ']'),
+        (None, None) => {
+            return Err(StepError::transformer(
+                "extract_json",
+                "No JSON object or array found in response",
+            ));
+        }
+    };
+
+    let end_idx = text.rfind(end_char).ok_or_else(|| {
+        StepError::transformer(
+            "extract_json",
+            format!("No matching '{}' found for JSON", end_char),
+        )
+    })?;
+
+    let json = text[start_idx..=end_idx].to_string();
+    serde_json::from_str::<serde_json::Value>(&json).map_err(|e| {
+        StepError::transformer(
+            "extract_json",
+            format!("Extracted string is not valid JSON: {}", e),
+        )
+    })?;
+
+    Ok(json)
+}
+
+pub fn parse_json<T>(step_name: &'static str, response: &str) -> Result<T, StepError>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_str(response)
+        .or_else(|_| {
+            let json = extract_json(response)?;
+            serde_json::from_str(&json).map_err(|err| {
+                StepError::transformer(
+                    step_name,
+                    format!("Failed to parse LLM JSON response: {err}"),
+                )
+            })
+        })
+        .map_err(|err| match err {
+            StepError::Transformer { .. } => err,
+            _ => StepError::transformer(
+                step_name,
+                format!("Failed to parse LLM JSON response: {err}"),
+            ),
+        })
+}
+
 pub(crate) fn call_json<T, S>(
     ctx: &ExecCtx<S>,
     step_name: &'static str,
@@ -34,38 +92,4 @@ where
         )
     })?;
     parse_json(step_name, &response)
-}
-
-fn parse_json<T>(step_name: &'static str, response: &str) -> Result<T, StepError>
-where
-    T: DeserializeOwned,
-{
-    serde_json::from_str(response)
-        .or_else(|_| {
-            let start = response
-                .find('{')
-                .or_else(|| response.find('['))
-                .ok_or_else(|| {
-                    StepError::transformer(step_name, "LLM response did not contain JSON")
-                })?;
-            let end = response
-                .rfind('}')
-                .or_else(|| response.rfind(']'))
-                .ok_or_else(|| {
-                    StepError::transformer(step_name, "LLM response did not contain complete JSON")
-                })?;
-            serde_json::from_str(&response[start..=end]).map_err(|err| {
-                StepError::transformer(
-                    step_name,
-                    format!("Failed to parse LLM JSON response: {err}"),
-                )
-            })
-        })
-        .map_err(|err| match err {
-            StepError::Transformer { .. } => err,
-            _ => StepError::transformer(
-                step_name,
-                format!("Failed to parse LLM JSON response: {err}"),
-            ),
-        })
 }
