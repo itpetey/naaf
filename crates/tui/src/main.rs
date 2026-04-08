@@ -17,6 +17,7 @@ use naaf_schema::execution_status::ExecutionStatus;
 use naaf_schema::lineage::Lineage;
 use naaf_schema::state::{RunId, StateEnvelope, StateId};
 use naaf_schema::state_kind::StateKind;
+use naaf_tui::spawn_tui_window;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -332,6 +333,8 @@ enum Command {
         #[arg(help = "Run ID to replay")]
         run_id: String,
     },
+    #[command(about = "Launch interactive TUI")]
+    Tui,
 }
 
 #[derive(Clone)]
@@ -491,6 +494,7 @@ async fn main() -> Result<()> {
         Command::Runs => list_runs(&paths)?,
         Command::Inspect { run_id } => inspect_run(&paths, &run_id)?,
         Command::Replay { run_id } => replay_run(&paths, &llm_config, &run_id).await?,
+        Command::Tui => run_tui(&paths).await?,
     }
 
     Ok(())
@@ -1023,6 +1027,20 @@ async fn replay_run(paths: &HostPaths, llm_config: &HostLlmConfig, run_id: &str)
 
 fn load_workflow_packages(paths: &HostPaths) -> Result<Vec<DiscoveredWorkflowPackage>> {
     Ok(discover_workflow_packages(&paths.workflows_dir)?)
+}
+
+async fn run_tui(paths: &HostPaths) -> Result<()> {
+    let packages = load_workflow_packages(paths)?;
+    let workflow_ids: Vec<String> = packages.iter().map(|p| p.package.id.clone()).collect();
+
+    if workflow_ids.is_empty() {
+        anyhow::bail!(
+            "No workflows found. Add workflows to {} first.",
+            paths.workflows_dir.display()
+        );
+    }
+
+    spawn_tui_window(workflow_ids).map_err(anyhow::Error::from)
 }
 
 fn find_workflow<'a>(
