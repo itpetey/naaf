@@ -43,6 +43,12 @@ pub struct ArtifactId(pub Uuid);
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TransitionId(pub String);
 
+impl Default for ArtifactId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArtifactId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
