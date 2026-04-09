@@ -1,0 +1,10 @@
+[package]
+name = "naaf-core"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+naaf-schema.workspace = true
+uuid = { workspace = true, features = ["v4"] }

@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = []
+members = [
+  "crates/core",
+  "crates/executors",
+  "crates/schema",
+  "crates/validators",
+  "crates/workflow",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,3 +15,10 @@ repository = "https://github.com/itpetey/naaf"
 license = "MPL-2.0"
 
 [workspace.dependencies]
+naaf-core = { path = "crates/core" }
+naaf-executors = { path = "crates/executors" }
+naaf-schema = { path = "crates/schema" }
+naaf-validators = { path = "crates/validators" }
+serde = { version = "1.0", default-features = false }
+serde_json = { version = "1.0", default-features = false }
+uuid = { version = "1.23", default-features = false }
