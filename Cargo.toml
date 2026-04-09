@@ -1,12 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-  "crates/core",
-  "crates/providers",
-  "crates/schema",
-  "crates/tui",
-  "workflows/openspec",
-]
+members = []
 
 [workspace.package]
 version = "0.1.0"
@@ -15,27 +9,3 @@ repository = "https://github.com/itpetey/naaf"
 license = "MPL-2.0"
 
 [workspace.dependencies]
-anyhow = { version = "1.0", default-features = false }
-chrono = { version = "0.4", default-features = false }
-clap = { version = "4.6", default-features = false }
-httpmock = { version = "0.8", default-features = false }
-petgraph = { version = "0.8", default-features = false }
-reqwest = { version = "0.13", default-features = false }
-serde = { version = "1.0", default-features = false }
-serde_json = { version = "1.0", default-features = false }
-tempfile = { version = "3.27", default-features = false }
-thiserror = { version = "2.0", default-features = false }
-toml = { version = "0.8", default-features = false, features = ["parse"] }
-tokio = { version = "1.50", default-features = false }
-tokio-util = { version = "0.7", default-features = false }
-tracing = { version = "0.1", default-features = false }
-tracing-subscriber = { version = "0.3", default-features = false }
-uuid = { version = "1.23", default-features = false }
-ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
-crossterm = "0.28"
-
-naaf-core = { path = "crates/core" }
-naaf-openspec = { path = "workflows/openspec" }
-naaf-providers = { path = "crates/providers" }
-naaf-schema = { path = "crates/schema" }
-naaf-tui = { path = "crates/tui" }
