@@ -21,12 +21,6 @@ pub struct ArtifactRef {
     pub data: Arc<dyn ErasedArtifact>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ArtifactId(pub Uuid);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TransitionId(pub String);
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ArtifactMeta {
     pub id: Uuid,
@@ -43,15 +37,21 @@ pub enum ArtifactKind {
     FindingSet,
 }
 
-impl ArtifactRef {
-    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
-        self.data.as_any().downcast_ref::<T>()
-    }
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ArtifactId(pub Uuid);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TransitionId(pub String);
 
 impl ArtifactId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+}
+
+impl ArtifactRef {
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        self.data.as_any().downcast_ref::<T>()
     }
 }
 
