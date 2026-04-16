@@ -249,6 +249,10 @@
 pub use crate::{
     check::Check,
     materialiser::Materialiser,
+    observability::{
+        CheckExt, MaterialiserExt, ObservedCheck, ObservedMaterialiser, ObservedRepairPlanner,
+        ObservedTask, RepairPlannerExt, TaskExt,
+    },
     repair::{
         Attempt, AttemptReport, NeverFinding, RepairPlanner, RetryPolicy, StepReport, Traced,
     },
@@ -258,6 +262,7 @@ pub use crate::{
 
 mod check;
 mod materialiser;
+mod observability;
 mod repair;
 mod step;
 mod task;

@@ -1,10 +1,12 @@
 use std::{
+    any::type_name,
     fmt::{Debug, Display, Formatter},
     marker::PhantomData,
     sync::Arc,
 };
 
 use futures::future::{LocalBoxFuture, try_join};
+use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
 use crate::{
     check::Check,
@@ -64,6 +66,7 @@ impl Step<(), (), (), (), ()> {
         T::Error: 'static,
     {
         StepBuilder {
+            task_name: type_name::<T>(),
             task: Arc::new(task),
             pipeline: ValidationPipeline::identity(),
             repair: None,
@@ -263,6 +266,7 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
 
 /// Builder for configuring a step's checks, materialisation, and repair loop.
 pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
+    task_name: &'static str,
     task: Arc<dyn Task<Runtime = R, Input = I, Output = A, Error = E>>,
     pipeline: ValidationPipeline<R, A, S, F, E>,
     repair: Option<
@@ -286,6 +290,7 @@ where
         F: 'static,
     {
         StepBuilder {
+            task_name: self.task_name,
             task: self.task,
             pipeline: self.pipeline.bind_findings(),
             repair: None,
@@ -302,6 +307,7 @@ where
         C::Finding: 'static,
     {
         StepBuilder {
+            task_name: self.task_name,
             task: self.task,
             pipeline: self.pipeline.validate_first(check),
             repair: None,
@@ -330,6 +336,7 @@ where
         NextSubject: 'static,
     {
         StepBuilder {
+            task_name: self.task_name,
             task: self.task,
             pipeline: self.pipeline.materialise(materialiser),
             repair: self.repair,
@@ -352,6 +359,7 @@ where
         F: Clone + 'static,
     {
         let task = self.task;
+        let task_name = self.task_name;
         let pipeline = self.pipeline;
         let repair = self.repair;
         let retry_policy = self.retry_policy;
@@ -361,61 +369,141 @@ where
                 let task = task.clone();
                 let pipeline = pipeline.clone();
                 let repair = repair.clone();
+                let step_span = info_span!(
+                    "step_run",
+                    component = "step",
+                    task = task_name,
+                    input_type = %type_name::<I>(),
+                    artefact_type = %type_name::<A>(),
+                    finding_type = %type_name::<F>(),
+                    max_attempts = retry_policy.max_attempts()
+                );
 
-                Box::pin(async move {
-                    let mut input = initial_input;
-                    let mut repair_attempts: Vec<Attempt<I, A, F>> = Vec::new();
-                    let mut report_attempts: Vec<AttemptReport<F>> = Vec::new();
+                Box::pin(
+                    async move {
+                        let mut input = initial_input;
+                        let mut repair_attempts: Vec<Attempt<I, A, F>> = Vec::new();
+                        let mut report_attempts: Vec<AttemptReport<F>> = Vec::new();
 
-                    loop {
-                        let artefact = task.run(runtime, input.clone()).await.map_err(|error| {
-                            StepError::System {
-                                stage: SystemStage::Task,
-                                error,
+                        info!(action = "run.start", "step started");
+                        trace!(action = "input", "step input received");
+
+                        loop {
+                            let attempt = repair_attempts.len() + 1;
+                            debug!(action = "attempt.start", attempt, "step attempt started");
+
+                            let artefact =
+                                task.run(runtime, input.clone()).await.map_err(|error| {
+                                    error!(
+                                        action = "run.error",
+                                        attempt,
+                                        stage = %SystemStage::Task,
+                                        "step failed with system error"
+                                    );
+                                    StepError::System {
+                                        stage: SystemStage::Task,
+                                        error,
+                                    }
+                                })?;
+
+                            trace!(action = "attempt.output", attempt, "task produced artefact");
+
+                            let (_, findings): (_, Vec<F>) = pipeline
+                                .run(runtime, artefact.clone())
+                                .await
+                                .map_err(|error| {
+                                    error!(
+                                        action = "run.error",
+                                        attempt,
+                                        stage = %SystemStage::Validation,
+                                        "step failed with system error"
+                                    );
+                                    StepError::System {
+                                        stage: SystemStage::Validation,
+                                        error,
+                                    }
+                                })?;
+
+                            let accepted = findings.is_empty();
+                            let finding_count = findings.len();
+                            report_attempts.push(AttemptReport {
+                                findings: findings.clone(),
+                                accepted,
+                            });
+
+                            debug!(
+                                action = "attempt.validated",
+                                attempt, accepted, finding_count, "step attempt validated"
+                            );
+
+                            if accepted {
+                                info!(
+                                    action = "run.complete",
+                                    attempts = report_attempts.len(),
+                                    "step completed"
+                                );
+                                return Ok(Traced::new(artefact, StepReport::new(report_attempts)));
                             }
-                        })?;
 
-                        let (_, findings): (_, Vec<F>) = pipeline
-                            .run(runtime, artefact.clone())
-                            .await
-                            .map_err(|error| StepError::System {
-                                stage: SystemStage::Validation,
-                                error,
-                            })?;
+                            repair_attempts.push(Attempt {
+                                input: input.clone(),
+                                artefact: artefact.clone(),
+                                findings,
+                            });
 
-                        let accepted = findings.is_empty();
-                        report_attempts.push(AttemptReport {
-                            findings: findings.clone(),
-                            accepted,
-                        });
+                            if repair_attempts.len() >= retry_policy.max_attempts() {
+                                warn!(
+                                    action = "run.rejected",
+                                    attempts = report_attempts.len(),
+                                    reason = "retry_limit_reached",
+                                    "step rejected"
+                                );
+                                return Err(StepError::Rejected(StepReport::new(report_attempts)));
+                            }
 
-                        if accepted {
-                            return Ok(Traced::new(artefact, StepReport::new(report_attempts)));
+                            let Some(repair) = repair.clone() else {
+                                warn!(
+                                    action = "run.rejected",
+                                    attempts = report_attempts.len(),
+                                    reason = "repair_unavailable",
+                                    "step rejected"
+                                );
+                                return Err(StepError::Rejected(StepReport::new(report_attempts)));
+                            };
+
+                            debug!(
+                                action = "attempt.repair.start",
+                                attempt,
+                                next_attempt = attempt + 1,
+                                "planning repair attempt"
+                            );
+
+                            input = repair
+                                .repair(runtime, repair_attempts.clone())
+                                .await
+                                .map_err(|error| {
+                                    error!(
+                                        action = "run.error",
+                                        attempt,
+                                        stage = %SystemStage::Repair,
+                                        "step failed with system error"
+                                    );
+                                    StepError::System {
+                                        stage: SystemStage::Repair,
+                                        error,
+                                    }
+                                })?;
+
+                            trace!(
+                                action = "attempt.repair.complete",
+                                attempt,
+                                next_attempt = attempt + 1,
+                                "repair planner produced next input"
+                            );
                         }
-
-                        repair_attempts.push(Attempt {
-                            input: input.clone(),
-                            artefact: artefact.clone(),
-                            findings,
-                        });
-
-                        if repair_attempts.len() >= retry_policy.max_attempts() {
-                            return Err(StepError::Rejected(StepReport::new(report_attempts)));
-                        }
-
-                        let Some(repair) = repair.clone() else {
-                            return Err(StepError::Rejected(StepReport::new(report_attempts)));
-                        };
-
-                        input = repair
-                            .repair(runtime, repair_attempts.clone())
-                            .await
-                            .map_err(|error| StepError::System {
-                                stage: SystemStage::Repair,
-                                error,
-                            })?;
                     }
-                })
+                    .instrument(step_span),
+                )
             }),
         }
     }
@@ -437,6 +525,7 @@ where
         C: Check<Runtime = R, Subject = S, Finding = F, Error = E> + 'static,
     {
         Self {
+            task_name: self.task_name,
             task: self.task,
             pipeline: self.pipeline.validate(check),
             repair: self.repair,
@@ -453,6 +542,7 @@ where
         C::Finding: Into<F> + 'static,
     {
         Self {
+            task_name: self.task_name,
             task: self.task,
             pipeline: self.pipeline.validate_into(check),
             repair: self.repair,
@@ -467,6 +557,7 @@ where
         P: RepairPlanner<Runtime = R, Input = I, Artefact = A, Finding = F, Error = E> + 'static,
     {
         Self {
+            task_name: self.task_name,
             task: self.task,
             pipeline: self.pipeline,
             repair: Some(Arc::new(planner)),
