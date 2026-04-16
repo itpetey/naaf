@@ -22,8 +22,7 @@
 
 use std::fmt::{Display, Formatter};
 
-use futures::future::LocalBoxFuture;
-use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, RetryPolicy, Step, Task};
+use naaf_core::{Attempt, RetryPolicy, Step, check_fn, materialiser_fn, repair_last_fn, task_fn};
 
 #[derive(Debug)]
 struct BuildRuntime {
@@ -64,104 +63,6 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-struct GeneratePatch;
-
-impl Task for GeneratePatch {
-    type Runtime = BuildRuntime;
-    type Input = FeatureRequest;
-    type Output = Patch;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-        Box::pin(async move {
-            let files = vec![
-                format!("src/{name}/mod.rs", name = input.name),
-                format!("src/{name}/tests.rs", name = input.name),
-            ];
-            Ok(Patch {
-                revision: input.revision,
-                files,
-            })
-        })
-    }
-}
-
-struct ApplyPatch;
-
-impl Materialiser for ApplyPatch {
-    type Runtime = BuildRuntime;
-    type Input = Patch;
-    type Output = Workspace;
-    type Error = Error;
-
-    fn materialise<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-        Box::pin(async move {
-            Ok(Workspace {
-                revision: input.revision,
-            })
-        })
-    }
-}
-
-struct CargoTest;
-
-impl Check for CargoTest {
-    type Runtime = BuildRuntime;
-    type Subject = Workspace;
-    type Finding = TestFinding;
-    type Error = Error;
-
-    fn check<'a>(
-        &'a self,
-        runtime: &'a Self::Runtime,
-        subject: Self::Subject,
-    ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
-        Box::pin(async move {
-            if subject.revision >= runtime.required_revision {
-                Ok(Vec::new())
-            } else {
-                let failed = runtime.required_revision - subject.revision;
-                Ok(vec![TestFinding::TestsFailed {
-                    passed: subject.revision,
-                    failed,
-                }])
-            }
-        })
-    }
-}
-
-struct RepairPatch;
-
-impl RepairPlanner for RepairPatch {
-    type Runtime = BuildRuntime;
-    type Input = FeatureRequest;
-    type Artefact = Patch;
-    type Finding = TestFinding;
-    type Error = Error;
-
-    fn repair<'a>(
-        &'a self,
-        runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
-    ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
-        Box::pin(async move {
-            let previous = attempts.last().expect("attempt present");
-            Ok(FeatureRequest {
-                name: previous.input.name.clone(),
-                revision: previous.artefact.revision + runtime.repair_increment,
-            })
-        })
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let runtime = BuildRuntime {
@@ -169,10 +70,55 @@ async fn main() {
         repair_increment: 2,
     };
 
-    let build_step = Step::builder(GeneratePatch)
-        .materialise(ApplyPatch)
-        .validate(CargoTest)
-        .repair_with(RepairPatch)
+    let generate_patch = task_fn(|_runtime: &BuildRuntime, input: FeatureRequest| {
+        let files = vec![
+            format!("src/{name}/mod.rs", name = input.name),
+            format!("src/{name}/tests.rs", name = input.name),
+        ];
+        Box::pin(async move {
+            Ok::<_, Error>(Patch {
+                revision: input.revision,
+                files,
+            })
+        })
+    });
+
+    let apply_patch = materialiser_fn(|_runtime: &BuildRuntime, input: Patch| {
+        Box::pin(async move {
+            Ok::<_, Error>(Workspace {
+                revision: input.revision,
+            })
+        })
+    });
+
+    let cargo_test = check_fn(|runtime: &BuildRuntime, subject: Workspace| {
+        let findings = if subject.revision >= runtime.required_revision {
+            Vec::new()
+        } else {
+            let failed = runtime.required_revision - subject.revision;
+            vec![TestFinding::TestsFailed {
+                passed: subject.revision,
+                failed,
+            }]
+        };
+        Box::pin(async move { Ok::<_, Error>(findings) })
+    });
+
+    let repair_patch = repair_last_fn(
+        |runtime: &BuildRuntime, last: Attempt<FeatureRequest, Patch, TestFinding>| {
+            Box::pin(async move {
+                Ok::<_, Error>(FeatureRequest {
+                    name: last.input.name,
+                    revision: last.artefact.revision + runtime.repair_increment,
+                })
+            })
+        },
+    );
+
+    let build_step = Step::builder(generate_patch)
+        .materialise(apply_patch)
+        .validate(cargo_test)
+        .repair_with(repair_patch)
         .retry_policy(RetryPolicy::new(5))
         .build();
 

@@ -251,6 +251,7 @@
 //! ```
 
 pub use crate::{
+    adaptor::{check_fn, materialiser_fn, repair_fn, repair_last_fn, task_fn},
     check::Check,
     graph::{
         EdgeSpec, GraphPatch, InputSelectionError, InvalidPatchError, NodeContext,
@@ -269,6 +270,7 @@ pub use crate::{
     task::Task,
 };
 
+mod adaptor;
 mod check;
 mod graph;
 mod materialiser;

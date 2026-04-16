@@ -1,60 +1,18 @@
 //! Demonstrates `ProcessTask` from `naaf-process`, which adapts shell commands
 //! into `naaf_core::Task`.
 //!
-//! A `ProcessTask` runs a `printf` command to produce output, a hand-written
+//! A `ProcessTask` runs a `printf` command to produce output, a closure-based
 //! check validates the result, and a repair planner adjusts the command. The
 //! step retries until the check passes.
 
 use std::{convert::Infallible, string::FromUtf8Error};
 
-use futures::future::LocalBoxFuture;
-use naaf_core::{Attempt, Check, RepairPlanner, RetryPolicy, Step};
+use naaf_core::{Attempt, RetryPolicy, Step, check_fn, repair_fn};
 use naaf_process::{AdapterError, ProcessAgent, ProcessCommand};
 
 #[derive(Debug)]
 struct CheckRuntime {
     required_substring: &'static str,
-}
-
-struct MentionsSubstring;
-
-impl Check for MentionsSubstring {
-    type Runtime = CheckRuntime;
-    type Subject = String;
-    type Finding = &'static str;
-    type Error = AdapterError<Infallible, FromUtf8Error>;
-
-    fn check<'a>(
-        &'a self,
-        runtime: &'a Self::Runtime,
-        subject: Self::Subject,
-    ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
-        Box::pin(async move {
-            if subject.contains(runtime.required_substring) {
-                Ok(Vec::new())
-            } else {
-                Ok(vec!["output did not contain the required substring"])
-            }
-        })
-    }
-}
-
-struct ReviseCommand;
-
-impl RepairPlanner for ReviseCommand {
-    type Runtime = CheckRuntime;
-    type Input = String;
-    type Artefact = String;
-    type Finding = &'static str;
-    type Error = AdapterError<Infallible, FromUtf8Error>;
-
-    fn repair<'a>(
-        &'a self,
-        runtime: &'a Self::Runtime,
-        _attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
-    ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
-        Box::pin(async move { Ok(format!("printf '{}'", runtime.required_substring)) })
-    }
 }
 
 #[tokio::main]
@@ -72,9 +30,29 @@ async fn main() {
         required_substring: "hello from naaf",
     };
 
+    let mentions_substring = check_fn(|runtime: &CheckRuntime, subject: String| {
+        let findings: Vec<&'static str> = if subject.contains(runtime.required_substring) {
+            Vec::new()
+        } else {
+            vec!["output did not contain the required substring"]
+        };
+        Box::pin(async move { Ok::<_, AdapterError<Infallible, FromUtf8Error>>(findings) })
+    });
+
+    let revise_command = repair_fn(
+        |runtime: &CheckRuntime, _attempts: Vec<Attempt<String, String, &'static str>>| {
+            Box::pin(async move {
+                Ok::<_, AdapterError<Infallible, FromUtf8Error>>(format!(
+                    "printf '{}'",
+                    runtime.required_substring
+                ))
+            })
+        },
+    );
+
     let step = Step::builder(echo_task)
-        .validate(MentionsSubstring)
-        .repair_with(ReviseCommand)
+        .validate(mentions_substring)
+        .repair_with(revise_command)
         .retry_policy(RetryPolicy::new(3))
         .build();
 

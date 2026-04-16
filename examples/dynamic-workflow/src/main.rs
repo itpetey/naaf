@@ -7,10 +7,9 @@
 
 use std::fmt::{Display, Formatter};
 
-use futures::future::LocalBoxFuture;
 use naaf_core::{
-    EdgeSpec, GraphPatch, NeverFinding, NodeContext, NodeId, NodeInput, NodeReport, NodeSpec, Step,
-    StepNode, Task, Workflow,
+    EdgeSpec, GraphPatch, NodeContext, NodeId, NodeInput, NodeSpec, Step, StepNode, Workflow,
+    task_fn,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,134 +60,70 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-struct PlanProject;
-
-impl Task for PlanProject {
-    type Runtime = PlannerRuntime;
-    type Input = PlanningInput;
-    type Output = ProjectPlan;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-        Box::pin(async move {
-            let phases = input
-                .goals
-                .iter()
-                .map(|goal| format!("Implement {goal}"))
-                .collect();
-            Ok(ProjectPlan {
-                name: input.name,
-                phases,
-                estimated_weeks: input.estimated_weeks,
-            })
-        })
-    }
-}
-
-struct DesignApi;
-
-impl Task for DesignApi {
-    type Runtime = PlannerRuntime;
-    type Input = ProjectPlan;
-    type Output = ApiDesign;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-        Box::pin(async move {
-            let endpoints = input
-                .phases
-                .iter()
-                .map(|phase| format!("/api/{phase}"))
-                .collect();
-            Ok(ApiDesign {
-                plan_name: input.name,
-                endpoints,
-            })
-        })
-    }
-}
-
-struct DesignUi;
-
-impl Task for DesignUi {
-    type Runtime = PlannerRuntime;
-    type Input = ProjectPlan;
-    type Output = UiDesign;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-        Box::pin(async move {
-            let components = input
-                .phases
-                .iter()
-                .map(|phase| format!("{phase}Panel"))
-                .collect();
-            Ok(UiDesign {
-                plan_name: input.name,
-                components,
-            })
-        })
-    }
-}
-
-struct MergeReport;
-
-impl Task for MergeReport {
-    type Runtime = PlannerRuntime;
-    type Input = (ApiDesign, UiDesign);
-    type Output = ProjectReport;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-        Box::pin(async move {
-            let plan = ProjectPlan {
-                name: input.0.plan_name.clone(),
-                phases: Vec::new(),
-                estimated_weeks: 0,
-            };
-            Ok(ProjectReport {
-                plan,
-                api: input.0,
-                ui: input.1,
-            })
-        })
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let runtime = PlannerRuntime;
 
     let root_id = NodeId::new();
-    let plan_step: Step<PlannerRuntime, PlanningInput, ProjectPlan, NeverFinding, Error> =
-        Step::builder(PlanProject)
-            .with_findings::<NeverFinding>()
-            .build();
-    let api_step = Step::builder(DesignApi)
-        .with_findings::<NeverFinding>()
-        .build();
-    let ui_step = Step::builder(DesignUi)
-        .with_findings::<NeverFinding>()
-        .build();
-    let merge_step = Step::builder(MergeReport)
-        .with_findings::<NeverFinding>()
-        .build();
+
+    let plan_step = Step::task(|_runtime: &PlannerRuntime, input: PlanningInput| {
+        let phases = input
+            .goals
+            .iter()
+            .map(|goal| format!("Implement {goal}"))
+            .collect();
+        Box::pin(async move {
+            Ok::<_, Error>(ProjectPlan {
+                name: input.name,
+                phases,
+                estimated_weeks: input.estimated_weeks,
+            })
+        })
+    });
+
+    let api_step = Step::task(|_runtime: &PlannerRuntime, input: ProjectPlan| {
+        let endpoints = input
+            .phases
+            .iter()
+            .map(|phase| format!("/api/{phase}"))
+            .collect();
+        Box::pin(async move {
+            Ok::<_, Error>(ApiDesign {
+                plan_name: input.name,
+                endpoints,
+            })
+        })
+    });
+
+    let ui_step = Step::task(|_runtime: &PlannerRuntime, input: ProjectPlan| {
+        let components = input
+            .phases
+            .iter()
+            .map(|phase| format!("{phase}Panel"))
+            .collect();
+        Box::pin(async move {
+            Ok::<_, Error>(UiDesign {
+                plan_name: input.name,
+                components,
+            })
+        })
+    });
+
+    let merge_step = task_fn(|_runtime: &PlannerRuntime, input: (ApiDesign, UiDesign)| {
+        let plan = ProjectPlan {
+            name: input.0.plan_name.clone(),
+            phases: Vec::new(),
+            estimated_weeks: 0,
+        };
+        Box::pin(async move {
+            Ok::<_, Error>(ProjectReport {
+                plan,
+                api: input.0,
+                ui: input.1,
+            })
+        })
+    });
+    let merge_step = Step::builder(merge_step).build();
 
     let api_step_clone = api_step.clone();
     let ui_step_clone = ui_step.clone();
@@ -262,7 +197,7 @@ async fn main() {
 
     for (id, node) in report.nodes() {
         println!("Node: {} ({id})", node.name());
-        if let NodeReport::Step(step_report) = node.report() {
+        if let naaf_core::NodeReport::Step(step_report) = node.report() {
             println!("  Attempts: {}", step_report.attempt_count());
         }
     }

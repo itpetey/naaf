@@ -1,14 +1,13 @@
 //! Demonstrates a step that materialises its task output into a different
 //! subject type before checking it.
 //!
-//! `PlanProject` produces a `ProjectPlan`, which `ReviewPlan` validates. Then
-//! `WriteProjectPlan` materialises it into a `String` for further checks. The
-//! repair planner revises the input when findings are reported.
+//! The plan task produces a `ProjectPlan`, which a check validates. Then a
+//! materialiser converts it into a `String` for further checks. The repair
+//! planner revises the input when findings are reported.
 
 use std::fmt::{Display, Formatter};
 
-use futures::future::LocalBoxFuture;
-use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, RetryPolicy, Step, Task};
+use naaf_core::{Attempt, RetryPolicy, Step, check_fn, materialiser_fn, repair_last_fn, task_fn};
 
 #[derive(Debug)]
 struct PlannerRuntime {
@@ -48,109 +47,62 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-struct PlanProject;
+#[tokio::main]
+async fn main() {
+    let runtime = PlannerRuntime {
+        min_phases: 3,
+        min_weeks: 4,
+        repair_increment: 2,
+    };
 
-impl Task for PlanProject {
-    type Runtime = PlannerRuntime;
-    type Input = PlanningInput;
-    type Output = ProjectPlan;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
+    let plan_project = task_fn(|_runtime: &PlannerRuntime, input: PlanningInput| {
+        let phases = input
+            .goals
+            .iter()
+            .map(|goal| format!("Implement {goal}"))
+            .collect();
         Box::pin(async move {
-            let phases = input
-                .goals
-                .iter()
-                .map(|goal| format!("Implement {goal}"))
-                .collect();
-            Ok(ProjectPlan {
+            Ok::<_, Error>(ProjectPlan {
                 name: input.name,
                 phases,
                 estimated_weeks: input.estimated_weeks,
             })
         })
-    }
-}
+    });
 
-struct ReviewPlan;
+    let review_plan = check_fn(|runtime: &PlannerRuntime, subject: ProjectPlan| {
+        let mut findings = Vec::new();
+        if subject.phases.len() < runtime.min_phases {
+            findings.push(Finding::InsufficientPhases {
+                min: runtime.min_phases,
+                actual: subject.phases.len(),
+            });
+        }
+        if subject.estimated_weeks < runtime.min_weeks {
+            findings.push(Finding::EstimationTooLow {
+                min: runtime.min_weeks,
+                actual: subject.estimated_weeks,
+            });
+        }
+        Box::pin(async move { Ok::<_, Error>(findings) })
+    });
 
-impl Check for ReviewPlan {
-    type Runtime = PlannerRuntime;
-    type Subject = ProjectPlan;
-    type Finding = Finding;
-    type Error = Error;
-
-    fn check<'a>(
-        &'a self,
-        runtime: &'a Self::Runtime,
-        subject: Self::Subject,
-    ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
+    let write_project_plan = materialiser_fn(|_runtime: &PlannerRuntime, input: ProjectPlan| {
         Box::pin(async move {
-            let mut findings = Vec::new();
-            if subject.phases.len() < runtime.min_phases {
-                findings.push(Finding::InsufficientPhases {
-                    min: runtime.min_phases,
-                    actual: subject.phases.len(),
-                });
-            }
-            if subject.estimated_weeks < runtime.min_weeks {
-                findings.push(Finding::EstimationTooLow {
-                    min: runtime.min_weeks,
-                    actual: subject.estimated_weeks,
-                });
-            }
-            Ok(findings)
-        })
-    }
-}
-
-struct WriteProjectPlan;
-
-impl Materialiser for WriteProjectPlan {
-    type Runtime = PlannerRuntime;
-    type Input = ProjectPlan;
-    type Output = String;
-    type Error = Error;
-
-    fn materialise<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-        Box::pin(async move {
-            Ok(format!(
+            Ok::<_, Error>(format!(
                 "# {name}\n\nPhases: {phases}\nEstimated: {weeks} weeks",
                 name = input.name,
                 phases = input.phases.join(", "),
                 weeks = input.estimated_weeks,
             ))
         })
-    }
-}
+    });
 
-struct RevisePlan;
-
-impl RepairPlanner for RevisePlan {
-    type Runtime = PlannerRuntime;
-    type Input = PlanningInput;
-    type Artefact = ProjectPlan;
-    type Finding = Finding;
-    type Error = Error;
-
-    fn repair<'a>(
-        &'a self,
-        runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
-    ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
-        Box::pin(async move {
-            let previous = attempts.last().expect("attempt present");
-            let mut goals = previous.input.goals.clone();
+    let revise_plan = repair_last_fn(
+        |runtime: &PlannerRuntime, last: Attempt<PlanningInput, ProjectPlan, Finding>| {
+            let mut goals = last.input.goals;
             let mut extra = false;
-            for finding in &previous.findings {
+            for finding in &last.findings {
                 match finding {
                     Finding::InsufficientPhases { .. } => {
                         goals.push("Integration testing".to_string());
@@ -164,27 +116,20 @@ impl RepairPlanner for RevisePlan {
             if !extra {
                 goals.push("Integration testing".to_string());
             }
-            Ok(PlanningInput {
-                name: previous.input.name.clone(),
-                goals,
-                estimated_weeks: previous.artefact.estimated_weeks + runtime.repair_increment,
+            Box::pin(async move {
+                Ok::<_, Error>(PlanningInput {
+                    name: last.input.name,
+                    goals,
+                    estimated_weeks: last.artefact.estimated_weeks + runtime.repair_increment,
+                })
             })
-        })
-    }
-}
+        },
+    );
 
-#[tokio::main]
-async fn main() {
-    let runtime = PlannerRuntime {
-        min_phases: 3,
-        min_weeks: 4,
-        repair_increment: 2,
-    };
-
-    let plan_step = Step::builder(PlanProject)
-        .validate(ReviewPlan)
-        .materialise(WriteProjectPlan)
-        .repair_with(RevisePlan)
+    let plan_step = Step::builder(plan_project)
+        .validate(review_plan)
+        .materialise(write_project_plan)
+        .repair_with(revise_plan)
         .retry_policy(RetryPolicy::new(5))
         .build();
 

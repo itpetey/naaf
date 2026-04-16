@@ -1,13 +1,12 @@
 //! Demonstrates parallel fan-out with `.join()` and reconciliation with
 //! `.reconcile_task()`.
 //!
-//! Two design tasks (`DesignApi` and `DesignUi`) run in parallel against the
-//! same cloned input. Their outputs are combined by `MergeReport`.
+//! Two design tasks run in parallel against the same cloned input. Their
+//! outputs are combined by a merge task.
 
 use std::fmt::{Display, Formatter};
 
-use futures::future::LocalBoxFuture;
-use naaf_core::Task;
+use naaf_core::{Step, task_fn};
 
 #[derive(Debug)]
 struct PlannerRuntime;
@@ -49,100 +48,54 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-struct DesignApi;
+#[tokio::main]
+async fn main() {
+    let runtime = PlannerRuntime;
 
-impl Task for DesignApi {
-    type Runtime = PlannerRuntime;
-    type Input = ProjectPlan;
-    type Output = ApiDesign;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
+    let design_api = Step::task(|_runtime: &PlannerRuntime, input: ProjectPlan| {
+        let endpoints = input
+            .phases
+            .iter()
+            .map(|phase| format!("/api/{phase}"))
+            .collect();
         Box::pin(async move {
-            let endpoints = input
-                .phases
-                .iter()
-                .map(|phase| format!("/api/{phase}"))
-                .collect();
-            Ok(ApiDesign {
+            Ok::<_, Error>(ApiDesign {
                 plan_name: input.name,
                 endpoints,
             })
         })
-    }
-}
+    });
 
-struct DesignUi;
-
-impl Task for DesignUi {
-    type Runtime = PlannerRuntime;
-    type Input = ProjectPlan;
-    type Output = UiDesign;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
+    let design_ui = Step::task(|_runtime: &PlannerRuntime, input: ProjectPlan| {
+        let components = input
+            .phases
+            .iter()
+            .map(|phase| format!("{phase}Panel"))
+            .collect();
         Box::pin(async move {
-            let components = input
-                .phases
-                .iter()
-                .map(|phase| format!("{phase}Panel"))
-                .collect();
-            Ok(UiDesign {
+            Ok::<_, Error>(UiDesign {
                 plan_name: input.name,
                 components,
             })
         })
-    }
-}
+    });
 
-struct MergeReport;
-
-impl Task for MergeReport {
-    type Runtime = PlannerRuntime;
-    type Input = (ApiDesign, UiDesign);
-    type Output = ProjectReport;
-    type Error = Error;
-
-    fn run<'a>(
-        &'a self,
-        _runtime: &'a Self::Runtime,
-        input: Self::Input,
-    ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
+    let merge_report = task_fn(|_runtime: &PlannerRuntime, input: (ApiDesign, UiDesign)| {
+        let plan = ProjectPlan {
+            name: input.0.plan_name.clone(),
+            phases: Vec::new(),
+            estimated_weeks: 0,
+        };
         Box::pin(async move {
-            let plan = ProjectPlan {
-                name: input.0.plan_name.clone(),
-                phases: Vec::new(),
-                estimated_weeks: 0,
-            };
-            Ok(ProjectReport {
+            Ok::<_, Error>(ProjectReport {
                 plan,
                 api: input.0,
                 ui: input.1,
             })
         })
-    }
-}
+    });
 
-#[tokio::main]
-async fn main() {
-    let runtime = PlannerRuntime;
-
-    let api_step = naaf_core::Step::builder(DesignApi)
-        .with_findings::<()>()
-        .build();
-    let ui_step = naaf_core::Step::builder(DesignUi)
-        .with_findings::<()>()
-        .build();
-
-    let combined = api_step.join(ui_step).reconcile_task(MergeReport);
+    let combined = design_api.join(design_ui).reconcile_task(merge_report);
 
     let plan = ProjectPlan {
         name: "Search Feature".to_string(),

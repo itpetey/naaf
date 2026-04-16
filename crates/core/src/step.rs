@@ -11,9 +11,7 @@ use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 use crate::{
     check::Check,
     materialiser::Materialiser,
-    repair::{
-        Attempt, AttemptReport, NeverFinding, RepairPlanner, RetryPolicy, StepReport, Traced,
-    },
+    repair::{Attempt, AttemptReport, RepairPlanner, RetryPolicy, StepReport, Traced},
     task::Task,
 };
 
@@ -50,7 +48,7 @@ pub struct FindingOpen;
 pub struct FindingBound;
 
 /// Builder alias used before the step's public finding type has been selected.
-pub type OpenStepBuilder<R, I, A, S, E> = StepBuilder<R, I, A, S, NeverFinding, E, FindingOpen>;
+pub type OpenStepBuilder<R, I, A, S, E> = StepBuilder<R, I, A, S, (), E, FindingOpen>;
 
 /// Builder alias used after the step's public finding type has been selected.
 pub type BoundStepBuilder<R, I, A, S, F, E> = StepBuilder<R, I, A, S, F, E, FindingBound>;
@@ -73,6 +71,18 @@ impl Step<(), (), (), (), ()> {
             retry_policy: RetryPolicy::default(),
             marker: PhantomData,
         }
+    }
+
+    /// Builds a step directly from a closure, with no validation or repair.
+    pub fn task<R, I, O, E, F>(f: F) -> Step<R, I, O, (), E>
+    where
+        R: 'static,
+        I: Clone + 'static,
+        O: Clone + 'static,
+        E: 'static,
+        F: Fn(&R, I) -> LocalBoxFuture<'_, Result<O, E>> + 'static,
+    {
+        Step::builder(crate::adaptor::TaskFn::new(f)).build()
     }
 }
 
