@@ -1,0 +1,15 @@
+[package]
+name = "naaf-process"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+futures = { workspace = true, features = ["alloc", "std"] }
+naaf-core = { path = "../core" }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread"] }
