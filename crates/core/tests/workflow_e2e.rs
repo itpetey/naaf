@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use futures::future::LocalBoxFuture;
-use naaf::{Attempt, Check, Materialiser, RepairPlanner, RetryPolicy, Step, Task};
+use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, RetryPolicy, Step, Task};
 
 #[derive(Debug)]
 struct TestRuntime {
