@@ -1,9 +1,13 @@
-//! LLM-backed `naaf_core::Task` infrastructure.
+//! LLM-backed `naaf_core` role infrastructure.
 //!
 //! `naaf-llm` keeps the outer workflow contract in `naaf-core` while handling
 //! the inner model execution loop, including tool calls. Callers stay in
 //! control of request construction and output decoding so the crate does not
 //! impose a prompt or response format.
+//!
+//! A shared [`LlmAgent`] can then be projected into typed `Task`, `Check`,
+//! `Materialiser`, and `RepairPlanner` implementations without duplicating the
+//! provider wiring.
 //!
 //! # Example
 //!
@@ -14,7 +18,7 @@
 //! use naaf_core::{Check, Step, Task};
 //! use naaf_llm::{
 //!     AssistantMessage, CompletionRequest, CompletionResponse, ExecutionOutcome, Executor,
-//!     LlmClient, LlmTask, Message, TaskError, Tool, ToolCall, ToolRegistry, ToolSpec,
+//!     LlmAgent, LlmClient, Message, TaskError, Tool, ToolCall, ToolRegistry, ToolSpec,
 //! };
 //! use serde_json::{Value, json};
 //!
@@ -141,8 +145,8 @@
 //! let tools = ToolRegistry::new()
 //!     .with_tool(AddTool)
 //!     .expect("tool registry should accept unique tool names");
-//! let task = LlmTask::with_executor(
-//!     Executor::with_tools(client, tools),
+//! let llm = LlmAgent::with_executor(Executor::with_tools(client, tools));
+//! let task = llm.task(
 //!     |_runtime: &Runtime, question: String| {
 //!         Ok::<_, Infallible>(CompletionRequest::new(
 //!             "stub-model",
@@ -293,17 +297,21 @@
 //! ```
 
 pub use crate::{
+    agent::LlmAgent,
     client::LlmClient,
-    error::{ExecutorError, TaskError},
+    error::{
+        AdapterError, CheckError, ExecutorError, MaterialiserError, RepairPlannerError, TaskError,
+    },
     executor::{ExecutionOutcome, Executor, ExecutorConfig},
     message::{
         AssistantMessage, CompletionRequest, CompletionResponse, Message, ToolCall, ToolChoice,
         ToolResultMessage, ToolSpec, Usage,
     },
-    task::LlmTask,
+    task::{LlmCheck, LlmMaterialiser, LlmRepairPlanner, LlmTask},
     tool::{RegisterToolError, Tool, ToolCallError, ToolRegistry},
 };
 
+mod agent;
 mod client;
 mod error;
 mod executor;
