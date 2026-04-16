@@ -303,6 +303,10 @@ pub use crate::{
         AdapterError, CheckError, ExecutorError, MaterialiserError, RepairPlannerError, TaskError,
     },
     executor::{ExecutionOutcome, Executor, ExecutorConfig},
+    human::{
+        ChannelHumanIO, HumanAnswer, HumanIO, HumanQuestion, PendingQuestion, QuestionTool,
+        StdinError, StdinHumanIO,
+    },
     message::{
         AssistantMessage, CompletionRequest, CompletionResponse, Message, ToolCall, ToolChoice,
         ToolResultMessage, ToolSpec, Usage,
@@ -324,6 +328,7 @@ mod agent;
 mod client;
 mod error;
 mod executor;
+mod human;
 mod message;
 #[cfg(feature = "openai")]
 mod openai;
