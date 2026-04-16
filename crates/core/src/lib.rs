@@ -252,6 +252,11 @@
 
 pub use crate::{
     check::Check,
+    graph::{
+        EdgeSpec, GraphPatch, InputSelectionError, InvalidPatchError, NodeContext,
+        NodeExecutionError, NodeId, NodeInput, NodeOutcome, NodeReport, NodeSpec, NodeSummary,
+        StepNode, Workflow, WorkflowError, WorkflowNode, WorkflowRunId, WorkflowRunReport,
+    },
     materialiser::Materialiser,
     observability::{
         CheckExt, MaterialiserExt, ObservedCheck, ObservedMaterialiser, ObservedRepairPlanner,
@@ -265,6 +270,7 @@ pub use crate::{
 };
 
 mod check;
+mod graph;
 mod materialiser;
 mod observability;
 mod repair;

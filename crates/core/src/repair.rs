@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
 use futures::future::LocalBoxFuture;
+use serde::{Deserialize, Serialize};
 
 /// One failed step attempt captured for repair planning.
 #[derive(Clone, PartialEq, Eq)]
@@ -193,5 +194,5 @@ where
 }
 
 /// Placeholder finding type for steps that do not yet bind a finding type.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NeverFinding {}
