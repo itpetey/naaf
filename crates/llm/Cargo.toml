@@ -8,6 +8,7 @@ license.workspace = true
 [features]
 default = []
 openai = ["dep:reqwest"]
+web-search = ["dep:reqwest"]
 
 [dependencies]
 futures = { workspace = true, features = ["alloc", "std"] }

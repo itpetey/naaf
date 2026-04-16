@@ -317,6 +317,8 @@ pub use crate::{
 
 #[cfg(feature = "openai")]
 pub use crate::openai::{OpenAiClient, OpenAiConfig, OpenAiError};
+#[cfg(feature = "web-search")]
+pub use crate::web_search::{WebSearchError, WebSearchParams, WebSearchTool};
 
 mod agent;
 mod client;
@@ -328,3 +330,5 @@ mod openai;
 mod spawn;
 mod task;
 mod tool;
+#[cfg(feature = "web-search")]
+mod web_search;
