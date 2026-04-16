@@ -13,8 +13,8 @@
 //! # End-To-End Step
 //!
 //! ```
-//! use futures::{executor::block_on, future::LocalBoxFuture};
-//! use naaf::{Check, Materialiser, RepairPlanner, RetryPolicy, Step, Task};
+//! use futures::future::LocalBoxFuture;
+//! use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, RetryPolicy, Step, Task};
 //!
 //! #[derive(Debug)]
 //! struct Runtime {
@@ -121,7 +121,7 @@
 //!     fn repair<'a>(
 //!         &'a self,
 //!         _runtime: &'a Self::Runtime,
-//!         attempts: Vec<naaf::Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+//!         attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
 //!     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
 //!         Box::pin(async move {
 //!             let previous = attempts.last().expect("attempt present");
@@ -132,7 +132,9 @@
 //!     }
 //! }
 //!
-//! block_on(async {
+//! tokio::runtime::Runtime::new()
+//!     .expect("runtime should build")
+//!     .block_on(async {
 //!     let runtime = Runtime {
 //!         required_revision: 2,
 //!     };
@@ -152,14 +154,14 @@
 //!     assert_eq!(traced.output().revision, 2);
 //!     assert_eq!(traced.report().attempt_count(), 3);
 //!     assert!(traced.report().attempts()[2].accepted());
-//! });
+//!     });
 //! ```
 //!
 //! # Parallel Fan-Out And Reconciliation
 //!
 //! ```
-//! use futures::{executor::block_on, future::LocalBoxFuture};
-//! use naaf::{Step, Task};
+//! use futures::future::LocalBoxFuture;
+//! use naaf_core::{Step, Task};
 //!
 //! #[derive(Debug)]
 //! struct Runtime {
@@ -228,7 +230,9 @@
 //!     }
 //! }
 //!
-//! block_on(async {
+//! tokio::runtime::Runtime::new()
+//!     .expect("runtime should build")
+//!     .block_on(async {
 //!     let runtime = Runtime {
 //!         increment: 1,
 //!         multiplier: 2,
@@ -243,7 +247,7 @@
 //!
 //!     let result = workflow.run(&runtime, 3).await.expect("workflow should succeed");
 //!     assert_eq!(result, 13);
-//! });
+//!     });
 //! ```
 
 pub use crate::{

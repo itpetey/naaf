@@ -380,9 +380,9 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use futures::{executor::block_on, future::LocalBoxFuture};
+    use futures::future::LocalBoxFuture;
     use serde_json::Value;
-    use tracing::{Instrument, Level, subscriber::with_default};
+    use tracing::{Instrument, Level, instrument::WithSubscriber};
 
     use super::{CheckExt, MaterialiserExt, RepairPlannerExt, TaskExt};
     use crate::{Attempt, RetryPolicy, Step};
@@ -544,8 +544,8 @@ mod tests {
                 .is_some_and(|spans| spans.iter().any(|span| span[field] == expected))
     }
 
-    #[test]
-    fn observed_components_emit_structured_json_logs() {
+    #[tokio::test]
+    async fn observed_components_emit_structured_json_logs() {
         let buffer = SharedBuffer::default();
         let subscriber = tracing_subscriber::fmt()
             .json()
@@ -563,22 +563,19 @@ mod tests {
             .retry_policy(RetryPolicy::new(2))
             .build();
 
-        with_default(subscriber, || {
-            block_on(async {
-                step.run(
-                    &TestRuntime {
-                        required_revision: 1,
-                    },
-                    Input {
-                        prompt: "fix tests",
-                        revision: 0,
-                    },
-                )
-                .instrument(tracing::info_span!("test_run"))
-                .await
-                .expect("step should succeed");
-            });
-        });
+        step.run(
+            &TestRuntime {
+                required_revision: 1,
+            },
+            Input {
+                prompt: "fix tests",
+                revision: 0,
+            },
+        )
+        .instrument(tracing::info_span!("test_run"))
+        .with_subscriber(subscriber)
+        .await
+        .expect("step should succeed");
 
         let raw = String::from_utf8(buffer.0.lock().expect("buffer lock").clone())
             .expect("utf8 log output");

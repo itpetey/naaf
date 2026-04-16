@@ -1,19 +1,20 @@
-[package]
-name = "naaf"
+[workspace]
+resolver = "3"
+members = ["crates/core"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/itpetey/naaf"
 license = "MPL-2.0"
 
-[dependencies]
-futures = "0.3"
-pin-project = "1.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2.0"
-tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
-tracing = "0.1"
-uuid = { version = "1.23", features = ["serde", "v4"] }
-
-[dev-dependencies]
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+[workspace.dependencies]
+futures = { version = "0.3", default-features = false }
+pin-project = { version = "1.1", default-features = false }
+serde = { version = "1.0", default-features = false }
+serde_json = { version = "1.0", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+tokio = { version = "1.52", default-features = false }
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+uuid = { version = "1.23", default-features = false }
