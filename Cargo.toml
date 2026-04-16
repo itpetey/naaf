@@ -1,6 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/llm", "crates/process"]
+members = [
+    "crates/core",
+    "crates/llm",
+    "crates/process",
+    "examples/build-test",
+    "examples/composed-workflow",
+    "examples/dynamic-workflow",
+    "examples/join-reconcile",
+    "examples/materialiser",
+    "examples/process-task",
+    "examples/step-retry",
+]
 
 [workspace.package]
 version = "0.1.0"

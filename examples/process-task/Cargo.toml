@@ -1,0 +1,12 @@
+[package]
+name = "process-task"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+naaf-core = { path = "../../crates/core" }
+naaf-process = { path = "../../crates/process" }
+futures = { workspace = true, features = ["alloc", "std"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

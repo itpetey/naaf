@@ -24,6 +24,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
+name = "build-test"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "naaf-core",
+ "tokio",
+]
+
+[[package]]
 name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -34,6 +43,26 @@ name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+
+[[package]]
+name = "composed-workflow"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "naaf-core",
+ "tokio",
+]
+
+[[package]]
+name = "dynamic-workflow"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "naaf-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "equivalent"
@@ -180,6 +209,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "join-reconcile"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "naaf-core",
+ "tokio",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -210,6 +248,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
+]
+
+[[package]]
+name = "materialiser"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "naaf-core",
+ "tokio",
 ]
 
 [[package]]
@@ -319,6 +366,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "process-task"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "naaf-core",
+ "naaf-process",
+ "tokio",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -423,6 +480,15 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "step-retry"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "naaf-core",
+ "tokio",
+]
 
 [[package]]
 name = "syn"
