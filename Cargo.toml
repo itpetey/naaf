@@ -1,24 +1,15 @@
-[workspace]
-resolver = "2"
-members = [
-  "crates/core",
-  "crates/executors",
-  "crates/schema",
-  "crates/validators",
-  "crates/workflow",
-]
-
-[workspace.package]
+[package]
+name = "naaf"
 version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/itpetey/naaf"
 license = "MPL-2.0"
 
-[workspace.dependencies]
-naaf-core = { path = "crates/core" }
-naaf-executors = { path = "crates/executors" }
-naaf-schema = { path = "crates/schema" }
-naaf-validators = { path = "crates/validators" }
-serde = { version = "1.0", default-features = false }
-serde_json = { version = "1.0", default-features = false }
-uuid = { version = "1.23", default-features = false }
+[dependencies]
+futures = "0.3"
+pin-project = "1.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.23", features = ["serde", "v4"] }
