@@ -76,6 +76,15 @@ pub struct NodeContext {
 }
 
 impl NodeContext {
+    /// Creates a node context for the given run, node, and optional parent.
+    pub fn new(run_id: WorkflowRunId, node_id: NodeId, parent_id: Option<NodeId>) -> Self {
+        Self {
+            run_id,
+            node_id,
+            parent_id,
+        }
+    }
+
     /// Returns the current workflow run identifier.
     pub fn run_id(&self) -> WorkflowRunId {
         self.run_id
@@ -320,6 +329,17 @@ impl<R, E> NodeSpec<R, E> {
             seed: None,
             parent: None,
             runner: Arc::new(runner),
+        }
+    }
+
+    /// Creates a node specification from a pre-shared runner.
+    pub fn from_shared_runner(name: impl Into<String>, runner: Arc<NodeRunner<R, E>>) -> Self {
+        Self {
+            id: NodeId::new(),
+            name: name.into(),
+            seed: None,
+            parent: None,
+            runner,
         }
     }
 

@@ -307,6 +307,10 @@ pub use crate::{
         AssistantMessage, CompletionRequest, CompletionResponse, Message, ToolCall, ToolChoice,
         ToolResultMessage, ToolSpec, Usage,
     },
+    spawn::{
+        NodeTemplate, SpawnEdge, SpawnNode, SpawnRequest, SpawnResolveError, SpawnStore, SpawnTool,
+        resolve_spawn,
+    },
     task::{LlmCheck, LlmMaterialiser, LlmRepairPlanner, LlmTask},
     tool::{RegisterToolError, Tool, ToolCallError, ToolRegistry},
 };
@@ -316,5 +320,6 @@ mod client;
 mod error;
 mod executor;
 mod message;
+mod spawn;
 mod task;
 mod tool;
