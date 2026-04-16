@@ -5,9 +5,14 @@ edition.workspace = true
 repository.workspace = true
 license.workspace = true
 
+[features]
+default = []
+openai = ["dep:reqwest"]
+
 [dependencies]
 futures = { workspace = true, features = ["alloc", "std"] }
 naaf-core = { path = "../core" }
+reqwest = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror.workspace = true

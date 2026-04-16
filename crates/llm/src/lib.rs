@@ -315,11 +315,16 @@ pub use crate::{
     tool::{RegisterToolError, Tool, ToolCallError, ToolRegistry},
 };
 
+#[cfg(feature = "openai")]
+pub use crate::openai::{OpenAiClient, OpenAiConfig, OpenAiError};
+
 mod agent;
 mod client;
 mod error;
 mod executor;
 mod message;
+#[cfg(feature = "openai")]
+mod openai;
 mod spawn;
 mod task;
 mod tool;
