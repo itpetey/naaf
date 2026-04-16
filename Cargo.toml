@@ -4,6 +4,7 @@ members = [
     "crates/core",
     "crates/llm",
     "crates/process",
+    "crates/tui",
     "examples/build-test",
     "examples/composed-workflow",
     "examples/dynamic-workflow",
@@ -11,6 +12,7 @@ members = [
     "examples/materialiser",
     "examples/process-task",
     "examples/step-retry",
+    "examples/tui-demo",
 ]
 
 [workspace.package]
@@ -20,7 +22,9 @@ repository = "https://github.com/itpetey/naaf"
 license = "MPL-2.0"
 
 [workspace.dependencies]
+crossterm = { version = "0.28", default-features = false, features = ["events"] }
 futures = { version = "0.3", default-features = false }
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
 serde = { version = "1.0", default-features = false }
 serde_json = { version = "1.0", default-features = false }
 thiserror = { version = "2.0", default-features = false }

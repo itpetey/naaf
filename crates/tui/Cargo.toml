@@ -1,0 +1,16 @@
+[package]
+name = "naaf-tui"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+crossterm = { workspace = true, features = ["events"] }
+naaf-core = { path = "../core" }
+parking_lot = "0.12"
+ratatui = { workspace = true }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true, features = ["std"] }
+tracing-subscriber = { workspace = true, features = ["registry", "std"] }

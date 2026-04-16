@@ -3,7 +3,10 @@ use std::{any::type_name, borrow::Cow, fmt::Debug};
 use futures::future::LocalBoxFuture;
 use tracing::{Instrument, debug, debug_span, error, trace};
 
-use crate::{Attempt, Check, Materialiser, RepairPlanner, Task};
+use crate::{
+    Attempt, Check, Materialiser, RepairPlanner, Task,
+    span::{action, component, name},
+};
 
 /// Extension trait for wrapping tasks with structured `tracing` events.
 pub trait TaskExt: Task + Sized {
@@ -142,8 +145,8 @@ where
         let task = self.name.clone();
         let inner = &self.inner;
         let span = debug_span!(
-            "task_run",
-            component = "task",
+            name::TASK,
+            component = component::TASK,
             task = %task,
             input_type = %type_name::<T::Input>(),
             output_type = %type_name::<T::Output>()
@@ -151,18 +154,18 @@ where
 
         Box::pin(
             async move {
-                trace!(action = "input", input = ?input, "task input");
-                debug!(action = "run.start", "task started");
+                trace!(action = action::INPUT, input = ?input, "task input");
+                debug!(action = action::RUN_START, "task started");
 
                 match inner.run(runtime, input).await {
                     Ok(output) => {
-                        trace!(action = "output", output = ?output, "task output");
-                        debug!(action = "run.complete", "task completed");
+                        trace!(action = action::OUTPUT, output = ?output, "task output");
+                        debug!(action = action::RUN_COMPLETE, "task completed");
                         Ok(output)
                     }
                     Err(error_value) => {
-                        trace!(action = "error", error = ?error_value, "task error");
-                        error!(action = "run.error", "task failed");
+                        trace!(action = action::OUTPUT, error = ?error_value, "task error");
+                        error!(action = action::RUN_ERROR, "task failed");
                         Err(error_value)
                     }
                 }
@@ -207,8 +210,8 @@ where
         let check = self.name.clone();
         let inner = &self.inner;
         let span = debug_span!(
-            "check_run",
-            component = "check",
+            name::CHECK,
+            component = component::CHECK,
             check = %check,
             subject_type = %type_name::<C::Subject>(),
             finding_type = %type_name::<C::Finding>()
@@ -216,19 +219,22 @@ where
 
         Box::pin(
             async move {
-                trace!(action = "input", subject = ?subject, "check subject");
-                debug!(action = "run.start", "check started");
+                trace!(action = action::INPUT, subject = ?subject, "check subject");
+                debug!(action = action::RUN_START, "check started");
 
                 match inner.check(runtime, subject).await {
                     Ok(findings) => {
                         let finding_count = findings.len();
-                        trace!(action = "output", findings = ?findings, "check findings");
-                        debug!(action = "run.complete", finding_count, "check completed");
+                        trace!(action = action::OUTPUT, findings = ?findings, "check findings");
+                        debug!(
+                            action = action::RUN_COMPLETE,
+                            finding_count, "check completed"
+                        );
                         Ok(findings)
                     }
                     Err(error_value) => {
-                        trace!(action = "error", error = ?error_value, "check error");
-                        error!(action = "run.error", "check failed");
+                        trace!(action = action::OUTPUT, error = ?error_value, "check error");
+                        error!(action = action::RUN_ERROR, "check failed");
                         Err(error_value)
                     }
                 }
@@ -273,8 +279,8 @@ where
         let materialiser = self.name.clone();
         let inner = &self.inner;
         let span = debug_span!(
-            "materialiser_run",
-            component = "materialiser",
+            name::MATERIALISER,
+            component = component::MATERIALISER,
             materialiser = %materialiser,
             input_type = %type_name::<M::Input>(),
             output_type = %type_name::<M::Output>()
@@ -282,18 +288,18 @@ where
 
         Box::pin(
             async move {
-                trace!(action = "input", input = ?input, "materialiser input");
-                debug!(action = "run.start", "materialiser started");
+                trace!(action = action::INPUT, input = ?input, "materialiser input");
+                debug!(action = action::RUN_START, "materialiser started");
 
                 match inner.materialise(runtime, input).await {
                     Ok(output) => {
-                        trace!(action = "output", output = ?output, "materialiser output");
-                        debug!(action = "run.complete", "materialiser completed");
+                        trace!(action = action::OUTPUT, output = ?output, "materialiser output");
+                        debug!(action = action::RUN_COMPLETE, "materialiser completed");
                         Ok(output)
                     }
                     Err(error_value) => {
-                        trace!(action = "error", error = ?error_value, "materialiser error");
-                        error!(action = "run.error", "materialiser failed");
+                        trace!(action = action::OUTPUT, error = ?error_value, "materialiser error");
+                        error!(action = action::RUN_ERROR, "materialiser failed");
                         Err(error_value)
                     }
                 }
@@ -340,8 +346,8 @@ where
         let planner = self.name.clone();
         let inner = &self.inner;
         let span = debug_span!(
-            "repair_run",
-            component = "repair",
+            name::REPAIR,
+            component = component::REPAIR,
             planner = %planner,
             input_type = %type_name::<P::Input>(),
             artefact_type = %type_name::<P::Artefact>(),
@@ -351,18 +357,18 @@ where
         Box::pin(
             async move {
                 let attempt_count = attempts.len();
-                trace!(action = "input", attempts = ?attempts, attempt_count, "repair attempts");
-                debug!(action = "run.start", attempt_count, "repair planner started");
+                trace!(action = action::INPUT, attempts = ?attempts, attempt_count, "repair attempts");
+                debug!(action = action::RUN_START, attempt_count, "repair planner started");
 
                 match inner.repair(runtime, attempts).await {
                     Ok(next_input) => {
-                        trace!(action = "output", next_input = ?next_input, "repair planner output");
-                        debug!(action = "run.complete", "repair planner completed");
+                        trace!(action = action::OUTPUT, next_input = ?next_input, "repair planner output");
+                        debug!(action = action::RUN_COMPLETE, "repair planner completed");
                         Ok(next_input)
                     }
                     Err(error_value) => {
-                        trace!(action = "error", error = ?error_value, "repair planner error");
-                        error!(action = "run.error", "repair planner failed");
+                        trace!(action = action::OUTPUT, error = ?error_value, "repair planner error");
+                        error!(action = action::RUN_ERROR, "repair planner failed");
                         Err(error_value)
                     }
                 }

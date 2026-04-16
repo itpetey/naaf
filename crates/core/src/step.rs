@@ -12,6 +12,7 @@ use crate::{
     check::Check,
     materialiser::Materialiser,
     repair::{Attempt, AttemptReport, RepairPlanner, RetryPolicy, StepReport, Traced},
+    span::{action, component, name, reason},
     task::Task,
 };
 
@@ -380,8 +381,8 @@ where
                 let pipeline = pipeline.clone();
                 let repair = repair.clone();
                 let step_span = info_span!(
-                    "step_run",
-                    component = "step",
+                    name::STEP,
+                    component = component::STEP,
                     task = task_name,
                     input_type = %type_name::<I>(),
                     artefact_type = %type_name::<A>(),
@@ -395,17 +396,20 @@ where
                         let mut repair_attempts: Vec<Attempt<I, A, F>> = Vec::new();
                         let mut report_attempts: Vec<AttemptReport<F>> = Vec::new();
 
-                        info!(action = "run.start", "step started");
-                        trace!(action = "input", "step input received");
+                        info!(action = action::RUN_START, "step started");
+                        trace!(action = action::INPUT, "step input received");
 
                         loop {
                             let attempt = repair_attempts.len() + 1;
-                            debug!(action = "attempt.start", attempt, "step attempt started");
+                            debug!(
+                                action = action::ATTEMPT_START,
+                                attempt, "step attempt started"
+                            );
 
                             let artefact =
                                 task.run(runtime, input.clone()).await.map_err(|error| {
                                     error!(
-                                        action = "run.error",
+                                        action = action::RUN_ERROR,
                                         attempt,
                                         stage = %SystemStage::Task,
                                         "step failed with system error"
@@ -416,14 +420,17 @@ where
                                     }
                                 })?;
 
-                            trace!(action = "attempt.output", attempt, "task produced artefact");
+                            trace!(
+                                action = action::ATTEMPT_OUTPUT,
+                                attempt, "task produced artefact"
+                            );
 
                             let (_, findings): (_, Vec<F>) = pipeline
                                 .run(runtime, artefact.clone())
                                 .await
                                 .map_err(|error| {
                                     error!(
-                                        action = "run.error",
+                                        action = action::RUN_ERROR,
                                         attempt,
                                         stage = %SystemStage::Validation,
                                         "step failed with system error"
@@ -442,13 +449,13 @@ where
                             });
 
                             debug!(
-                                action = "attempt.validated",
+                                action = action::ATTEMPT_VALIDATED,
                                 attempt, accepted, finding_count, "step attempt validated"
                             );
 
                             if accepted {
                                 info!(
-                                    action = "run.complete",
+                                    action = action::RUN_COMPLETE,
                                     attempts = report_attempts.len(),
                                     "step completed"
                                 );
@@ -463,9 +470,9 @@ where
 
                             if repair_attempts.len() >= retry_policy.max_attempts() {
                                 warn!(
-                                    action = "run.rejected",
+                                    action = action::RUN_REJECTED,
                                     attempts = report_attempts.len(),
-                                    reason = "retry_limit_reached",
+                                    reason = reason::RETRY_LIMIT_REACHED,
                                     "step rejected"
                                 );
                                 return Err(StepError::Rejected(StepReport::new(report_attempts)));
@@ -473,16 +480,16 @@ where
 
                             let Some(repair) = repair.clone() else {
                                 warn!(
-                                    action = "run.rejected",
+                                    action = action::RUN_REJECTED,
                                     attempts = report_attempts.len(),
-                                    reason = "repair_unavailable",
+                                    reason = reason::REPAIR_UNAVAILABLE,
                                     "step rejected"
                                 );
                                 return Err(StepError::Rejected(StepReport::new(report_attempts)));
                             };
 
                             debug!(
-                                action = "attempt.repair.start",
+                                action = action::ATTEMPT_REPAIR_START,
                                 attempt,
                                 next_attempt = attempt + 1,
                                 "planning repair attempt"
@@ -493,7 +500,7 @@ where
                                 .await
                                 .map_err(|error| {
                                     error!(
-                                        action = "run.error",
+                                        action = action::RUN_ERROR,
                                         attempt,
                                         stage = %SystemStage::Repair,
                                         "step failed with system error"
@@ -505,7 +512,7 @@ where
                                 })?;
 
                             trace!(
-                                action = "attempt.repair.complete",
+                                action = action::ATTEMPT_REPAIR_COMPLETE,
                                 attempt,
                                 next_attempt = attempt + 1,
                                 "repair planner produced next input"

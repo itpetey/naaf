@@ -276,5 +276,6 @@ mod graph;
 mod materialiser;
 mod observability;
 mod repair;
+pub mod span;
 mod step;
 mod task;
