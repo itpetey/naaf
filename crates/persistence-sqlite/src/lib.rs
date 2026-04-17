@@ -1,3 +1,21 @@
+//! SQLite-based checkpoint persistence for `naaf`.
+//!
+//! `naaf-persistence-sqlite` provides a `Checkpointer` implementation that stores
+//! workflow and step checkpoints in a SQLite database.
+//!
+//! # Usage
+//!
+//! ```ignore
+//! use naaf_core::Checkpointer;
+//! use naaf_persistence_sqlite::SqliteCheckpointer;
+//!
+//! let checkpointer = SqliteCheckpointer::open("checkpoints.db")?;
+//! ```
+//!
+//! The checkpointer uses two tables:
+//! - `workflow_checkpoints` — stores workflow-level checkpoints by run ID
+//! - `step_checkpoints` — stores per-step checkpoints by run ID and node ID
+
 use std::sync::Arc;
 
 use naaf_core::{NodeId, StepCheckpoint, WorkflowCheckpoint, WorkflowRunId};

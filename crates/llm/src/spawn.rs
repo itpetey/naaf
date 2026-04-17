@@ -186,7 +186,7 @@ pub enum SpawnResolveError {
 /// Looks up a node runner by name and returns it for graph patch construction.
 ///
 /// Implementers map a template name to a specific node runner, typically by
-/// looking up a pre-built [`Step`] wrapped in a [`StepNode`].
+/// looking up a pre-built step wrapped in a [`naaf_core::StepNode`].
 pub trait NodeTemplate<R, E> {
     /// Returns a shared runner for the given template name, or `None`.
     fn lookup(

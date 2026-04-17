@@ -1,3 +1,21 @@
+//! Filesystem-based checkpoint persistence for `naaf`.
+//!
+//! `naaf-persistence-fs` provides a `Checkpointer` implementation that stores
+//! workflow and step checkpoints as JSON files on the local filesystem.
+//!
+//! # Usage
+//!
+//! ```ignore
+//! use naaf_core::{Checkpointer, WorkflowRunId, NodeId};
+//! use naaf_persistence_fs::FsCheckpointer;
+//!
+//! let checkpointer = FsCheckpointer::new("/tmp/naaf-checkpoints");
+//! ```
+//!
+//! The checkpointer organizes checkpoints by workflow run ID:
+//! - `/base_dir/{run_id}/workflow.json` — workflow-level checkpoint
+//! - `/base_dir/{run_id}/steps/{node_id}.json` — per-step checkpoints
+
 use std::path::PathBuf;
 
 use naaf_core::{NodeId, StepCheckpoint, WorkflowCheckpoint, WorkflowRunId};
