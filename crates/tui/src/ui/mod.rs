@@ -55,11 +55,12 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PromptState {
     pub question: String,
     pub choices: Vec<String>,
     pub input: String,
+    reply: tokio::sync::oneshot::Sender<String>,
 }
 
 impl AppState {
@@ -211,15 +212,17 @@ impl AppState {
                 }
                 self.logs.push(LogEntry { level, message });
             }
-            TuiEvent::HumanPrompt { question, choices } => {
+            TuiEvent::HumanPrompt {
+                question,
+                choices,
+                reply,
+            } => {
                 self.active_prompt = Some(PromptState {
                     question,
                     choices,
                     input: String::new(),
+                    reply,
                 });
-            }
-            TuiEvent::HumanAnswer { .. } => {
-                self.active_prompt = None;
             }
             TuiEvent::Quit => {}
         }
@@ -267,18 +270,20 @@ impl AppState {
             return;
         }
 
-        if let Some(prompt) = &mut self.active_prompt {
-            match key.code {
-                crossterm::event::KeyCode::Enter => {
-                    self.active_prompt = None;
+        if self.active_prompt.is_some() {
+            if key.code == crossterm::event::KeyCode::Enter {
+                let prompt = self.active_prompt.take().expect("checked is_some");
+                let _ = prompt.reply.send(prompt.input);
+            } else if let Some(prompt) = &mut self.active_prompt {
+                match key.code {
+                    crossterm::event::KeyCode::Char(c) => {
+                        prompt.input.push(c);
+                    }
+                    crossterm::event::KeyCode::Backspace => {
+                        prompt.input.pop();
+                    }
+                    _ => {}
                 }
-                crossterm::event::KeyCode::Char(c) => {
-                    prompt.input.push(c);
-                }
-                crossterm::event::KeyCode::Backspace => {
-                    prompt.input.pop();
-                }
-                _ => {}
             }
             return;
         }

@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum TuiEvent {
     StepStarted {
         task_name: String,
@@ -52,9 +52,7 @@ pub enum TuiEvent {
     HumanPrompt {
         question: String,
         choices: Vec<String>,
-    },
-    HumanAnswer {
-        answer: String,
+        reply: tokio::sync::oneshot::Sender<String>,
     },
     Quit,
 }
@@ -110,7 +108,6 @@ impl fmt::Display for TuiEvent {
                 message,
             } => write!(f, "[{level}] {target}: {message}"),
             Self::HumanPrompt { question, .. } => write!(f, "? {question}"),
-            Self::HumanAnswer { answer } => write!(f, "answer: {answer}"),
             Self::Quit => write!(f, "quit"),
         }
     }
