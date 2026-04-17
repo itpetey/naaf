@@ -16,10 +16,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Knowledge Tool Example ===\n");
 
-    let qdrant_url = std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6334".to_string());
+    let qdrant_url =
+        std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6334".to_string());
     let collection = std::env::var("QDRANT_COLLECTION").unwrap_or_else(|_| "knowledge".to_string());
-    let openai_api_key = std::env::var("OPENAI_API_KEY")
-        .expect("OPENAI_API_KEY must be set");
+    let openai_api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
 
     println!("Connecting to Qdrant at {}...", qdrant_url);
     let mut client = naaf_qdrant::QdrantClient::from_url(&qdrant_url)?;
@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let knowledge_tool = KnowledgeTool::new(
         client.clone(),
         Box::new(embedder),
-        5,  // top_k
+        5,   // top_k
         0.7, // min_score
     );
 
@@ -43,22 +43,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let llm_config = OpenAiConfig::new(openai_api_key);
     let llm_client = OpenAiClient::new(llm_config);
 
-    let executor = Executor::with_tools(llm_client, registry)
-        .with_config(ExecutorConfig::new(5));
+    let executor = Executor::with_tools(llm_client, registry).with_config(ExecutorConfig::new(5));
 
     println!("\n--- Query 1: What do you know about naaf-core? ---\n");
 
     let query1 = "What do you know about naaf-core?";
     let messages = vec![
-        Message::system("You are a helpful assistant with access to a knowledge base. \
-            Use the knowledge_search tool to find relevant information before answering."),
+        Message::system(
+            "You are a helpful assistant with access to a knowledge base. \
+            Use the knowledge_search tool to find relevant information before answering.",
+        ),
         Message::user(query1),
     ];
 
-    let request = CompletionRequest::new(
-        "gpt-4o".to_string(),
-        messages,
-    );
+    let request = CompletionRequest::new("gpt-4o".to_string(), messages);
 
     let outcome = executor
         .execute(&(), request)
@@ -72,14 +70,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Query 2: Find info about Step and Retry ---\n");
 
     let query2 = "Find information about Step and Retry in the codebase";
-    let messages = vec![
-        Message::user(query2),
-    ];
+    let messages = vec![Message::user(query2)];
 
-    let request = CompletionRequest::new(
-        "gpt-4o".to_string(),
-        messages,
-    );
+    let request = CompletionRequest::new("gpt-4o".to_string(), messages);
 
     let outcome = executor
         .execute(&(), request)

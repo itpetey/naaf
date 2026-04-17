@@ -51,7 +51,7 @@ pub trait RepairPlanner {
 }
 
 /// Configures how many attempts a step may perform before it is rejected.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetryPolicy {
     max_attempts: usize,
 }
@@ -79,7 +79,7 @@ impl Default for RetryPolicy {
 }
 
 /// A lightweight view of one step attempt recorded in a report.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttemptReport<F> {
     /// Findings produced by checks for this attempt.
     pub findings: Vec<F>,
@@ -107,7 +107,7 @@ where
 }
 
 /// A summary of all attempts performed by a step.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepReport<F> {
     attempts: Vec<AttemptReport<F>>,
 }

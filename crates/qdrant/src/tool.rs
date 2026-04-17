@@ -92,7 +92,10 @@ impl<R: 'static> Tool for QdrantSearchTool<R> {
             let vectors = self.embedder.embed(vec![query.clone()]).await?;
             let query_vector = vectors.into_iter().next().ok_or(QdrantError::NoResults)?;
             let repo = arguments.get("repo").and_then(Value::as_str);
-            let results = self.client.search(query_vector, top_k, min_score, repo).await?;
+            let results = self
+                .client
+                .search(query_vector, top_k, min_score, repo)
+                .await?;
 
             let results_json: Vec<Value> = results
                 .iter()

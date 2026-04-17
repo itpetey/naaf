@@ -92,17 +92,14 @@ async fn main() {
 
             if path.is_dir() {
                 info!("Walking directory: {}", path.display());
-                let report = naaf_knowledge::ingest::ingest_directory(&agent, path, repo.as_deref())
-                    .await
-                    .expect("directory ingestion failed");
+                let report =
+                    naaf_knowledge::ingest::ingest_directory(&agent, path, repo.as_deref())
+                        .await
+                        .expect("directory ingestion failed");
 
                 for (file_path, result) in &report.reports {
                     match result {
-                        Ok(r) => println!(
-                            "  {} — {} chunks",
-                            file_path.display(),
-                            r.chunks_count
-                        ),
+                        Ok(r) => println!("  {} — {} chunks", file_path.display(), r.chunks_count),
                         Err(e) => eprintln!("  {} — ERROR: {}", file_path.display(), e),
                     }
                 }

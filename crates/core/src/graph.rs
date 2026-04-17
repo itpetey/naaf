@@ -11,9 +11,17 @@ use futures::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use thiserror::Error;
+use tracing::warn;
 use uuid::Uuid;
 
-use crate::{AttemptReport, Step, StepError, StepReport, SystemStage, repair::NeverFinding};
+use crate::{
+    AttemptReport, Step, StepError, StepReport, SystemStage,
+    checkpoint::{
+        Checkpointer, NodeCheckpoint, NodeCheckpointReport, NodeCheckpointState, ResumeError,
+        RunnerRegistry, WorkflowCheckpoint,
+    },
+    repair::NeverFinding,
+};
 
 type NodeRunner<R, E> = dyn WorkflowNode<Runtime = R, Error = E>;
 type NodeResult<R, E> = Result<NodeOutcome<R, E>, NodeExecutionError<E>>;
@@ -241,7 +249,7 @@ pub enum InvalidPatchError {
 }
 
 /// Per-node execution metadata returned after a successful workflow run.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum NodeReport {
     /// The node did not expose a structured execution report.
     #[default]
@@ -300,6 +308,7 @@ pub trait WorkflowNode {
 pub struct NodeSpec<R, E> {
     id: NodeId,
     name: String,
+    runner_key: Option<String>,
     seed: Option<Value>,
     parent: Option<NodeId>,
     runner: Arc<NodeRunner<R, E>>,
@@ -310,6 +319,7 @@ impl<R, E> Clone for NodeSpec<R, E> {
         Self {
             id: self.id,
             name: self.name.clone(),
+            runner_key: self.runner_key.clone(),
             seed: self.seed.clone(),
             parent: self.parent,
             runner: self.runner.clone(),
@@ -326,6 +336,7 @@ impl<R, E> NodeSpec<R, E> {
         Self {
             id: NodeId::new(),
             name: name.into(),
+            runner_key: None,
             seed: None,
             parent: None,
             runner: Arc::new(runner),
@@ -337,6 +348,7 @@ impl<R, E> NodeSpec<R, E> {
         Self {
             id: NodeId::new(),
             name: name.into(),
+            runner_key: None,
             seed: None,
             parent: None,
             runner,
@@ -367,6 +379,12 @@ impl<R, E> NodeSpec<R, E> {
     /// Records which node created this node.
     pub fn with_parent(mut self, parent: NodeId) -> Self {
         self.parent = Some(parent);
+        self
+    }
+
+    /// Sets the runner registry key for checkpoint/resume support.
+    pub fn with_runner_key(mut self, key: impl Into<String>) -> Self {
+        self.runner_key = Some(key.into());
         self
     }
 
@@ -453,7 +471,7 @@ impl<R, E> GraphPatch<R, E> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum NodeState {
     Pending,
     Running,
@@ -463,6 +481,7 @@ enum NodeState {
 struct NodeRecord<R, E> {
     id: NodeId,
     name: String,
+    runner_key: Option<String>,
     seed: Option<Value>,
     parent: Option<NodeId>,
     dependencies: BTreeSet<NodeId>,
@@ -538,6 +557,8 @@ impl WorkflowRunReport {
 pub struct Workflow<R, E> {
     run_id: WorkflowRunId,
     max_concurrency: usize,
+    checkpointer: Option<Arc<dyn Checkpointer>>,
+    registry: Option<RunnerRegistry<R, E>>,
     nodes: BTreeMap<NodeId, NodeRecord<R, E>>,
 }
 
@@ -553,6 +574,8 @@ impl<R, E> Workflow<R, E> {
         Self {
             run_id: WorkflowRunId::new(),
             max_concurrency: usize::MAX,
+            checkpointer: None,
+            registry: None,
             nodes: BTreeMap::new(),
         }
     }
@@ -567,6 +590,78 @@ impl<R, E> Workflow<R, E> {
         self
     }
 
+    /// Installs a checkpointer for saving workflow state after each node completion.
+    pub fn with_checkpointer(mut self, checkpointer: impl Checkpointer + 'static) -> Self {
+        self.checkpointer = Some(Arc::new(checkpointer));
+        self
+    }
+
+    /// Installs a runner registry for mapping names to node runners during resume.
+    pub fn with_registry(mut self, registry: RunnerRegistry<R, E>) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Reconstructs a workflow from a previously saved checkpoint.
+    ///
+    /// Nodes that were running when the checkpoint was captured are reset to
+    /// pending so they will be re-executed. Succeeded nodes retain their
+    /// outputs and will not be re-run.
+    pub fn resume(
+        checkpoint: WorkflowCheckpoint,
+        registry: RunnerRegistry<R, E>,
+    ) -> Result<Self, ResumeError> {
+        let mut workflow = Self {
+            run_id: checkpoint.run_id,
+            max_concurrency: checkpoint.max_concurrency,
+            checkpointer: None,
+            registry: Some(registry),
+            nodes: BTreeMap::new(),
+        };
+
+        let registry_ref = workflow.registry.as_ref().expect("registry just set");
+
+        for (node_id, node_cp) in checkpoint.nodes {
+            let runner_key = node_cp.runner_key.as_ref();
+            let runner = runner_key
+                .ok_or(ResumeError::UnkeyedNode { node_id })
+                .and_then(|key| {
+                    registry_ref
+                        .get(key)
+                        .cloned()
+                        .ok_or_else(|| ResumeError::MissingRunner { key: key.clone() })
+                })?;
+
+            let state = match node_cp.state {
+                NodeCheckpointState::Pending => NodeState::Pending,
+                NodeCheckpointState::Running => NodeState::Pending,
+                NodeCheckpointState::Succeeded => NodeState::Succeeded,
+            };
+
+            workflow.nodes.insert(
+                node_id,
+                NodeRecord {
+                    id: node_id,
+                    name: node_cp.name,
+                    runner_key: node_cp.runner_key,
+                    seed: node_cp.seed,
+                    parent: node_cp.parent,
+                    dependencies: node_cp.dependencies,
+                    downstream: node_cp.downstream,
+                    state,
+                    output: node_cp.output,
+                    report: match node_cp.report {
+                        NodeCheckpointReport::Empty => NodeReport::Empty,
+                        NodeCheckpointReport::Step(report) => NodeReport::Step(report),
+                    },
+                    runner,
+                },
+            );
+        }
+
+        Ok(workflow)
+    }
+
     /// Applies one additive patch before or during execution.
     pub fn apply_patch(&mut self, patch: GraphPatch<R, E>) -> Result<(), InvalidPatchError> {
         let (nodes, edges) = patch.into_parts();
@@ -579,6 +674,7 @@ impl<R, E> Workflow<R, E> {
                 NodeRecord {
                     id,
                     name: node.name,
+                    runner_key: node.runner_key,
                     seed: node.seed,
                     parent: node.parent,
                     dependencies: BTreeSet::new(),
@@ -675,8 +771,49 @@ impl<R, E> Workflow<R, E> {
                 }
 
                 self.apply_patch(patch)?;
+
+                if let Some(checkpointer) = &self.checkpointer {
+                    let checkpoint = self.build_checkpoint();
+                    if let Err(error) = checkpointer.save_workflow(self.run_id, &checkpoint).await {
+                        warn!(run_id = %self.run_id, %error, "failed to save workflow checkpoint");
+                    }
+                }
             }
         })
+    }
+
+    fn build_checkpoint(&self) -> WorkflowCheckpoint {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|(node_id, record)| {
+                (
+                    *node_id,
+                    NodeCheckpoint {
+                        id: record.id,
+                        name: record.name.clone(),
+                        runner_key: record.runner_key.clone(),
+                        seed: record.seed.clone(),
+                        parent: record.parent,
+                        dependencies: record.dependencies.clone(),
+                        downstream: record.downstream.clone(),
+                        state: match record.state {
+                            NodeState::Pending => NodeCheckpointState::Pending,
+                            NodeState::Running => NodeCheckpointState::Running,
+                            NodeState::Succeeded => NodeCheckpointState::Succeeded,
+                        },
+                        output: record.output.clone(),
+                        report: NodeCheckpointReport::from_node_report(&record.report),
+                    },
+                )
+            })
+            .collect();
+
+        WorkflowCheckpoint {
+            run_id: self.run_id,
+            max_concurrency: self.max_concurrency,
+            nodes,
+        }
     }
 
     fn next_ready_node(&self) -> Option<NodeId> {

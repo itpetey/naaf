@@ -54,7 +54,12 @@ impl<R: 'static> Task for QdrantSearch<R> {
             let vectors = self.embedder.embed(vec![query]).await?;
             let query_vector = vectors.into_iter().next().ok_or(QdrantError::NoResults)?;
             self.client
-                .search(query_vector, self.top_k, self.min_score, self.repo.as_deref())
+                .search(
+                    query_vector,
+                    self.top_k,
+                    self.min_score,
+                    self.repo.as_deref(),
+                )
                 .await
         })
     }
@@ -141,7 +146,9 @@ impl<R: 'static> naaf_core::Check for QdrantSimilarityCheck<R> {
         Box::pin(async move {
             let vectors = self.embedder.embed(vec![query]).await?;
             let query_vector = vectors.into_iter().next().ok_or(QdrantError::NoResults)?;
-            self.client.search(query_vector, 5, self.threshold, None).await
+            self.client
+                .search(query_vector, 5, self.threshold, None)
+                .await
         })
     }
 }

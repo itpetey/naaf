@@ -253,6 +253,10 @@
 pub use crate::{
     adaptor::{check_fn, materialiser_fn, repair_fn, repair_last_fn, task_fn},
     check::Check,
+    checkpoint::{
+        AttemptCheckpoint, Checkpointer, NodeCheckpoint, NodeCheckpointReport, NodeCheckpointState,
+        ResumeError, RunnerRegistry, StepCheckpoint, StepCheckpointer, WorkflowCheckpoint,
+    },
     graph::{
         EdgeSpec, GraphPatch, InputSelectionError, InvalidPatchError, NodeContext,
         NodeExecutionError, NodeId, NodeInput, NodeOutcome, NodeReport, NodeSpec, NodeSummary,
@@ -272,6 +276,7 @@ pub use crate::{
 
 mod adaptor;
 mod check;
+mod checkpoint;
 mod graph;
 mod materialiser;
 mod observability;

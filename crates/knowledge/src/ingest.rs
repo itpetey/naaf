@@ -11,40 +11,9 @@ use crate::knowledge::IngestReport;
 use crate::source::{SourceInfo, SourceType};
 
 static BINARY_EXTENSIONS: &[&str] = &[
-    ".lock",
-    ".min.js",
-    ".min.css",
-    ".map",
-    ".pyc",
-    ".pyo",
-    ".so",
-    ".dylib",
-    ".dll",
-    ".exe",
-    ".o",
-    ".a",
-    ".wasm",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".ico",
-    ".svg",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".eot",
-    ".gz",
-    ".zip",
-    ".tar",
-    ".rar",
-    ".7z",
-    ".bz2",
-    ".xz",
-    ".zst",
-    ".class",
-    ".jar",
-    ".war",
+    ".lock", ".min.js", ".min.css", ".map", ".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe", ".o",
+    ".a", ".wasm", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf",
+    ".eot", ".gz", ".zip", ".tar", ".rar", ".7z", ".bz2", ".xz", ".zst", ".class", ".jar", ".war",
 ];
 
 pub async fn ingest_file<R>(
@@ -57,8 +26,8 @@ pub async fn ingest_file<R>(
 
     let qdrant_source_info = convert_source_info(&source_info)?;
 
-    let chunker = ContentChunker::from_path(path)
-        .map_err(|e| KnowledgeError::Ingest(e.to_string()))?;
+    let chunker =
+        ContentChunker::from_path(path).map_err(|e| KnowledgeError::Ingest(e.to_string()))?;
 
     let chunks = chunker
         .chunk(&content, &qdrant_source_info)
@@ -189,10 +158,7 @@ fn walk_dir(dir: &Path) -> Vec<std::path::PathBuf> {
             continue;
         }
 
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         if BINARY_EXTENSIONS
             .iter()

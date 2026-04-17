@@ -224,36 +224,36 @@ impl Chunker for CodeChunker {
             let trimmed = line.trim();
 
             let is_boundary = trimmed.starts_with("pub ")
-            || trimmed.starts_with("fn ")
-            || trimmed.starts_with("async fn ")
-            || trimmed.starts_with("impl ")
-            || trimmed.starts_with("struct ")
-            || trimmed.starts_with("enum ")
-            || trimmed.starts_with("trait ")
-            || trimmed.starts_with("class ")
-            || trimmed.starts_with("def ")
-            || trimmed.starts_with('#');
+                || trimmed.starts_with("fn ")
+                || trimmed.starts_with("async fn ")
+                || trimmed.starts_with("impl ")
+                || trimmed.starts_with("struct ")
+                || trimmed.starts_with("enum ")
+                || trimmed.starts_with("trait ")
+                || trimmed.starts_with("class ")
+                || trimmed.starts_with("def ")
+                || trimmed.starts_with('#');
 
-        if is_boundary
-            && !current.is_empty()
-            && (current.len() > self.max_chunk_size
-                || current.len() + line.len() > self.max_chunk_size)
-        {
-            chunks.push(Chunk {
-                text: current.trim().to_string(),
-                metadata: ChunkMetadata {
-                    index: chunks.len(),
-                    source_type: source_info.source_type.clone(),
-                    start_char: start,
-                    end_char: start + current.len(),
-                    path: source_info.path.clone(),
-                    language: source_info.language.clone(),
-                    heading: None,
-                },
-            });
-            start += current.len();
-            current.clear();
-        }
+            if is_boundary
+                && !current.is_empty()
+                && (current.len() > self.max_chunk_size
+                    || current.len() + line.len() > self.max_chunk_size)
+            {
+                chunks.push(Chunk {
+                    text: current.trim().to_string(),
+                    metadata: ChunkMetadata {
+                        index: chunks.len(),
+                        source_type: source_info.source_type.clone(),
+                        start_char: start,
+                        end_char: start + current.len(),
+                        path: source_info.path.clone(),
+                        language: source_info.language.clone(),
+                        heading: None,
+                    },
+                });
+                start += current.len();
+                current.clear();
+            }
 
             current.push_str(line);
             current.push('\n');

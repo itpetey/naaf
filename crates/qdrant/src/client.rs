@@ -1,10 +1,9 @@
+use qdrant_client::qdrant::Filter;
 use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, Distance, PointId,
-    PointStruct, QueryPointsBuilder, RetrievedPoint, ScoredPoint, ScrollPointsBuilder,
-    UpsertPointsBuilder, VectorParamsBuilder,
+    Condition, CreateCollectionBuilder, Distance, PointId, PointStruct, QueryPointsBuilder,
+    RetrievedPoint, ScoredPoint, ScrollPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
     point_id::PointIdOptions,
 };
-use qdrant_client::qdrant::Filter;
 use qdrant_client::{Payload, Qdrant};
 use uuid::Uuid;
 
@@ -241,7 +240,9 @@ impl<R> QdrantAgent<R> {
     ) -> Result<Vec<SearchResult>, QdrantError> {
         let vectors = self.embedder.embed(vec![query.to_string()]).await?;
         let query_vector = vectors.into_iter().next().ok_or(QdrantError::NoResults)?;
-        self.client.search(query_vector, top_k, min_score, repo).await
+        self.client
+            .search(query_vector, top_k, min_score, repo)
+            .await
     }
 
     pub async fn upsert_chunks(

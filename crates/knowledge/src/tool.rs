@@ -89,9 +89,7 @@ impl<R: 'static> Tool for KnowledgeTool<R> {
                             .ok_or_else(|| {
                                 KnowledgeError::Query("missing 'query' field".to_string())
                             })?;
-                    let repo = arguments
-                        .get("repo")
-                        .and_then(Value::as_str);
+                    let repo = arguments.get("repo").and_then(Value::as_str);
                     let vectors = self
                         .embedder
                         .embed(vec![query_text.to_string()])
