@@ -50,6 +50,7 @@ static BINARY_EXTENSIONS: &[&str] = &[
 pub async fn ingest_file<R>(
     qdrant: &QdrantAgent<R>,
     path: &Path,
+    repo: Option<&str>,
 ) -> Result<IngestReport, KnowledgeError> {
     let source_info = SourceInfo::from_path(path)?;
     let content = std::fs::read_to_string(path)?;
@@ -66,7 +67,7 @@ pub async fn ingest_file<R>(
     let chunks_count = chunks.len();
 
     let source_ids = qdrant
-        .upsert_chunks(chunks, &qdrant_source_info)
+        .upsert_chunks(chunks, &qdrant_source_info, repo)
         .await
         .map_err(KnowledgeError::Qdrant)?;
 
@@ -81,6 +82,7 @@ pub async fn ingest_file<R>(
 pub async fn ingest_directory<R>(
     qdrant: &QdrantAgent<R>,
     dir: &Path,
+    repo: Option<&str>,
 ) -> Result<DirectoryIngestReport, KnowledgeError> {
     let mut reports = Vec::new();
     let mut total_chunks = 0;
@@ -89,7 +91,7 @@ pub async fn ingest_directory<R>(
     let mut files_skipped = 0;
 
     for entry in walk_dir(dir) {
-        match ingest_file(qdrant, &entry).await {
+        match ingest_file(qdrant, &entry, repo).await {
             Ok(report) => {
                 total_chunks += report.chunks_count;
                 total_source_ids.extend(report.source_ids.iter().copied());
@@ -116,6 +118,7 @@ pub async fn ingest_content<R>(
     qdrant: &QdrantAgent<R>,
     content: &str,
     source_info: &SourceInfo,
+    repo: Option<&str>,
 ) -> Result<IngestReport, KnowledgeError> {
     let qdrant_source_info = convert_source_info(source_info)?;
 
@@ -127,7 +130,7 @@ pub async fn ingest_content<R>(
     let chunks_count = chunks.len();
 
     let source_ids = qdrant
-        .upsert_chunks(chunks, &qdrant_source_info)
+        .upsert_chunks(chunks, &qdrant_source_info, repo)
         .await
         .map_err(KnowledgeError::Qdrant)?;
 

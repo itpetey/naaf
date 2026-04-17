@@ -1,8 +1,10 @@
 use qdrant_client::qdrant::{
-    CreateCollectionBuilder, Distance, PointId, PointStruct, QueryPointsBuilder, RetrievedPoint,
-    ScoredPoint, ScrollPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
+    Condition, CreateCollectionBuilder, Distance, PointId,
+    PointStruct, QueryPointsBuilder, RetrievedPoint, ScoredPoint, ScrollPointsBuilder,
+    UpsertPointsBuilder, VectorParamsBuilder,
     point_id::PointIdOptions,
 };
+use qdrant_client::qdrant::Filter;
 use qdrant_client::{Payload, Qdrant};
 use uuid::Uuid;
 
@@ -140,15 +142,21 @@ impl QdrantClient {
         query_vector: Vec<f32>,
         limit: usize,
         min_score: f32,
+        repo: Option<&str>,
     ) -> Result<Vec<SearchResult>, QdrantError> {
+        let mut builder = QueryPointsBuilder::new(&self.collection)
+            .query(query_vector)
+            .limit(limit as u64)
+            .with_payload(true);
+
+        if let Some(repo_name) = repo {
+            let filter = Filter::must([Condition::matches("repo", repo_name.to_string())]);
+            builder = builder.filter(filter);
+        }
+
         let response = self
             .inner
-            .query(
-                QueryPointsBuilder::new(&self.collection)
-                    .query(query_vector)
-                    .limit(limit as u64)
-                    .with_payload(true),
-            )
+            .query(builder)
             .await
             .map_err(|e| QdrantError::Client(e.to_string()))?;
 
@@ -229,16 +237,18 @@ impl<R> QdrantAgent<R> {
         query: &str,
         top_k: usize,
         min_score: f32,
+        repo: Option<&str>,
     ) -> Result<Vec<SearchResult>, QdrantError> {
         let vectors = self.embedder.embed(vec![query.to_string()]).await?;
         let query_vector = vectors.into_iter().next().ok_or(QdrantError::NoResults)?;
-        self.client.search(query_vector, top_k, min_score).await
+        self.client.search(query_vector, top_k, min_score, repo).await
     }
 
     pub async fn upsert_chunks(
         &self,
         chunks: Vec<crate::chunker::Chunk>,
         source_info: &SourceInfo,
+        repo: Option<&str>,
     ) -> Result<Vec<Uuid>, QdrantError> {
         let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
         let vectors = self.embedder.embed(texts).await?;
@@ -265,6 +275,10 @@ impl<R> QdrantAgent<R> {
                 chunk.text.clone(),
                 entity_type,
             );
+
+            if let Some(repo_name) = repo {
+                payload = payload.with_repo(repo_name);
+            }
 
             if let Some(ref path) = chunk.metadata.path {
                 payload.source_metadata = Some(crate::payload::SourceMetadata {

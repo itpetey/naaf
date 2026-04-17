@@ -53,6 +53,7 @@ pub struct KnowledgePayload {
     pub title: String,
     pub content: String,
     pub entity_type: EntityType,
+    pub repo: Option<String>,
     pub source_ids: Vec<uuid::Uuid>,
     pub related_ids: Vec<uuid::Uuid>,
     pub tags: Vec<String>,
@@ -69,6 +70,7 @@ impl KnowledgePayload {
             title,
             content,
             entity_type,
+            repo: None,
             source_ids: Vec::new(),
             related_ids: Vec::new(),
             tags: Vec::new(),
@@ -77,6 +79,11 @@ impl KnowledgePayload {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    pub fn with_repo(mut self, repo: impl Into<String>) -> Self {
+        self.repo = Some(repo.into());
+        self
     }
 
     pub fn with_source(mut self, source_id: uuid::Uuid) -> Self {

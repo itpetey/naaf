@@ -55,6 +55,10 @@ impl<R: 'static> Tool for KnowledgeTool<R> {
                     "top_k": {
                         "type": "integer",
                         "description": "Number of results (for query action)"
+                    },
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository name to filter by (for query action)"
                     }
                 },
                 "required": ["action"]
@@ -85,6 +89,9 @@ impl<R: 'static> Tool for KnowledgeTool<R> {
                             .ok_or_else(|| {
                                 KnowledgeError::Query("missing 'query' field".to_string())
                             })?;
+                    let repo = arguments
+                        .get("repo")
+                        .and_then(Value::as_str);
                     let vectors = self
                         .embedder
                         .embed(vec![query_text.to_string()])
@@ -95,7 +102,7 @@ impl<R: 'static> Tool for KnowledgeTool<R> {
                         .next()
                         .ok_or_else(|| KnowledgeError::Query("embedding failed".to_string()))?;
                     let results = client
-                        .search(query_vector, top_k, min_score)
+                        .search(query_vector, top_k, min_score, repo)
                         .await
                         .map_err(KnowledgeError::Qdrant)?;
 

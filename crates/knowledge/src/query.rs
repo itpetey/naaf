@@ -13,9 +13,10 @@ pub async fn query_knowledge<R>(
     query: &str,
     top_k: usize,
     min_score: f32,
+    repo: Option<&str>,
 ) -> Result<Vec<SearchResult>, KnowledgeError> {
     qdrant
-        .search(query, top_k, min_score)
+        .search(query, top_k, min_score, repo)
         .await
         .map_err(KnowledgeError::Qdrant)
 }

@@ -18,11 +18,17 @@ enum Commands {
     Ingest {
         /// Path to file or directory to ingest
         path: String,
+        /// Repository name for filtering
+        #[arg(short, long)]
+        repo: Option<String>,
     },
     /// Query the knowledge base
     Query {
         /// Natural language query
         query: Vec<String>,
+        /// Repository name for filtering
+        #[arg(short, long)]
+        repo: Option<String>,
     },
     /// Lint the knowledge base for issues
     Lint,
@@ -64,7 +70,7 @@ async fn main() {
 
             println!("Collection '{}' is ready.", config.qdrant.collection);
         }
-        Commands::Ingest { path } => {
+        Commands::Ingest { path, repo } => {
             let path = std::path::Path::new(&path);
             if !path.exists() {
                 eprintln!("Path does not exist: {}", path.display());
@@ -86,7 +92,7 @@ async fn main() {
 
             if path.is_dir() {
                 info!("Walking directory: {}", path.display());
-                let report = naaf_knowledge::ingest::ingest_directory(&agent, path)
+                let report = naaf_knowledge::ingest::ingest_directory(&agent, path, repo.as_deref())
                     .await
                     .expect("directory ingestion failed");
 
@@ -114,7 +120,7 @@ async fn main() {
             } else {
                 info!("Ingesting: {}", path.display());
 
-                let report = naaf_knowledge::ingest::ingest_file(&agent, path)
+                let report = naaf_knowledge::ingest::ingest_file(&agent, path, repo.as_deref())
                     .await
                     .expect("ingestion failed");
 
@@ -122,7 +128,7 @@ async fn main() {
                 println!("Source IDs: {:?}", report.source_ids);
             }
         }
-        Commands::Query { query } => {
+        Commands::Query { query, repo } => {
             let query_text = query.join(" ");
 
             let mut client =
@@ -143,6 +149,7 @@ async fn main() {
                 &query_text,
                 config.query.top_k,
                 config.query.min_score,
+                repo.as_deref(),
             )
             .await
             .expect("query failed");
