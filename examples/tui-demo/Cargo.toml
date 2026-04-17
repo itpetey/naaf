@@ -10,4 +10,3 @@ naaf-core = { path = "../../crates/core" }
 naaf-tui = { path = "../../crates/tui" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["fmt"] }

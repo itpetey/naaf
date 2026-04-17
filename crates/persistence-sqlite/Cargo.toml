@@ -8,9 +8,9 @@ license.workspace = true
 [dependencies]
 naaf-core = { path = "../core" }
 parking_lot = { workspace = true }
-rusqlite = { version = "0.34", features = ["bundled"] }
-serde = { workspace = true, features = ["derive"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde_json = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 thiserror = { workspace = true }
-tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
