@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 
 #[derive(Parser)]
-#[command(name = "knowledge", about = "Knowledge base management CLI")]
+#[command(name = "naaf", about = "Knowledge base management CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -12,6 +12,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Knowledge base commands
+    #[command(subcommand)]
+    Kb(KbCommands),
+}
+
+#[derive(Subcommand)]
+enum KbCommands {
     /// Initialise the knowledge base (create Qdrant collection)
     Init,
     /// Ingest a file or directory into the knowledge base
@@ -48,171 +55,177 @@ async fn main() {
     let config = config::Config::load().expect("failed to load config");
 
     match cli.command {
-        Commands::Init => {
-            info!("Connecting to Qdrant at {}", config.qdrant.url);
-            let mut client =
-                naaf_qdrant::QdrantClient::from_url(&config.qdrant.url).expect("failed to connect");
-            if let Some(ref api_key) = config.qdrant.api_key {
-                client = client.with_api_key(api_key).expect("failed to set API key");
-            }
-            client = client.with_collection(&config.qdrant.collection);
-
-            let embedder = naaf_qdrant::OpenAiEmbedder::new(
-                std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set"),
-            );
-
-            let agent = naaf_qdrant::QdrantAgent::<()>::new(client, Box::new(embedder));
-
-            agent
-                .init_collection()
-                .await
-                .expect("failed to create collection");
-
-            println!("Collection '{}' is ready.", config.qdrant.collection);
-        }
-        Commands::Ingest { path, repo } => {
-            let path = std::path::Path::new(&path);
-            if !path.exists() {
-                eprintln!("Path does not exist: {}", path.display());
-                std::process::exit(1);
-            }
-
-            let mut client =
-                naaf_qdrant::QdrantClient::from_url(&config.qdrant.url).expect("failed to connect");
-            if let Some(ref api_key) = config.qdrant.api_key {
-                client = client.with_api_key(api_key).expect("failed to set API key");
-            }
-            client = client.with_collection(&config.qdrant.collection);
-
-            let embedder = naaf_qdrant::OpenAiEmbedder::new(
-                std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set"),
-            );
-
-            let agent = naaf_qdrant::QdrantAgent::<()>::new(client, Box::new(embedder));
-
-            if path.is_dir() {
-                info!("Walking directory: {}", path.display());
-                let report =
-                    naaf_knowledge::ingest::ingest_directory(&agent, path, repo.as_deref())
-                        .await
-                        .expect("directory ingestion failed");
-
-                for (file_path, result) in &report.reports {
-                    match result {
-                        Ok(r) => println!("  {} — {} chunks", file_path.display(), r.chunks_count),
-                        Err(e) => eprintln!("  {} — ERROR: {}", file_path.display(), e),
-                    }
+        Commands::Kb(cmd) => match cmd {
+            KbCommands::Init => {
+                info!("Connecting to Qdrant at {}", config.qdrant.url);
+                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
+                    .expect("failed to connect");
+                if let Some(ref api_key) = config.qdrant.api_key {
+                    client = client.with_api_key(api_key).expect("failed to set API key");
                 }
+                client = client.with_collection(&config.qdrant.collection);
 
-                println!();
-                println!(
-                    "Ingested {} files, skipped {} errors",
-                    report.files_ingested, report.files_skipped
+                let embedder = naaf_qdrant::OpenAiEmbedder::new(
+                    std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set"),
                 );
-                println!(
-                    "Total: {} chunks, {} source entries",
-                    report.total_chunks,
-                    report.total_source_ids.len()
-                );
-            } else {
-                info!("Ingesting: {}", path.display());
 
-                let report = naaf_knowledge::ingest::ingest_file(&agent, path, repo.as_deref())
+                let agent = naaf_qdrant::QdrantAgent::<()>::new(client, Box::new(embedder));
+
+                agent
+                    .init_collection()
                     .await
-                    .expect("ingestion failed");
+                    .expect("failed to create collection");
 
-                println!("Ingested {} chunks", report.chunks_count);
-                println!("Source IDs: {:?}", report.source_ids);
+                println!("Collection '{}' is ready.", config.qdrant.collection);
             }
-        }
-        Commands::Query { query, repo } => {
-            let query_text = query.join(" ");
-
-            let mut client =
-                naaf_qdrant::QdrantClient::from_url(&config.qdrant.url).expect("failed to connect");
-            if let Some(ref api_key) = config.qdrant.api_key {
-                client = client.with_api_key(api_key).expect("failed to set API key");
-            }
-            client = client.with_collection(&config.qdrant.collection);
-
-            let embedder = naaf_qdrant::OpenAiEmbedder::new(
-                std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set"),
-            );
-
-            let agent = naaf_qdrant::QdrantAgent::<()>::new(client, Box::new(embedder));
-
-            let results = naaf_knowledge::query::query_knowledge(
-                &agent,
-                &query_text,
-                config.query.top_k,
-                config.query.min_score,
-                repo.as_deref(),
-            )
-            .await
-            .expect("query failed");
-
-            if results.is_empty() {
-                println!("No results found.");
-            } else {
-                for result in &results {
-                    println!(
-                        "[{}] {} (score: {:.3})",
-                        result.payload.entity_type, result.payload.title, result.score
-                    );
-                    println!("  {}", truncate(&result.payload.content, 200));
-                    println!();
+            KbCommands::Ingest { path, repo } => {
+                let path = std::path::Path::new(&path);
+                if !path.exists() {
+                    eprintln!("Path does not exist: {}", path.display());
+                    std::process::exit(1);
                 }
-                println!("{} results found.", results.len());
-            }
-        }
-        Commands::Lint => {
-            let mut client =
-                naaf_qdrant::QdrantClient::from_url(&config.qdrant.url).expect("failed to connect");
-            if let Some(ref api_key) = config.qdrant.api_key {
-                client = client.with_api_key(api_key).expect("failed to set API key");
-            }
-            client = client.with_collection(&config.qdrant.collection);
 
-            let report = naaf_knowledge::lint::lint_collection(&client)
+                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
+                    .expect("failed to connect");
+                if let Some(ref api_key) = config.qdrant.api_key {
+                    client = client.with_api_key(api_key).expect("failed to set API key");
+                }
+                client = client.with_collection(&config.qdrant.collection);
+
+                let embedder = naaf_qdrant::OpenAiEmbedder::new(
+                    std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set"),
+                );
+
+                let agent = naaf_qdrant::QdrantAgent::<()>::new(client, Box::new(embedder));
+
+                if path.is_dir() {
+                    info!("Walking directory: {}", path.display());
+                    let report =
+                        naaf_knowledge::ingest::ingest_directory(&agent, path, repo.as_deref())
+                            .await
+                            .expect("directory ingestion failed");
+
+                    for (file_path, result) in &report.reports {
+                        match result {
+                            Ok(r) => {
+                                println!("  {} — {} chunks", file_path.display(), r.chunks_count)
+                            }
+                            Err(e) => eprintln!("  {} — ERROR: {}", file_path.display(), e),
+                        }
+                    }
+
+                    println!();
+                    println!(
+                        "Ingested {} files, skipped {} errors",
+                        report.files_ingested, report.files_skipped
+                    );
+                    println!(
+                        "Total: {} chunks, {} source entries",
+                        report.total_chunks,
+                        report.total_source_ids.len()
+                    );
+                } else {
+                    info!("Ingesting: {}", path.display());
+
+                    let report = naaf_knowledge::ingest::ingest_file(&agent, path, repo.as_deref())
+                        .await
+                        .expect("ingestion failed");
+
+                    println!("Ingested {} chunks", report.chunks_count);
+                    println!("Source IDs: {:?}", report.source_ids);
+                }
+            }
+            KbCommands::Query { query, repo } => {
+                let query_text = query.join(" ");
+
+                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
+                    .expect("failed to connect");
+                if let Some(ref api_key) = config.qdrant.api_key {
+                    client = client.with_api_key(api_key).expect("failed to set API key");
+                }
+                client = client.with_collection(&config.qdrant.collection);
+
+                let embedder = naaf_qdrant::OpenAiEmbedder::new(
+                    std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set"),
+                );
+
+                let agent = naaf_qdrant::QdrantAgent::<()>::new(client, Box::new(embedder));
+
+                let results = naaf_knowledge::query::query_knowledge(
+                    &agent,
+                    &query_text,
+                    config.query.top_k,
+                    config.query.min_score,
+                    repo.as_deref(),
+                )
                 .await
-                .expect("lint failed");
+                .expect("query failed");
 
-            println!("Scanned {} entries", report.entries_scanned);
-            if report.issues.is_empty() {
-                println!("No issues found.");
-            } else {
-                println!("{} issues found:", report.issues.len());
-                for issue in &report.issues {
-                    println!("  [{:?}] {}", issue.issue_type, issue.description);
-                    if let Some(ref suggestion) = issue.suggestion {
-                        println!("    Suggestion: {suggestion}");
+                if results.is_empty() {
+                    println!("No results found.");
+                } else {
+                    for result in &results {
+                        println!(
+                            "[{}] {} (score: {:.3})",
+                            result.payload.entity_type, result.payload.title, result.score
+                        );
+                        println!("  {}", truncate(&result.payload.content, 200));
+                        println!();
+                    }
+                    println!("{} results found.", results.len());
+                }
+            }
+            KbCommands::Lint => {
+                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
+                    .expect("failed to connect");
+                if let Some(ref api_key) = config.qdrant.api_key {
+                    client = client.with_api_key(api_key).expect("failed to set API key");
+                }
+                client = client.with_collection(&config.qdrant.collection);
+
+                let report = naaf_knowledge::lint::lint_collection(&client)
+                    .await
+                    .expect("lint failed");
+
+                println!("Scanned {} entries", report.entries_scanned);
+                if report.issues.is_empty() {
+                    println!("No issues found.");
+                } else {
+                    println!("{} issues found:", report.issues.len());
+                    for issue in &report.issues {
+                        println!("  [{:?}] {}", issue.issue_type, issue.description);
+                        if let Some(ref suggestion) = issue.suggestion {
+                            println!("    Suggestion: {suggestion}");
+                        }
                     }
                 }
             }
-        }
-        Commands::List { limit } => {
-            let mut client =
-                naaf_qdrant::QdrantClient::from_url(&config.qdrant.url).expect("failed to connect");
-            if let Some(ref api_key) = config.qdrant.api_key {
-                client = client.with_api_key(api_key).expect("failed to set API key");
-            }
-            client = client.with_collection(&config.qdrant.collection);
-
-            let entries = client.scroll(limit, None).await.expect("scroll failed");
-
-            if entries.is_empty() {
-                println!("No entries found.");
-            } else {
-                for entry in &entries {
-                    println!(
-                        "[{}] {} (created: {})",
-                        entry.payload.entity_type, entry.payload.title, entry.payload.created_at
-                    );
-                    println!("  {}", truncate(&entry.payload.content, 100));
+            KbCommands::List { limit } => {
+                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
+                    .expect("failed to connect");
+                if let Some(ref api_key) = config.qdrant.api_key {
+                    client = client.with_api_key(api_key).expect("failed to set API key");
                 }
-                println!("{} entries shown.", entries.len());
+                client = client.with_collection(&config.qdrant.collection);
+
+                let entries = client.scroll(limit, None).await.expect("scroll failed");
+
+                if entries.is_empty() {
+                    println!("No entries found.");
+                } else {
+                    for entry in &entries {
+                        println!(
+                            "[{}] {} (created: {})",
+                            entry.payload.entity_type,
+                            entry.payload.title,
+                            entry.payload.created_at
+                        );
+                        println!("  {}", truncate(&entry.payload.content, 100));
+                    }
+                    println!("{} entries shown.", entries.len());
+                }
             }
-        }
+        },
     }
 }
 

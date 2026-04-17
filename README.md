@@ -172,7 +172,7 @@ Equivalent extensions exist for `Check`, `Materialiser`, and `RepairPlanner`. St
 | `naaf-tui` | Terminal UI for observing workflows, human-in-the-loop prompting |
 | `naaf-persistence-fs` | Filesystem-based checkpoint persistence for workflow resumption |
 | `naaf-persistence-sqlite` | SQLite-based checkpoint persistence for workflow resumption |
-| `naaf-cli` | CLI binary (`knowledge`) for ingesting and querying the knowledge base |
+| `naaf-cli` | CLI binary (`naaf kb`) for ingesting and querying the knowledge base |
 
 ## LLM Integration
 

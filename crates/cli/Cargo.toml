@@ -6,7 +6,7 @@ repository.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "knowledge"
+name = "naaf"
 path = "src/main.rs"
 
 [dependencies]
