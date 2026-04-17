@@ -19,10 +19,7 @@ reqwest = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true, features = ["default"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tracing = { workspace = true, features = ["std"] }
 uuid = { workspace = true }
 pdf-extract = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -333,7 +333,7 @@ mod human;
 mod message;
 #[cfg(feature = "openai")]
 mod openai;
-mod repository;
+pub mod repository;
 mod spawn;
 mod task;
 mod tool;
