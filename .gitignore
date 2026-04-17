@@ -3,3 +3,4 @@ target/
 *.log
 .runs/
 .DS_Store
+docs/book/

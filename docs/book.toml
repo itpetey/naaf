@@ -1,0 +1,13 @@
+[book]
+title = "naaf"
+description = "Not Another Agent Framework — a strongly typed Rust library for building asynchronous LLM workflows"
+authors = ["Pete Hayes"]
+language = "en"
+
+[output.html]
+git-repository-url = "https://github.com/itpetey/naaf"
+
+[output.html.playground]
+editable = true
+copyable = true
+line-numbers = true
