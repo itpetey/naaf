@@ -4,7 +4,7 @@
 
 naaf provides composable, type-safe building blocks for workflows that plan, validate, repair, and rerun. The core loop is: run a task, validate the output, and if validation fails, repair the input and try again. Steps compose sequentially, in parallel, or as dynamic graphs — all with full tracing support.
 
-You can find user documentation here: [https://itpetey.github.io/naaf/]().
+You can find user documentation here: [itpetey.github.io/naaf/](https://itpetey.github.io/naaf/).
 
 ## Status
 
