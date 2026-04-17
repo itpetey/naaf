@@ -1,0 +1,28 @@
+[package]
+name = "naaf-qdrant"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+default = ["openai"]
+openai = ["dep:reqwest"]
+
+[dependencies]
+chrono = { workspace = true }
+futures = { workspace = true, features = ["alloc", "std"] }
+naaf-core = { path = "../core" }
+naaf-llm = { path = "../llm" }
+qdrant-client = { workspace = true }
+reqwest = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true, features = ["default"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing = { workspace = true, features = ["std"] }
+uuid = { workspace = true }
+pdf-extract = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

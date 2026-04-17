@@ -1,0 +1,23 @@
+[package]
+name = "naaf-knowledge"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+futures = { workspace = true, features = ["alloc", "std"] }
+ignore = { workspace = true }
+naaf-core = { path = "../core" }
+naaf-llm = { path = "../llm" }
+naaf-qdrant = { path = "../qdrant" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true, features = ["default"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing = { workspace = true, features = ["std"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
