@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 futures = { workspace = true, features = ["alloc", "std"] }
+glob.workspace = true
 naaf-core = { path = "../core" }
 reqwest = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }

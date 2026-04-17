@@ -311,6 +311,7 @@ pub use crate::{
         AssistantMessage, CompletionRequest, CompletionResponse, Message, ToolCall, ToolChoice,
         ToolResultMessage, ToolSpec, Usage,
     },
+    repository::{GlobPathsTool, ReadFileTool, SearchFilesTool},
     spawn::{
         NodeTemplate, SpawnEdge, SpawnNode, SpawnRequest, SpawnResolveError, SpawnStore, SpawnTool,
         resolve_spawn,
@@ -332,6 +333,7 @@ mod human;
 mod message;
 #[cfg(feature = "openai")]
 mod openai;
+mod repository;
 mod spawn;
 mod task;
 mod tool;
