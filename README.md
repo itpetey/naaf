@@ -167,6 +167,12 @@ Equivalent extensions exist for `Check`, `Materialiser`, and `RepairPlanner`. St
 | `naaf-core` | Core traits (`Task`, `Check`, `Materialiser`, `RepairPlanner`), `Step` builder, `Workflow` runtime, observability |
 | `naaf-llm` | LLM-backed adapters (`LlmTask`, `LlmCheck`, `LlmMaterialiser`, `LlmRepairPlanner`), `LlmAgent`, executor with tool calling, OpenAI client |
 | `naaf-process` | Shell-command adapters (`ProcessTask`, `ProcessCheck`, `ProcessMaterialiser`, `ProcessRepairPlanner`), `ProcessAgent` |
+| `naaf-qdrant` | Qdrant vector database integration (`QdrantAgent`, search, upsert, similarity check), chunkers, embedding adapters |
+| `naaf-knowledge` | Knowledge orchestration with Qdrant — ingest, query, and lint operations built on `naaf-core` |
+| `naaf-tui` | Terminal UI for observing workflows, human-in-the-loop prompting |
+| `naaf-persistence-fs` | Filesystem-based checkpoint persistence for workflow resumption |
+| `naaf-persistence-sqlite` | SQLite-based checkpoint persistence for workflow resumption |
+| `naaf-cli` | CLI binary (`knowledge`) for ingesting and querying the knowledge base |
 
 ## LLM Integration
 
