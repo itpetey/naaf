@@ -237,6 +237,8 @@ cargo run -p <example-name>
 | [dynamic-workflow](examples/dynamic-workflow/) | Runtime graph construction with `Workflow`, `StepNode`, and `GraphPatch` |
 | [process-task](examples/process-task/) | Shell-command integration via `naaf-process` |
 | [build-test](examples/build-test/) | Generate → materialise → validate → repair loop at the heart of naaf |
+| [knowledge-tool](examples/knowledge-tool/) | Knowledge base integration with Qdrant |
+| [tui-demo](examples/tui-demo/) | Terminal UI for observing workflows |
 
 ## Error Handling
 
