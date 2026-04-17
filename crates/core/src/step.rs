@@ -6,20 +6,33 @@ use std::{
 };
 
 use futures::future::{LocalBoxFuture, try_join};
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::Value;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
 use crate::{
     check::Check,
+    checkpoint::{AttemptCheckpoint, StepCheckpoint, StepCheckpointer},
     materialiser::Materialiser,
     repair::{Attempt, AttemptReport, RepairPlanner, RetryPolicy, StepReport, Traced},
     span::{action, component, name, reason},
     task::Task,
 };
 
-type Runner<R, I, O, F, E> =
-    dyn for<'a> Fn(&'a R, I) -> LocalBoxFuture<'a, Result<Traced<O, F>, StepError<F, E>>> + 'static;
+type Runner<R, I, O, F, E> = dyn for<'a> Fn(&'a R, StepInput<I>) -> LocalBoxFuture<'a, Result<Traced<O, F>, StepError<F, E>>>
+    + 'static;
 type PipelineRunner<R, A, S, F, E> =
     dyn for<'a> Fn(&'a R, A) -> LocalBoxFuture<'a, Result<(S, Vec<F>), E>> + 'static;
+
+enum StepInput<I> {
+    Fresh {
+        input: I,
+    },
+    Resume {
+        input: I,
+        checkpoint: StepCheckpoint,
+    },
+}
 type BuilderMarker<R, I, A, S, F, E, State> = PhantomData<fn() -> (R, I, A, S, F, E, State)>;
 type BuilderFor<T> = OpenStepBuilder<
     <T as Task>::Runtime,
@@ -70,6 +83,7 @@ impl Step<(), (), (), (), ()> {
             pipeline: ValidationPipeline::identity(),
             repair: None,
             retry_policy: RetryPolicy::default(),
+            step_checkpointer: None,
             marker: PhantomData,
         }
     }
@@ -121,7 +135,40 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
         F: 'static,
         E: 'static,
     {
-        (self.runner)(runtime, input)
+        (self.runner)(runtime, StepInput::Fresh { input })
+    }
+
+    /// Resumes a step from a previously saved checkpoint, continuing the retry loop
+    /// from where it left off.
+    ///
+    /// Earlier attempts recorded in the checkpoint are preserved in the report
+    /// but are not re-executed. The current input is deserialised and used as
+    /// the next task input.
+    pub fn run_resumed<'a>(
+        &'a self,
+        runtime: &'a R,
+        checkpoint: StepCheckpoint,
+    ) -> LocalBoxFuture<'a, Result<Traced<O, F>, StepError<F, E>>>
+    where
+        R: 'static,
+        I: DeserializeOwned + Clone + Serialize + 'static,
+        O: 'static,
+        F: DeserializeOwned + Clone + Serialize + 'static,
+        E: 'static,
+    {
+        let input: I = match serde_json::from_value(checkpoint.current_input.clone()) {
+            Ok(input) => input,
+            Err(_) => {
+                #[allow(unreachable_code)]
+                return Box::pin(async move {
+                    Err(StepError::System {
+                        stage: SystemStage::Task,
+                        error: todo!(),
+                    })
+                });
+            }
+        };
+        (self.runner)(runtime, StepInput::Resume { input, checkpoint })
     }
 
     /// Sequences two steps so the left output becomes the right input.
@@ -138,13 +185,13 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
         let right = next.runner.clone();
 
         Step {
-            runner: Arc::new(move |runtime, input| {
+            runner: Arc::new(move |runtime, step_input| {
                 let left = left.clone();
                 let right = right.clone();
                 Box::pin(async move {
-                    let left_traced = left(runtime, input).await?;
+                    let left_traced = left(runtime, step_input).await?;
                     let (output, left_report) = left_traced.into_parts();
-                    let right_traced = right(runtime, output).await?;
+                    let right_traced = right(runtime, StepInput::Fresh { input: output }).await?;
                     let (next_output, right_report) = right_traced.into_parts();
                     Ok(Traced::new(next_output, left_report.extend(right_report)))
                 })
@@ -220,12 +267,21 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
         let right = other.runner.clone();
 
         Step {
-            runner: Arc::new(move |runtime, input: I| {
+            runner: Arc::new(move |runtime, step_input: StepInput<I>| {
                 let left = left.clone();
                 let right = right.clone();
                 Box::pin(async move {
-                    let left_fut = left(runtime, input.clone());
-                    let right_fut = right(runtime, input);
+                    let input = match step_input {
+                        StepInput::Fresh { input } => input,
+                        StepInput::Resume { input, .. } => input,
+                    };
+                    let left_fut = left(
+                        runtime,
+                        StepInput::Fresh {
+                            input: input.clone(),
+                        },
+                    );
+                    let right_fut = right(runtime, StepInput::Fresh { input });
                     let (left_traced, right_traced) = try_join(left_fut, right_fut).await?;
                     let (left_output, left_report) = left_traced.into_parts();
                     let (right_output, right_report) = right_traced.into_parts();
@@ -256,12 +312,16 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
         let right = other.runner.clone();
 
         Step {
-            runner: Arc::new(move |runtime, (left_input, right_input)| {
+            runner: Arc::new(move |runtime, step_input: StepInput<(I, OtherInput)>| {
                 let left = left.clone();
                 let right = right.clone();
                 Box::pin(async move {
-                    let left_fut = left(runtime, left_input);
-                    let right_fut = right(runtime, right_input);
+                    let (left_input, right_input) = match step_input {
+                        StepInput::Fresh { input } => input,
+                        StepInput::Resume { input, .. } => input,
+                    };
+                    let left_fut = left(runtime, StepInput::Fresh { input: left_input });
+                    let right_fut = right(runtime, StepInput::Fresh { input: right_input });
                     let (left_traced, right_traced) = try_join(left_fut, right_fut).await?;
                     let (left_output, left_report) = left_traced.into_parts();
                     let (right_output, right_report) = right_traced.into_parts();
@@ -275,6 +335,54 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
     }
 }
 
+fn build_step_checkpoint<I, A, F>(
+    initial_input: &Value,
+    current_input: &I,
+    repair_attempts: &[Attempt<I, A, F>],
+    report_attempts: &[AttemptReport<F>],
+    retry_policy: RetryPolicy,
+) -> StepCheckpoint
+where
+    I: Serialize,
+    A: Serialize,
+    F: Serialize + Clone,
+{
+    let report_attempts: Vec<crate::repair::AttemptReport<Value>> = report_attempts
+        .iter()
+        .map(|ar| crate::repair::AttemptReport {
+            findings: ar
+                .findings
+                .iter()
+                .cloned()
+                .map(|f| serde_json::to_value(f).unwrap_or(Value::Null))
+                .collect(),
+            accepted: ar.accepted,
+        })
+        .collect();
+
+    let repair_attempts: Vec<AttemptCheckpoint> = repair_attempts
+        .iter()
+        .map(|a| AttemptCheckpoint {
+            input: serde_json::to_value(&a.input).unwrap_or(Value::Null),
+            artefact: serde_json::to_value(&a.artefact).unwrap_or(Value::Null),
+            findings: a
+                .findings
+                .iter()
+                .cloned()
+                .map(|f| serde_json::to_value(f).unwrap_or(Value::Null))
+                .collect(),
+        })
+        .collect();
+
+    StepCheckpoint {
+        initial_input: initial_input.clone(),
+        current_input: serde_json::to_value(current_input).unwrap_or(Value::Null),
+        repair_attempts,
+        report_attempts,
+        retry_policy,
+    }
+}
+
 /// Builder for configuring a step's checks, materialisation, and repair loop.
 pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
     task_name: &'static str,
@@ -284,6 +392,7 @@ pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
         Arc<dyn RepairPlanner<Runtime = R, Input = I, Artefact = A, Finding = F, Error = E>>,
     >,
     retry_policy: RetryPolicy,
+    step_checkpointer: Option<Arc<dyn StepCheckpointer>>,
     marker: BuilderMarker<R, I, A, S, F, E, State>,
 }
 
@@ -306,6 +415,7 @@ where
             pipeline: self.pipeline.bind_findings(),
             repair: None,
             retry_policy: self.retry_policy,
+            step_checkpointer: self.step_checkpointer,
             marker: PhantomData,
         }
     }
@@ -323,6 +433,7 @@ where
             pipeline: self.pipeline.validate_first(check),
             repair: None,
             retry_policy: self.retry_policy,
+            step_checkpointer: self.step_checkpointer,
             marker: PhantomData,
         }
     }
@@ -352,6 +463,7 @@ where
             pipeline: self.pipeline.materialise(materialiser),
             repair: self.repair,
             retry_policy: self.retry_policy,
+            step_checkpointer: self.step_checkpointer,
             marker: PhantomData,
         }
     }
@@ -362,7 +474,13 @@ where
         self
     }
 
-    /// Finishes the builder and produces a runnable step.
+    /// Installs a step checkpointer for saving retry loop state after each attempt.
+    pub fn checkpoint_with(mut self, checkpointer: impl StepCheckpointer + 'static) -> Self {
+        self.step_checkpointer = Some(Arc::new(checkpointer));
+        self
+    }
+
+    /// Finishes the builder and produces a runnable step without checkpointing.
     pub fn build(self) -> Step<R, I, A, F, E>
     where
         I: Clone + 'static,
@@ -376,7 +494,7 @@ where
         let retry_policy = self.retry_policy;
 
         Step {
-            runner: Arc::new(move |runtime, initial_input: I| {
+            runner: Arc::new(move |runtime, step_input: StepInput<I>| {
                 let task = task.clone();
                 let pipeline = pipeline.clone();
                 let repair = repair.clone();
@@ -392,7 +510,16 @@ where
 
                 Box::pin(
                     async move {
-                        let mut input = initial_input;
+                        let mut input = match step_input {
+                            StepInput::Fresh { input } => input,
+                            StepInput::Resume { .. } => {
+                                #[allow(unreachable_code)]
+                                return Err(StepError::System {
+                                    stage: SystemStage::Task,
+                                    error: todo!(),
+                                });
+                            }
+                        };
                         let mut repair_attempts: Vec<Attempt<I, A, F>> = Vec::new();
                         let mut report_attempts: Vec<AttemptReport<F>> = Vec::new();
 
@@ -524,6 +651,238 @@ where
             }),
         }
     }
+
+    /// Finishes the builder and produces a step that supports checkpointing and
+    /// resume. The input, artefact, and finding types must be serialisable and
+    /// deserialisable so their values can be persisted between sessions.
+    pub fn build_persistent(self) -> Step<R, I, A, F, E>
+    where
+        I: Clone + Serialize + DeserializeOwned + 'static,
+        A: Clone + Serialize + DeserializeOwned + 'static,
+        F: Clone + Serialize + DeserializeOwned + 'static,
+    {
+        let task = self.task;
+        let task_name = self.task_name;
+        let pipeline = self.pipeline;
+        let repair = self.repair;
+        let retry_policy = self.retry_policy;
+        let step_checkpointer = self.step_checkpointer;
+
+        Step {
+            runner: Arc::new(move |runtime, step_input: StepInput<I>| {
+                let task = task.clone();
+                let pipeline = pipeline.clone();
+                let repair = repair.clone();
+                let step_checkpointer = step_checkpointer.clone();
+                let step_span = info_span!(
+                    name::STEP,
+                    component = component::STEP,
+                    task = task_name,
+                    input_type = %type_name::<I>(),
+                    artefact_type = %type_name::<A>(),
+                    finding_type = %type_name::<F>(),
+                    max_attempts = retry_policy.max_attempts()
+                );
+
+                Box::pin(
+                    async move {
+                        let (initial_input, mut input, mut repair_attempts, mut report_attempts) =
+                            match step_input {
+                                StepInput::Fresh { input: fresh } => {
+                                    let initial_input_value =
+                                        serde_json::to_value(&fresh).unwrap_or(Value::Null);
+                                    (initial_input_value, fresh, Vec::new(), Vec::new())
+                                }
+                                StepInput::Resume {
+                                    input: resumed,
+                                    checkpoint,
+                                } => {
+                                    let repair_attempts = checkpoint
+                                        .repair_attempts
+                                        .into_iter()
+                                        .map(|ac| {
+                                            let input: I = serde_json::from_value(ac.input)
+                                                .unwrap_or_else(|_| todo!());
+                                            let artefact: A = serde_json::from_value(ac.artefact)
+                                                .unwrap_or_else(|_| todo!());
+                                            let findings: Vec<F> = ac
+                                                .findings
+                                                .into_iter()
+                                                .map(|v| {
+                                                    serde_json::from_value(v)
+                                                        .unwrap_or_else(|_| todo!())
+                                                })
+                                                .collect();
+                                            Attempt {
+                                                input,
+                                                artefact,
+                                                findings,
+                                            }
+                                        })
+                                        .collect();
+                                    let report_attempts = checkpoint
+                                        .report_attempts
+                                        .into_iter()
+                                        .map(|ar| AttemptReport {
+                                            findings: ar
+                                                .findings
+                                                .into_iter()
+                                                .map(|v| {
+                                                    serde_json::from_value(v)
+                                                        .unwrap_or_else(|_| todo!())
+                                                })
+                                                .collect(),
+                                            accepted: ar.accepted,
+                                        })
+                                        .collect();
+                                    (
+                                        checkpoint.initial_input,
+                                        resumed,
+                                        repair_attempts,
+                                        report_attempts,
+                                    )
+                                }
+                            };
+
+                        info!(action = action::RUN_START, "step started");
+                        trace!(action = action::INPUT, "step input received");
+
+                        loop {
+                            let attempt = repair_attempts.len() + 1;
+                            debug!(
+                                action = action::ATTEMPT_START,
+                                attempt, "step attempt started"
+                            );
+
+                            let artefact =
+                                task.run(runtime, input.clone()).await.map_err(|error| {
+                                    error!(
+                                        action = action::RUN_ERROR,
+                                        attempt,
+                                        stage = %SystemStage::Task,
+                                        "step failed with system error"
+                                    );
+                                    StepError::System {
+                                        stage: SystemStage::Task,
+                                        error,
+                                    }
+                                })?;
+
+                            trace!(
+                                action = action::ATTEMPT_OUTPUT,
+                                attempt, "task produced artefact"
+                            );
+
+                            let (_, findings): (_, Vec<F>) = pipeline
+                                .run(runtime, artefact.clone())
+                                .await
+                                .map_err(|error| {
+                                    error!(
+                                        action = action::RUN_ERROR,
+                                        attempt,
+                                        stage = %SystemStage::Validation,
+                                        "step failed with system error"
+                                    );
+                                    StepError::System {
+                                        stage: SystemStage::Validation,
+                                        error,
+                                    }
+                                })?;
+
+                            let accepted = findings.is_empty();
+                            let finding_count = findings.len();
+                            report_attempts.push(AttemptReport {
+                                findings: findings.clone(),
+                                accepted,
+                            });
+
+                            debug!(
+                                action = action::ATTEMPT_VALIDATED,
+                                attempt, accepted, finding_count, "step attempt validated"
+                            );
+
+                            if let Some(cp) = &step_checkpointer {
+                                let checkpoint = build_step_checkpoint(
+                                    &initial_input,
+                                    &input,
+                                    &repair_attempts,
+                                    &report_attempts,
+                                    retry_policy,
+                                );
+                                cp.checkpoint(checkpoint).await;
+                            }
+
+                            if accepted {
+                                info!(
+                                    action = action::RUN_COMPLETE,
+                                    attempts = report_attempts.len(),
+                                    "step completed"
+                                );
+                                return Ok(Traced::new(artefact, StepReport::new(report_attempts)));
+                            }
+
+                            repair_attempts.push(Attempt {
+                                input: input.clone(),
+                                artefact: artefact.clone(),
+                                findings,
+                            });
+
+                            if repair_attempts.len() >= retry_policy.max_attempts() {
+                                warn!(
+                                    action = action::RUN_REJECTED,
+                                    attempts = report_attempts.len(),
+                                    reason = reason::RETRY_LIMIT_REACHED,
+                                    "step rejected"
+                                );
+                                return Err(StepError::Rejected(StepReport::new(report_attempts)));
+                            }
+
+                            let Some(repair) = repair.clone() else {
+                                warn!(
+                                    action = action::RUN_REJECTED,
+                                    attempts = report_attempts.len(),
+                                    reason = reason::REPAIR_UNAVAILABLE,
+                                    "step rejected"
+                                );
+                                return Err(StepError::Rejected(StepReport::new(report_attempts)));
+                            };
+
+                            debug!(
+                                action = action::ATTEMPT_REPAIR_START,
+                                attempt,
+                                next_attempt = attempt + 1,
+                                "planning repair attempt"
+                            );
+
+                            input = repair
+                                .repair(runtime, repair_attempts.clone())
+                                .await
+                                .map_err(|error| {
+                                    error!(
+                                        action = action::RUN_ERROR,
+                                        attempt,
+                                        stage = %SystemStage::Repair,
+                                        "step failed with system error"
+                                    );
+                                    StepError::System {
+                                        stage: SystemStage::Repair,
+                                        error,
+                                    }
+                                })?;
+
+                            trace!(
+                                action = action::ATTEMPT_REPAIR_COMPLETE,
+                                attempt,
+                                next_attempt = attempt + 1,
+                                "repair planner produced next input"
+                            );
+                        }
+                    }
+                    .instrument(step_span),
+                )
+            }),
+        }
+    }
 }
 
 impl<R, I, A, S, F, E> BoundStepBuilder<R, I, A, S, F, E>
@@ -547,6 +906,7 @@ where
             pipeline: self.pipeline.validate(check),
             repair: self.repair,
             retry_policy: self.retry_policy,
+            step_checkpointer: self.step_checkpointer,
             marker: PhantomData,
         }
     }
@@ -564,6 +924,7 @@ where
             pipeline: self.pipeline.validate_into(check),
             repair: self.repair,
             retry_policy: self.retry_policy,
+            step_checkpointer: self.step_checkpointer,
             marker: PhantomData,
         }
     }
@@ -579,6 +940,7 @@ where
             pipeline: self.pipeline,
             repair: Some(Arc::new(planner)),
             retry_policy: self.retry_policy,
+            step_checkpointer: self.step_checkpointer,
             marker: PhantomData,
         }
     }

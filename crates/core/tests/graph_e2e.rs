@@ -2,8 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use futures::future::LocalBoxFuture;
 use naaf_core::{
-    EdgeSpec, GraphPatch, InvalidPatchError, NodeContext, NodeId, NodeInput, NodeReport, NodeSpec,
-    Step, StepNode, Task, Workflow, WorkflowError,
+    EdgeSpec, GraphPatch, InvalidPatchError, NodeCheckpoint, NodeCheckpointReport,
+    NodeCheckpointState, NodeContext, NodeId, NodeInput, NodeReport, NodeSpec, ResumeError,
+    RunnerRegistry, Step, StepNode, Task, Workflow, WorkflowCheckpoint, WorkflowError,
+    WorkflowRunId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -306,4 +308,181 @@ async fn workflow_rejects_patch_that_targets_existing_nodes() {
         }
         other => panic!("unexpected error: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn workflow_resumes_from_checkpoint() {
+    let runtime = TestRuntime::default();
+    let root_id = NodeId::new();
+    let api_id = NodeId::new();
+
+    let api = api_step();
+
+    let root = NodeSpec::new(
+        "plan_feature",
+        StepNode::new(plan_step(), |input: &NodeInput| input.seed_as::<String>()),
+    )
+    .with_id(root_id)
+    .with_runner_key("plan_feature")
+    .with_seed("auth".to_string())
+    .expect("seed should serialise");
+
+    let api_node = NodeSpec::new(
+        "generate_api",
+        StepNode::new(api, move |input: &NodeInput| {
+            input.output_as::<Plan>(root_id)
+        }),
+    )
+    .with_id(api_id)
+    .with_runner_key("generate_api")
+    .with_parent(root_id);
+
+    let workflow = Workflow::new()
+        .with_max_concurrency(4)
+        .with_patch(
+            GraphPatch::new()
+                .with_node(root)
+                .with_node(api_node)
+                .with_edge(EdgeSpec::new(root_id, api_id)),
+        )
+        .expect("patch should validate");
+
+    let report = workflow
+        .run(&runtime)
+        .await
+        .expect("workflow should succeed");
+    assert_eq!(report.nodes().len(), 2);
+
+    let root_summary = report.node(root_id).expect("root node");
+    let root_output = root_summary.output().clone();
+
+    let checkpoint = WorkflowCheckpoint {
+        run_id: WorkflowRunId::new(),
+        max_concurrency: 4,
+        nodes: {
+            let mut nodes = std::collections::BTreeMap::new();
+            nodes.insert(
+                root_id,
+                NodeCheckpoint {
+                    id: root_id,
+                    name: "plan_feature".to_string(),
+                    runner_key: Some("plan_feature".to_string()),
+                    seed: Some(serde_json::json!("auth")),
+                    parent: None,
+                    dependencies: std::collections::BTreeSet::new(),
+                    downstream: std::collections::BTreeSet::from([api_id]),
+                    state: NodeCheckpointState::Succeeded,
+                    output: Some(root_output),
+                    report: NodeCheckpointReport::Empty,
+                },
+            );
+            nodes.insert(
+                api_id,
+                NodeCheckpoint {
+                    id: api_id,
+                    name: "generate_api".to_string(),
+                    runner_key: Some("generate_api".to_string()),
+                    seed: None,
+                    parent: Some(root_id),
+                    dependencies: std::collections::BTreeSet::from([root_id]),
+                    downstream: std::collections::BTreeSet::new(),
+                    state: NodeCheckpointState::Pending,
+                    output: None,
+                    report: NodeCheckpointReport::Empty,
+                },
+            );
+            nodes
+        },
+    };
+
+    let plan_runner = Arc::new(StepNode::new(plan_step(), |input: &NodeInput| {
+        input.seed_as::<String>()
+    }));
+    let api_runner = Arc::new(StepNode::new(api_step(), move |input: &NodeInput| {
+        input.output_as::<Plan>(root_id)
+    }));
+
+    let mut registry = RunnerRegistry::new();
+    registry.register("plan_feature", plan_runner);
+    registry.register("generate_api", api_runner);
+
+    let resumed = Workflow::resume(checkpoint, registry).expect("resume should succeed");
+    let resumed_report = resumed
+        .run(&runtime)
+        .await
+        .expect("resumed workflow should succeed");
+
+    assert_eq!(resumed_report.nodes().len(), 2);
+    let api_summary = resumed_report
+        .nodes()
+        .values()
+        .find(|n| n.name() == "generate_api")
+        .expect("api node should exist");
+    let api_draft: ApiDraft =
+        serde_json::from_value(api_summary.output().clone()).expect("output should decode");
+    assert_eq!(api_draft.file, "src/auth/api.rs");
+}
+
+#[tokio::test]
+async fn workflow_resume_rejects_missing_runner_key() {
+    let node_id = NodeId::new();
+    let checkpoint = WorkflowCheckpoint {
+        run_id: WorkflowRunId::new(),
+        max_concurrency: 1,
+        nodes: {
+            let mut nodes = std::collections::BTreeMap::new();
+            nodes.insert(
+                node_id,
+                NodeCheckpoint {
+                    id: node_id,
+                    name: "orphan".to_string(),
+                    runner_key: None,
+                    seed: None,
+                    parent: None,
+                    dependencies: std::collections::BTreeSet::new(),
+                    downstream: std::collections::BTreeSet::new(),
+                    state: NodeCheckpointState::Pending,
+                    output: None,
+                    report: NodeCheckpointReport::Empty,
+                },
+            );
+            nodes
+        },
+    };
+
+    let registry = RunnerRegistry::<TestRuntime, TestError>::new();
+    let result = Workflow::resume(checkpoint, registry);
+    assert!(matches!(result, Err(ResumeError::UnkeyedNode { .. })));
+}
+
+#[tokio::test]
+async fn workflow_resume_rejects_unknown_runner_key() {
+    let node_id = NodeId::new();
+    let checkpoint = WorkflowCheckpoint {
+        run_id: WorkflowRunId::new(),
+        max_concurrency: 1,
+        nodes: {
+            let mut nodes = std::collections::BTreeMap::new();
+            nodes.insert(
+                node_id,
+                NodeCheckpoint {
+                    id: node_id,
+                    name: "missing".to_string(),
+                    runner_key: Some("nonexistent".to_string()),
+                    seed: None,
+                    parent: None,
+                    dependencies: std::collections::BTreeSet::new(),
+                    downstream: std::collections::BTreeSet::new(),
+                    state: NodeCheckpointState::Pending,
+                    output: None,
+                    report: NodeCheckpointReport::Empty,
+                },
+            );
+            nodes
+        },
+    };
+
+    let registry = RunnerRegistry::<TestRuntime, TestError>::new();
+    let result = Workflow::resume(checkpoint, registry);
+    assert!(matches!(result, Err(ResumeError::MissingRunner { .. })));
 }

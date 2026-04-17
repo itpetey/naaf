@@ -1,0 +1,16 @@
+[package]
+name = "naaf-persistence-sqlite"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+naaf-core = { path = "../core" }
+parking_lot = { workspace = true }
+rusqlite = { version = "0.34", features = ["bundled"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }

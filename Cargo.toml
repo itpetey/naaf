@@ -5,6 +5,8 @@ members = [
     "crates/llm",
     "crates/process",
     "crates/tui",
+    "crates/persistence-fs",
+    "crates/persistence-sqlite",
     "examples/build-test",
     "examples/composed-workflow",
     "examples/dynamic-workflow",
@@ -31,5 +33,6 @@ thiserror = { version = "2.0", default-features = false }
 tokio = { version = "1.52", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
+parking_lot = { version = "0.12", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["default-tls", "json", "query"] }
 uuid = { version = "1.23", default-features = false }
