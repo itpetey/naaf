@@ -55,6 +55,12 @@ impl Default for EmbedderConfig {
     }
 }
 
+impl EmbedderConfig {
+    pub fn lm_studio_default_base_url() -> &'static str {
+        "http://127.0.0.1:1234/v1"
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct LlmConfig {
     #[serde(default = "default_llm_provider")]
