@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use futures::future::LocalBoxFuture;
 
 /// Produces a typed artefact from a typed input using the shared runtime.
@@ -17,4 +19,9 @@ pub trait Task {
         runtime: &'a Self::Runtime,
         input: Self::Input,
     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>>;
+
+    /// Returns a human-facing label for UI surfaces when one is available.
+    fn label(&self) -> Option<Cow<'static, str>> {
+        None
+    }
 }

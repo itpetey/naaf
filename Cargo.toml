@@ -51,6 +51,7 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
 thiserror = { version = "2.0", default-features = false }
 tokio = { version = "1.52", default-features = false }
 toml = { version = "1.1" }
+unicode-width = { version = "0.2", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 uuid = { version = "1.23", default-features = false, features = ["serde", "v4"] }

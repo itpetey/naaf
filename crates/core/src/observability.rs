@@ -173,6 +173,10 @@ where
             .instrument(span),
         )
     }
+
+    fn label(&self) -> Option<Cow<'static, str>> {
+        Some(self.name.clone())
+    }
 }
 
 /// A check wrapper that emits structured `tracing` events around execution.
@@ -593,6 +597,7 @@ mod tests {
         assert!(entries.iter().any(|entry| {
             entry["fields"]["action"] == "input"
                 && has_span_field(entry, "task", "generate_patch")
+                && has_span_field(entry, "label", "generate_patch")
                 && entry["fields"]["input"].to_string().contains("fix tests")
         }));
         assert!(entries.iter().any(|entry| {

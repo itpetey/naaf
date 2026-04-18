@@ -14,24 +14,24 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
             StepStatus::Running => Line::from(Span::styled(
                 format!(
                     "[running] {} (attempt {})",
-                    step.task_name, step.current_attempt
+                    step.task_label, step.current_attempt
                 ),
                 Style::default().fg(Color::Yellow),
             )),
             StepStatus::Completed => Line::from(Span::styled(
-                format!("[completed] {}", step.task_name),
+                format!("[completed] {}", step.task_label),
                 Style::default().fg(Color::Green),
             )),
             StepStatus::Rejected { reason } => Line::from(vec![
                 Span::styled(
-                    format!("[rejected] {} ", step.task_name),
+                    format!("[rejected] {} ", step.task_label),
                     Style::default().fg(Color::Red),
                 ),
                 Span::styled(reason.clone(), Style::default().fg(Color::LightRed)),
             ]),
             StepStatus::Failed { stage } => Line::from(vec![
                 Span::styled(
-                    format!("[failed] {} ", step.task_name),
+                    format!("[failed] {} ", step.task_label),
                     Style::default().fg(Color::Red),
                 ),
                 Span::styled(stage.clone(), Style::default().fg(Color::LightRed)),

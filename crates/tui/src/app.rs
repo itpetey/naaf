@@ -1,12 +1,14 @@
 use std::sync::Arc;
 use std::time::Duration;
+use std::{io, path::PathBuf};
 
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing_subscriber::prelude::*;
 
+use crate::debug_log::DebugLog;
 use crate::event::TuiEvent;
 use crate::terminal::TerminalGuard;
-use crate::ui::AppState;
+use crate::ui::{AppState, KeyAction};
 
 const DEFAULT_TICK_MS: u64 = 100;
 const DEFAULT_MAX_LOG_LINES: usize = 1000;
@@ -20,6 +22,7 @@ pub struct TuiAppBuilder {
     max_log_lines: usize,
     install_tracing_layer: bool,
     input_screen: Option<String>,
+    debug_log_path: Option<PathBuf>,
 }
 
 impl TuiAppBuilder {
@@ -48,6 +51,11 @@ impl TuiAppBuilder {
         self
     }
 
+    pub fn debug_log_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.debug_log_path = Some(path.into());
+        self
+    }
+
     pub fn spawn(self) -> Result<(EventSender, TuiHandle), TuiError> {
         let (tx, rx) = mpsc::unbounded_channel();
 
@@ -60,9 +68,19 @@ impl TuiAppBuilder {
         let tick_rate = self.tick_rate;
         let max_log_lines = self.max_log_lines;
         let input_label = self.input_screen.clone();
+        let debug_log_path = self.debug_log_path.clone();
 
         let join_handle = Arc::new(Mutex::new(Some(tokio::spawn(async move {
-            let _ = run_app(rx, title, tick_rate, max_log_lines, input_label, None).await;
+            let _ = run_app(
+                rx,
+                title,
+                tick_rate,
+                max_log_lines,
+                input_label,
+                None,
+                debug_log_path,
+            )
+            .await;
         }))));
 
         let handle = TuiHandle { join_handle };
@@ -85,6 +103,7 @@ impl TuiAppBuilder {
         let title = self.title;
         let tick_rate = self.tick_rate;
         let max_log_lines = self.max_log_lines;
+        let debug_log_path = self.debug_log_path.clone();
         let input_label = self
             .input_screen
             .clone()
@@ -98,6 +117,7 @@ impl TuiAppBuilder {
                 max_log_lines,
                 Some(input_label),
                 Some(instruction_tx),
+                debug_log_path,
             )
             .await;
         }))));
@@ -116,6 +136,7 @@ impl Default for TuiAppBuilder {
             max_log_lines: DEFAULT_MAX_LOG_LINES,
             install_tracing_layer: false,
             input_screen: None,
+            debug_log_path: None,
         }
     }
 }
@@ -141,6 +162,9 @@ impl TuiHandle {
 pub enum TuiError {
     #[error("terminal error: {0}")]
     Terminal(String),
+
+    #[error("debug log error: {0}")]
+    DebugLog(String),
 }
 
 async fn run_app(
@@ -150,7 +174,12 @@ async fn run_app(
     max_log_lines: usize,
     input_label: Option<String>,
     instruction_tx: Option<oneshot::Sender<String>>,
+    debug_log_path: Option<PathBuf>,
 ) -> Result<(), TuiError> {
+    let mut debug_log = debug_log_path
+        .map(DebugLog::open)
+        .transpose()
+        .map_err(map_debug_log_error)?;
     let mut terminal = TerminalGuard::new().map_err(|e| TuiError::Terminal(e.to_string()))?;
 
     let mut app_state = AppState::new(title, max_log_lines);
@@ -159,12 +188,38 @@ async fn run_app(
         app_state = app_state.with_input_phase(label, tx);
     }
 
+    if let Some(log) = debug_log.as_mut() {
+        log.record_launch(
+            &app_state.title,
+            tick_rate.as_millis() as u64,
+            max_log_lines,
+            match &app_state.phase {
+                crate::ui::TuiPhase::Input { .. } => Some(app_state.input_prompt_label.as_str()),
+                crate::ui::TuiPhase::Running => None,
+            },
+        )
+        .map_err(map_debug_log_error)?;
+        log.record_state("initial_state", &app_state)
+            .map_err(map_debug_log_error)?;
+    }
+
     loop {
         while let Ok(event) = rx.try_recv() {
+            if let Some(log) = debug_log.as_mut() {
+                log.record_event(&event).map_err(map_debug_log_error)?;
+            }
             if matches!(event, TuiEvent::Quit) {
+                if let Some(log) = debug_log.as_mut() {
+                    log.record_state("before_quit", &app_state)
+                        .map_err(map_debug_log_error)?;
+                }
                 return Ok(());
             }
             app_state.handle_event(event);
+            if let Some(log) = debug_log.as_mut() {
+                log.record_state("after_event", &app_state)
+                    .map_err(map_debug_log_error)?;
+            }
         }
 
         terminal
@@ -175,12 +230,25 @@ async fn run_app(
             && let Ok(event) = crossterm::event::read()
             && let crossterm::event::Event::Key(key) = event
         {
-            if key.code == crossterm::event::KeyCode::Char('q')
-                && key.modifiers.contains(crossterm::event::KeyModifiers::NONE)
-            {
+            if let Some(log) = debug_log.as_mut() {
+                log.record_key(&key).map_err(map_debug_log_error)?;
+            }
+
+            let action = app_state.handle_key(key);
+            if let Some(log) = debug_log.as_mut() {
+                log.record_key_action(&action)
+                    .map_err(map_debug_log_error)?;
+                log.record_state("after_key", &app_state)
+                    .map_err(map_debug_log_error)?;
+            }
+
+            if matches!(action, KeyAction::Quit) {
                 return Ok(());
             }
-            app_state.handle_key(key);
         }
     }
+}
+
+fn map_debug_log_error(error: io::Error) -> TuiError {
+    TuiError::DebugLog(error.to_string())
 }

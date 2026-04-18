@@ -19,6 +19,7 @@ struct SpanInfo {
     name: String,
     component: Option<String>,
     task_name: Option<String>,
+    task_label: Option<String>,
 }
 
 impl TuiLayer {
@@ -54,10 +55,12 @@ where
     ) {
         let mut component = None;
         let mut task_name = None;
+        let mut task_label = None;
 
         let mut visitor = SpanFieldVisitor {
             component: &mut component,
             task_name: &mut task_name,
+            task_label: &mut task_label,
         };
         attrs.values().record(&mut visitor);
 
@@ -70,6 +73,7 @@ where
                 name,
                 component,
                 task_name,
+                task_label,
             },
         );
     }
@@ -105,7 +109,8 @@ where
                 });
 
         if let Some(info) = &span_info {
-            let task = info.task_name.clone().unwrap_or_else(|| info.name.clone());
+            let task_name = info.task_name.clone().unwrap_or_else(|| info.name.clone());
+            let task_label = info.task_label.clone().unwrap_or_else(|| task_name.clone());
 
             match info.name.as_str() {
                 span::name::STEP => {
@@ -113,18 +118,21 @@ where
                         match action {
                             span::action::RUN_START => {
                                 self.send(TuiEvent::StepStarted {
-                                    task_name: task.clone(),
+                                    task_name: task_name.clone(),
+                                    task_label: task_label.clone(),
                                 });
                             }
                             span::action::ATTEMPT_START => {
                                 self.send(TuiEvent::StepAttemptStarted {
-                                    task_name: task.clone(),
+                                    task_name: task_name.clone(),
+                                    task_label: task_label.clone(),
                                     attempt: attempt.unwrap_or(0) as usize,
                                 });
                             }
                             span::action::ATTEMPT_VALIDATED => {
                                 self.send(TuiEvent::StepAttemptValidated {
-                                    task_name: task.clone(),
+                                    task_name: task_name.clone(),
+                                    task_label: task_label.clone(),
                                     attempt: attempt.unwrap_or(0) as usize,
                                     accepted: accepted.unwrap_or(false),
                                     finding_count: finding_count.unwrap_or(0) as usize,
@@ -132,26 +140,30 @@ where
                             }
                             span::action::ATTEMPT_REPAIR_START => {
                                 self.send(TuiEvent::StepRepairStarted {
-                                    task_name: task.clone(),
+                                    task_name: task_name.clone(),
+                                    task_label: task_label.clone(),
                                     attempt: attempt.unwrap_or(0) as usize,
                                 });
                             }
                             span::action::RUN_COMPLETE => {
                                 self.send(TuiEvent::StepCompleted {
-                                    task_name: task.clone(),
+                                    task_name: task_name.clone(),
+                                    task_label: task_label.clone(),
                                     attempts: attempt.unwrap_or(1) as usize,
                                 });
                             }
                             span::action::RUN_REJECTED => {
                                 self.send(TuiEvent::StepRejected {
-                                    task_name: task.clone(),
+                                    task_name: task_name.clone(),
+                                    task_label: task_label.clone(),
                                     attempts: attempt.unwrap_or(0) as usize,
                                     reason: reason.unwrap_or_else(|| "unknown".to_string()),
                                 });
                             }
                             span::action::RUN_ERROR => {
                                 self.send(TuiEvent::StepFailed {
-                                    task_name: task.clone(),
+                                    task_name: task_name.clone(),
+                                    task_label: task_label.clone(),
                                     stage: stage.unwrap_or_else(|| "unknown".to_string()),
                                 });
                             }
@@ -169,19 +181,19 @@ where
                             span::action::RUN_START => {
                                 self.send(TuiEvent::ComponentStarted {
                                     component,
-                                    name: task.clone(),
+                                    name: task_label.clone(),
                                 });
                             }
                             span::action::RUN_COMPLETE => {
                                 self.send(TuiEvent::ComponentCompleted {
                                     component,
-                                    name: task.clone(),
+                                    name: task_label.clone(),
                                 });
                             }
                             span::action::RUN_ERROR => {
                                 self.send(TuiEvent::ComponentFailed {
                                     component,
-                                    name: task.clone(),
+                                    name: task_label.clone(),
                                 });
                             }
                             _ => {}
@@ -216,6 +228,7 @@ where
 struct SpanFieldVisitor<'a> {
     component: &'a mut Option<String>,
     task_name: &'a mut Option<String>,
+    task_label: &'a mut Option<String>,
 }
 
 impl tracing::field::Visit for SpanFieldVisitor<'_> {
@@ -225,13 +238,16 @@ impl tracing::field::Visit for SpanFieldVisitor<'_> {
             "task" | "check" | "materialiser" | "planner" => {
                 *self.task_name = Some(value.to_string());
             }
+            "label" => *self.task_label = Some(value.to_string()),
             _ => {}
         }
     }
 
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "component" {
-            *self.component = Some(format!("{value:?}"));
+        match field.name() {
+            "component" => *self.component = Some(format!("{value:?}")),
+            "label" => *self.task_label = Some(format!("{value:?}")),
+            _ => {}
         }
     }
 }
@@ -286,6 +302,48 @@ impl tracing::field::Visit for EventFieldVisitor<'_> {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         if field.name() == "message" || field.name() == "" {
             *self.message = format!("{value:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::mpsc;
+    use tracing::{info, info_span};
+    use tracing_subscriber::{Registry, layer::SubscriberExt};
+
+    use super::TuiLayer;
+    use crate::event::TuiEvent;
+
+    #[test]
+    fn step_events_prefer_explicit_labels() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let subscriber = Registry::default().with(TuiLayer::new(tx));
+        let dispatch = tracing::Dispatch::new(subscriber);
+
+        tracing::dispatcher::with_default(&dispatch, || {
+            let span = info_span!(
+                naaf_core::span::name::STEP,
+                component = naaf_core::span::component::STEP,
+                task = "naaf_core::observability::ObservedTask<example::Task>",
+                label = "Discovery brief"
+            );
+            let _entered = span.enter();
+            info!(action = naaf_core::span::action::RUN_START, "step started");
+        });
+
+        match rx.try_recv() {
+            Ok(TuiEvent::StepStarted {
+                task_name,
+                task_label,
+            }) => {
+                assert_eq!(
+                    task_name,
+                    "naaf_core::observability::ObservedTask<example::Task>"
+                );
+                assert_eq!(task_label, "Discovery brief");
+            }
+            other => panic!("unexpected event: {other:?}"),
         }
     }
 }

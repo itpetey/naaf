@@ -4,32 +4,39 @@ use std::fmt;
 pub enum TuiEvent {
     StepStarted {
         task_name: String,
+        task_label: String,
     },
     StepAttemptStarted {
         task_name: String,
+        task_label: String,
         attempt: usize,
     },
     StepAttemptValidated {
         task_name: String,
+        task_label: String,
         attempt: usize,
         accepted: bool,
         finding_count: usize,
     },
     StepRepairStarted {
         task_name: String,
+        task_label: String,
         attempt: usize,
     },
     StepCompleted {
         task_name: String,
+        task_label: String,
         attempts: usize,
     },
     StepRejected {
         task_name: String,
+        task_label: String,
         attempts: usize,
         reason: String,
     },
     StepFailed {
         task_name: String,
+        task_label: String,
         stage: String,
     },
     ComponentStarted {
@@ -60,38 +67,51 @@ pub enum TuiEvent {
 impl fmt::Display for TuiEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::StepStarted { task_name } => write!(f, "step started: {task_name}"),
-            Self::StepAttemptStarted { task_name, attempt } => {
-                write!(f, "attempt {attempt} started: {task_name}")
+            Self::StepStarted { task_label, .. } => write!(f, "step started: {task_label}"),
+            Self::StepAttemptStarted {
+                task_label,
+                attempt,
+                ..
+            } => {
+                write!(f, "attempt {attempt} started: {task_label}")
             }
             Self::StepAttemptValidated {
-                task_name,
+                task_label,
                 attempt,
                 accepted,
                 finding_count,
+                ..
             } => write!(
                 f,
-                "attempt {attempt} validated: {task_name} (accepted={accepted}, findings={finding_count})"
+                "attempt {attempt} validated: {task_label} (accepted={accepted}, findings={finding_count})"
             ),
-            Self::StepRepairStarted { task_name, attempt } => {
-                write!(f, "repair started: {task_name} (attempt {attempt})")
+            Self::StepRepairStarted {
+                task_label,
+                attempt,
+                ..
+            } => {
+                write!(f, "repair started: {task_label} (attempt {attempt})")
             }
             Self::StepCompleted {
-                task_name,
+                task_label,
                 attempts,
+                ..
             } => {
-                write!(f, "step completed: {task_name} ({attempts} attempts)")
+                write!(f, "step completed: {task_label} ({attempts} attempts)")
             }
             Self::StepRejected {
-                task_name,
+                task_label,
                 attempts,
                 reason,
+                ..
             } => write!(
                 f,
-                "step rejected: {task_name} ({attempts} attempts, {reason})"
+                "step rejected: {task_label} ({attempts} attempts, {reason})"
             ),
-            Self::StepFailed { task_name, stage } => {
-                write!(f, "step failed: {task_name} ({stage})")
+            Self::StepFailed {
+                task_label, stage, ..
+            } => {
+                write!(f, "step failed: {task_label} ({stage})")
             }
             Self::ComponentStarted { component, name } => {
                 write!(f, "{component} started: {name}")

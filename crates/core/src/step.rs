@@ -1,5 +1,6 @@
 use std::{
     any::type_name,
+    borrow::Cow,
     fmt::{Debug, Display, Formatter},
     marker::PhantomData,
     sync::Arc,
@@ -79,6 +80,7 @@ impl Step<(), (), (), (), ()> {
     {
         StepBuilder {
             task_name: type_name::<T>(),
+            task_label: task.label(),
             task: Arc::new(task),
             pipeline: ValidationPipeline::identity(),
             repair: None,
@@ -386,6 +388,7 @@ where
 /// Builder for configuring a step's checks, materialisation, and repair loop.
 pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
     task_name: &'static str,
+    task_label: Option<Cow<'static, str>>,
     task: Arc<dyn Task<Runtime = R, Input = I, Output = A, Error = E>>,
     pipeline: ValidationPipeline<R, A, S, F, E>,
     repair: Option<
@@ -411,6 +414,7 @@ where
     {
         StepBuilder {
             task_name: self.task_name,
+            task_label: self.task_label,
             task: self.task,
             pipeline: self.pipeline.bind_findings(),
             repair: None,
@@ -429,6 +433,7 @@ where
     {
         StepBuilder {
             task_name: self.task_name,
+            task_label: self.task_label,
             task: self.task,
             pipeline: self.pipeline.validate_first(check),
             repair: None,
@@ -459,6 +464,7 @@ where
     {
         StepBuilder {
             task_name: self.task_name,
+            task_label: self.task_label,
             task: self.task,
             pipeline: self.pipeline.materialise(materialiser),
             repair: self.repair,
@@ -471,6 +477,12 @@ where
     /// Sets the retry policy used by the built step.
     pub fn retry_policy(mut self, retry_policy: RetryPolicy) -> Self {
         self.retry_policy = retry_policy;
+        self
+    }
+
+    /// Overrides the human-facing label emitted for this step.
+    pub fn with_label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
+        self.task_label = Some(label.into());
         self
     }
 
@@ -489,6 +501,7 @@ where
     {
         let task = self.task;
         let task_name = self.task_name;
+        let task_label = self.task_label;
         let pipeline = self.pipeline;
         let repair = self.repair;
         let retry_policy = self.retry_policy;
@@ -498,15 +511,28 @@ where
                 let task = task.clone();
                 let pipeline = pipeline.clone();
                 let repair = repair.clone();
-                let step_span = info_span!(
-                    name::STEP,
-                    component = component::STEP,
-                    task = task_name,
-                    input_type = %type_name::<I>(),
-                    artefact_type = %type_name::<A>(),
-                    finding_type = %type_name::<F>(),
-                    max_attempts = retry_policy.max_attempts()
-                );
+                let step_span = if let Some(task_label) = task_label.clone() {
+                    info_span!(
+                        name::STEP,
+                        component = component::STEP,
+                        task = task_name,
+                        label = task_label.as_ref(),
+                        input_type = %type_name::<I>(),
+                        artefact_type = %type_name::<A>(),
+                        finding_type = %type_name::<F>(),
+                        max_attempts = retry_policy.max_attempts()
+                    )
+                } else {
+                    info_span!(
+                        name::STEP,
+                        component = component::STEP,
+                        task = task_name,
+                        input_type = %type_name::<I>(),
+                        artefact_type = %type_name::<A>(),
+                        finding_type = %type_name::<F>(),
+                        max_attempts = retry_policy.max_attempts()
+                    )
+                };
 
                 Box::pin(
                     async move {
@@ -663,6 +689,7 @@ where
     {
         let task = self.task;
         let task_name = self.task_name;
+        let task_label = self.task_label;
         let pipeline = self.pipeline;
         let repair = self.repair;
         let retry_policy = self.retry_policy;
@@ -674,15 +701,28 @@ where
                 let pipeline = pipeline.clone();
                 let repair = repair.clone();
                 let step_checkpointer = step_checkpointer.clone();
-                let step_span = info_span!(
-                    name::STEP,
-                    component = component::STEP,
-                    task = task_name,
-                    input_type = %type_name::<I>(),
-                    artefact_type = %type_name::<A>(),
-                    finding_type = %type_name::<F>(),
-                    max_attempts = retry_policy.max_attempts()
-                );
+                let step_span = if let Some(task_label) = task_label.clone() {
+                    info_span!(
+                        name::STEP,
+                        component = component::STEP,
+                        task = task_name,
+                        label = task_label.as_ref(),
+                        input_type = %type_name::<I>(),
+                        artefact_type = %type_name::<A>(),
+                        finding_type = %type_name::<F>(),
+                        max_attempts = retry_policy.max_attempts()
+                    )
+                } else {
+                    info_span!(
+                        name::STEP,
+                        component = component::STEP,
+                        task = task_name,
+                        input_type = %type_name::<I>(),
+                        artefact_type = %type_name::<A>(),
+                        finding_type = %type_name::<F>(),
+                        max_attempts = retry_policy.max_attempts()
+                    )
+                };
 
                 Box::pin(
                     async move {
@@ -902,6 +942,7 @@ where
     {
         Self {
             task_name: self.task_name,
+            task_label: self.task_label,
             task: self.task,
             pipeline: self.pipeline.validate(check),
             repair: self.repair,
@@ -920,6 +961,7 @@ where
     {
         Self {
             task_name: self.task_name,
+            task_label: self.task_label,
             task: self.task,
             pipeline: self.pipeline.validate_into(check),
             repair: self.repair,
@@ -936,6 +978,7 @@ where
     {
         Self {
             task_name: self.task_name,
+            task_label: self.task_label,
             task: self.task,
             pipeline: self.pipeline,
             repair: Some(Arc::new(planner)),

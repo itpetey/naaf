@@ -16,6 +16,7 @@ pub use event::TuiEvent;
 pub use tracing_layer::TuiLayer;
 
 mod app;
+mod debug_log;
 mod event;
 mod terminal;
 mod tracing_layer;

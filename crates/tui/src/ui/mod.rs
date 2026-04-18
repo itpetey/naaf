@@ -18,6 +18,14 @@ pub enum TuiPhase {
     Running,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeyAction {
+    Continue,
+    Quit,
+    InstructionSubmitted(String),
+    PromptSubmitted { question: String, reply: String },
+}
+
 pub struct AppState {
     pub title: String,
     pub phase: TuiPhase,
@@ -34,6 +42,7 @@ pub struct AppState {
 #[derive(Clone, Debug)]
 pub struct StepState {
     pub task_name: String,
+    pub task_label: String,
     pub status: StepStatus,
     pub current_attempt: usize,
     pub max_attempts: usize,
@@ -107,9 +116,13 @@ impl AppState {
 
     pub fn handle_event(&mut self, event: TuiEvent) {
         match event {
-            TuiEvent::StepStarted { task_name } => {
+            TuiEvent::StepStarted {
+                task_name,
+                task_label,
+            } => {
                 let existing = self.steps.iter().position(|s| s.task_name == task_name);
                 if let Some(idx) = existing {
+                    self.steps[idx].task_label = task_label;
                     self.steps[idx].status = StepStatus::Running;
                     self.steps[idx].current_attempt = 0;
                     self.steps[idx].attempt_findings.clear();
@@ -117,44 +130,59 @@ impl AppState {
                 } else {
                     self.steps.push(StepState {
                         task_name: task_name.clone(),
+                        task_label: task_label.clone(),
                         status: StepStatus::Running,
                         current_attempt: 0,
                         max_attempts: 0,
                         attempt_findings: Vec::new(),
-                        detail_lines: vec![format!("started: {task_name}")],
+                        detail_lines: vec![format!("started: {task_label}")],
                     });
                 }
             }
-            TuiEvent::StepAttemptStarted { task_name, attempt } => {
+            TuiEvent::StepAttemptStarted {
+                task_name,
+                task_label,
+                attempt,
+            } => {
                 if let Some(step) = self.steps.iter_mut().find(|s| s.task_name == task_name) {
+                    step.task_label = task_label;
                     step.current_attempt = attempt;
                     step.detail_lines.push(format!("attempt {attempt} started"));
                 }
             }
             TuiEvent::StepAttemptValidated {
                 task_name,
+                task_label,
                 attempt,
                 accepted,
                 finding_count,
             } => {
                 if let Some(step) = self.steps.iter_mut().find(|s| s.task_name == task_name) {
+                    step.task_label = task_label;
                     step.attempt_findings.push(finding_count);
                     step.detail_lines.push(format!(
                         "attempt {attempt}: accepted={accepted}, findings={finding_count}"
                     ));
                 }
             }
-            TuiEvent::StepRepairStarted { task_name, attempt } => {
+            TuiEvent::StepRepairStarted {
+                task_name,
+                task_label,
+                attempt,
+            } => {
                 if let Some(step) = self.steps.iter_mut().find(|s| s.task_name == task_name) {
+                    step.task_label = task_label;
                     step.detail_lines
                         .push(format!("repair planning for attempt {attempt}"));
                 }
             }
             TuiEvent::StepCompleted {
                 task_name,
+                task_label,
                 attempts,
             } => {
                 if let Some(step) = self.steps.iter_mut().find(|s| s.task_name == task_name) {
+                    step.task_label = task_label;
                     step.status = StepStatus::Completed;
                     step.detail_lines
                         .push(format!("completed after {attempts} attempt(s)"));
@@ -162,10 +190,12 @@ impl AppState {
             }
             TuiEvent::StepRejected {
                 task_name,
+                task_label,
                 attempts,
                 reason,
             } => {
                 if let Some(step) = self.steps.iter_mut().find(|s| s.task_name == task_name) {
+                    step.task_label = task_label;
                     step.status = StepStatus::Rejected {
                         reason: reason.clone(),
                     };
@@ -173,8 +203,13 @@ impl AppState {
                         .push(format!("rejected after {attempts} attempt(s): {reason}"));
                 }
             }
-            TuiEvent::StepFailed { task_name, stage } => {
+            TuiEvent::StepFailed {
+                task_name,
+                task_label,
+                stage,
+            } => {
                 if let Some(step) = self.steps.iter_mut().find(|s| s.task_name == task_name) {
+                    step.task_label = task_label;
                     step.status = StepStatus::Failed {
                         stage: stage.clone(),
                     };
@@ -228,11 +263,13 @@ impl AppState {
         }
     }
 
-    pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+    pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> KeyAction {
         if let TuiPhase::Input { buffer, cursor } = &mut self.phase {
             match key.code {
                 crossterm::event::KeyCode::Enter => {
-                    self.submit_instruction();
+                    if let Some(instruction) = self.submit_instruction() {
+                        return KeyAction::InstructionSubmitted(instruction);
+                    }
                 }
                 crossterm::event::KeyCode::Char(c) => {
                     buffer.insert(*cursor, c);
@@ -267,13 +304,16 @@ impl AppState {
                 }
                 _ => {}
             }
-            return;
+            return KeyAction::Continue;
         }
 
         if self.active_prompt.is_some() {
             if key.code == crossterm::event::KeyCode::Enter {
                 let prompt = self.active_prompt.take().expect("checked is_some");
-                let _ = prompt.reply.send(prompt.input);
+                let question = prompt.question;
+                let reply = prompt.input;
+                let _ = prompt.reply.send(reply.clone());
+                return KeyAction::PromptSubmitted { question, reply };
             } else if let Some(prompt) = &mut self.active_prompt {
                 match key.code {
                     crossterm::event::KeyCode::Char(c) => {
@@ -285,7 +325,7 @@ impl AppState {
                     _ => {}
                 }
             }
-            return;
+            return KeyAction::Continue;
         }
 
         match key.code {
@@ -307,8 +347,75 @@ impl AppState {
             crossterm::event::KeyCode::Char('k') => {
                 self.log_scroll_offset += 1;
             }
+            crossterm::event::KeyCode::Char('q')
+                if key.modifiers.contains(crossterm::event::KeyModifiers::NONE) =>
+            {
+                return KeyAction::Quit;
+            }
             _ => {}
         }
+        KeyAction::Continue
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tokio::sync::oneshot;
+
+    use super::{AppState, KeyAction};
+    use crate::event::TuiEvent;
+
+    #[test]
+    fn enter_submits_input_phase_contents() {
+        let (tx, _rx) = oneshot::channel();
+        let mut state =
+            AppState::new("naaf".to_string(), 100).with_input_phase("Instruction".to_string(), tx);
+
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::NONE)),
+            KeyAction::Continue
+        );
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE)),
+            KeyAction::Continue
+        );
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            KeyAction::InstructionSubmitted("Hi".to_string())
+        );
+    }
+
+    #[test]
+    fn enter_submits_human_prompt_reply() {
+        let (tx, _rx) = oneshot::channel();
+        let mut state = AppState::new("naaf".to_string(), 100);
+
+        state.handle_event(TuiEvent::HumanPrompt {
+            question: "Clarify?".to_string(),
+            choices: vec!["yes".to_string(), "no".to_string()],
+            reply: tx,
+        });
+
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
+            KeyAction::Continue
+        );
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE)),
+            KeyAction::Continue
+        );
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)),
+            KeyAction::Continue
+        );
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            KeyAction::PromptSubmitted {
+                question: "Clarify?".to_string(),
+                reply: "yes".to_string(),
+            }
+        );
     }
 }
 
@@ -320,7 +427,12 @@ pub fn render(frame: &mut Frame, state: &AppState) {
 
     let size = frame.area();
 
-    let prompt_height = if state.active_prompt.is_some() { 3 } else { 0 };
+    let prompt_height = if let Some(prompt) = &state.active_prompt {
+        let content_lines = 2 + if prompt.choices.is_empty() { 0 } else { 1 };
+        content_lines + 2
+    } else {
+        0
+    };
 
     let outer = Layout::default()
         .direction(Direction::Vertical)
