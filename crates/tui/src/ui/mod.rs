@@ -6,11 +6,13 @@ pub mod steps;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::Span;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::event::TuiEvent;
+
+const CTRL_C_QUIT_MESSAGE: &str = "press ctrl+c again to quit";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TuiPhase {
@@ -21,6 +23,7 @@ pub enum TuiPhase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeyAction {
     Continue,
+    QuitArmed,
     Quit,
     InstructionSubmitted(String),
     PromptSubmitted { question: String, reply: String },
@@ -36,6 +39,7 @@ pub struct AppState {
     pub log_scroll_offset: usize,
     pub active_prompt: Option<PromptState>,
     pub input_prompt_label: String,
+    quit_armed: bool,
     instruction_tx: Option<tokio::sync::oneshot::Sender<String>>,
 }
 
@@ -84,6 +88,7 @@ impl AppState {
             log_scroll_offset: 0,
             active_prompt: None,
             input_prompt_label: String::from("Instruction"),
+            quit_armed: false,
             instruction_tx: None,
         }
     }
@@ -112,6 +117,35 @@ impl AppState {
             return Some(instruction);
         }
         None
+    }
+
+    pub fn quit_notice(&self) -> Option<&'static str> {
+        self.quit_armed.then_some(CTRL_C_QUIT_MESSAGE)
+    }
+
+    fn push_log(&mut self, level: tracing::Level, message: String) {
+        if self.logs.len() >= self.max_log_lines {
+            self.logs.remove(0);
+            if self.log_scroll_offset > 0 {
+                self.log_scroll_offset -= 1;
+            }
+        }
+
+        self.logs.push(LogEntry { level, message });
+    }
+
+    fn arm_quit(&mut self) -> KeyAction {
+        if self.quit_armed {
+            return KeyAction::Quit;
+        }
+
+        self.quit_armed = true;
+        self.push_log(tracing::Level::WARN, CTRL_C_QUIT_MESSAGE.to_string());
+        KeyAction::QuitArmed
+    }
+
+    fn clear_quit_notice(&mut self) {
+        self.quit_armed = false;
     }
 
     pub fn handle_event(&mut self, event: TuiEvent) {
@@ -217,35 +251,26 @@ impl AppState {
                 }
             }
             TuiEvent::ComponentStarted { component, name } => {
-                self.logs.push(LogEntry {
-                    level: tracing::Level::DEBUG,
-                    message: format!("{component} started: {name}"),
-                });
+                self.push_log(
+                    tracing::Level::DEBUG,
+                    format!("{component} started: {name}"),
+                );
             }
             TuiEvent::ComponentCompleted { component, name } => {
-                self.logs.push(LogEntry {
-                    level: tracing::Level::DEBUG,
-                    message: format!("{component} completed: {name}"),
-                });
+                self.push_log(
+                    tracing::Level::DEBUG,
+                    format!("{component} completed: {name}"),
+                );
             }
             TuiEvent::ComponentFailed { component, name } => {
-                self.logs.push(LogEntry {
-                    level: tracing::Level::ERROR,
-                    message: format!("{component} failed: {name}"),
-                });
+                self.push_log(tracing::Level::ERROR, format!("{component} failed: {name}"));
             }
             TuiEvent::Log {
                 level,
                 message,
                 target: _,
             } => {
-                if self.logs.len() >= self.max_log_lines {
-                    self.logs.remove(0);
-                    if self.log_scroll_offset > 0 {
-                        self.log_scroll_offset -= 1;
-                    }
-                }
-                self.logs.push(LogEntry { level, message });
+                self.push_log(level, message);
             }
             TuiEvent::HumanPrompt {
                 question,
@@ -264,6 +289,14 @@ impl AppState {
     }
 
     pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> KeyAction {
+        if is_ctrl_c(&key) {
+            return self.arm_quit();
+        }
+
+        if self.quit_armed {
+            self.clear_quit_notice();
+        }
+
         if let TuiPhase::Input { buffer, cursor } = &mut self.phase {
             match key.code {
                 crossterm::event::KeyCode::Enter => {
@@ -358,6 +391,31 @@ impl AppState {
     }
 }
 
+fn is_ctrl_c(key: &crossterm::event::KeyEvent) -> bool {
+    key.modifiers
+        .contains(crossterm::event::KeyModifiers::CONTROL)
+        && matches!(key.code, crossterm::event::KeyCode::Char('c' | 'C'))
+}
+
+pub(crate) fn title_line(state: &AppState) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        format!(" {} ", state.title),
+        Style::default().add_modifier(Modifier::BOLD),
+    )];
+
+    if let Some(notice) = state.quit_notice() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            notice.to_string(),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    Line::from(spans)
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -417,6 +475,40 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn ctrl_c_requires_confirmation_before_quitting() {
+        let mut state = AppState::new("naaf".to_string(), 100);
+
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            KeyAction::QuitArmed
+        );
+        assert_eq!(state.quit_notice(), Some("press ctrl+c again to quit"));
+        assert_eq!(
+            state.logs.last().map(|entry| entry.message.as_str()),
+            state.quit_notice()
+        );
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            KeyAction::Quit
+        );
+    }
+
+    #[test]
+    fn ctrl_c_confirmation_clears_after_other_keys() {
+        let mut state = AppState::new("naaf".to_string(), 100);
+
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            KeyAction::QuitArmed
+        );
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+            KeyAction::Continue
+        );
+        assert_eq!(state.quit_notice(), None);
+    }
 }
 
 pub fn render(frame: &mut Frame, state: &AppState) {
@@ -427,27 +519,25 @@ pub fn render(frame: &mut Frame, state: &AppState) {
 
     let size = frame.area();
 
-    let prompt_height = if let Some(prompt) = &state.active_prompt {
-        let content_lines = 2 + if prompt.choices.is_empty() { 0 } else { 1 };
-        content_lines + 2
-    } else {
-        0
-    };
+    let prompt_height = state
+        .active_prompt
+        .as_ref()
+        .map(|prompt| human::desired_height(size.width, prompt))
+        .unwrap_or(0);
+
+    let log_height = if state.active_prompt.is_some() { 6 } else { 8 };
 
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Fill(1),
-            Constraint::Length(8),
+            Constraint::Length(log_height),
             Constraint::Length(prompt_height),
         ])
         .split(size);
 
-    let title = Paragraph::new(Span::styled(
-        format!(" {} ", state.title),
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
+    let title = Paragraph::new(title_line(state));
     frame.render_widget(title, outer[0]);
 
     let body = Layout::default()

@@ -59,6 +59,9 @@ impl DebugLog {
     pub fn record_key_action(&mut self, action: &KeyAction) -> io::Result<()> {
         match action {
             KeyAction::Continue => Ok(()),
+            KeyAction::QuitArmed => {
+                self.record("action", "quit_confirmation_requested".to_string())
+            }
             KeyAction::Quit => self.record("action", "quit_requested".to_string()),
             KeyAction::InstructionSubmitted(instruction) => self.record(
                 "action",

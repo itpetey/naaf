@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::ui::{AppState, TuiPhase};
+use crate::ui::{AppState, TuiPhase, title_line};
 
 pub fn render(frame: &mut Frame, state: &AppState) {
     let size = frame.area();
@@ -19,10 +19,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         ])
         .split(size);
 
-    let title = Paragraph::new(Span::styled(
-        format!(" {} ", state.title),
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
+    let title = Paragraph::new(title_line(state));
     frame.render_widget(title, outer[0]);
 
     let TuiPhase::Input { buffer, cursor } = &state.phase else {
@@ -51,7 +48,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     );
     frame.render_widget(input, outer[1]);
 
-    let help = Paragraph::new(vec![
+    let mut help_lines = vec![
         Line::from(""),
         Line::from(Span::styled(
             "Enter your instruction and press Enter to begin.",
@@ -67,8 +64,20 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         Line::from(Span::raw("  Enter      Submit instruction")),
         Line::from(Span::raw("  \u{2190}/\u{2192}       Move cursor")),
         Line::from(Span::raw("  Home/End   Jump to start/end")),
+        Line::from(Span::raw("  Ctrl+C     Quit (confirm)")),
         Line::from(Span::raw("  q          Quit")),
-    ])
-    .wrap(Wrap { trim: false });
+    ];
+
+    if let Some(notice) = state.quit_notice() {
+        help_lines.push(Line::from(""));
+        help_lines.push(Line::from(Span::styled(
+            notice,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    let help = Paragraph::new(help_lines).wrap(Wrap { trim: false });
     frame.render_widget(help, outer[2]);
 }
