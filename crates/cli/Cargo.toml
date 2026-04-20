@@ -13,7 +13,6 @@ path = "src/main.rs"
 clap = { workspace = true }
 naaf-knowledge = { path = "../knowledge" }
 naaf-qdrant = { path = "../qdrant", features = ["openai"] }
-naaf-ws = { path = "../ws" }
 serde = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 toml = { workspace = true }

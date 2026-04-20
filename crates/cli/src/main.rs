@@ -1,10 +1,7 @@
 mod config;
 
-use std::net::SocketAddr;
-
 use clap::{Parser, Subcommand};
 use tracing::info;
-use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
 #[command(name = "naaf", about = "Knowledge base management CLI")]
@@ -15,13 +12,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the WebSocket front end
-    Serve {
-        /// Address for the WebSocket server
-        #[arg(long, default_value = "127.0.0.1:8080")]
-        addr: SocketAddr,
-    },
-
     /// Knowledge base commands
     #[command(subcommand)]
     Kb(KbCommands),
@@ -89,14 +79,13 @@ fn make_embedder(config: &config::Config) -> Box<dyn naaf_qdrant::Embedder> {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt().init();
+    let config = config::Config::load().expect("failed to load config");
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Serve { addr } => serve(addr).await,
         Commands::Kb(cmd) => match cmd {
             KbCommands::Init => {
-                tracing_subscriber::fmt().init();
-                let config = config::Config::load().expect("failed to load config");
                 info!("Connecting to Qdrant at {}", config.qdrant.url);
                 let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
                     .expect("failed to connect");
@@ -116,8 +105,6 @@ async fn main() {
                 println!("Collection '{}' is ready.", config.qdrant.collection);
             }
             KbCommands::Ingest { path, repo } => {
-                tracing_subscriber::fmt().init();
-                let config = config::Config::load().expect("failed to load config");
                 let path = std::path::Path::new(&path);
                 if !path.exists() {
                     eprintln!("Path does not exist: {}", path.display());
@@ -172,8 +159,6 @@ async fn main() {
                 }
             }
             KbCommands::Query { query, repo } => {
-                tracing_subscriber::fmt().init();
-                let config = config::Config::load().expect("failed to load config");
                 let query_text = query.join(" ");
 
                 let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
@@ -211,8 +196,6 @@ async fn main() {
                 }
             }
             KbCommands::Lint => {
-                tracing_subscriber::fmt().init();
-                let config = config::Config::load().expect("failed to load config");
                 let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
                     .expect("failed to connect");
                 if let Some(ref api_key) = config.qdrant.api_key {
@@ -238,8 +221,6 @@ async fn main() {
                 }
             }
             KbCommands::List { limit } => {
-                tracing_subscriber::fmt().init();
-                let config = config::Config::load().expect("failed to load config");
                 let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
                     .expect("failed to connect");
                 if let Some(ref api_key) = config.qdrant.api_key {
@@ -266,32 +247,6 @@ async fn main() {
             }
         },
     }
-}
-
-async fn serve(addr: SocketAddr) {
-    let (event_tx, handle) = naaf_ws::WsAppBuilder::default()
-        .addr(addr)
-        .spawn()
-        .expect("failed to start websocket front end");
-
-    let ws_layer = naaf_ws::WsLayer::new(event_tx.clone());
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(ws_layer)
-        .init();
-
-    info!(target: "naaf::serve", "WebSocket front end ready at ws://{addr}/ws");
-    info!(target: "naaf::serve", "Press Ctrl+C to stop");
-
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for shutdown signal");
-
-    let _ = event_tx.send(naaf_ws::FrontendEvent::Quit);
-    handle
-        .shutdown()
-        .await
-        .expect("websocket front end should shut down cleanly");
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
