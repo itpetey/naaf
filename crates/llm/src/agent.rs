@@ -1,7 +1,12 @@
 use std::{convert::Infallible, sync::Arc};
 
+use naaf_core::{Task, TaskExt};
+use serde::de::DeserializeOwned;
+
 use crate::{
+    ExecutionOutcome,
     executor::Executor,
+    message::{CompletionRequest, Message},
     task::{LlmCheck, LlmMaterialiser, LlmRepairPlanner, LlmTask},
 };
 
@@ -11,14 +16,14 @@ pub struct LlmAgent<C, R, E = Infallible> {
     executor: Arc<Executor<C, R, E>>,
 }
 
-impl<C, R> LlmAgent<C, R, Infallible> {
+impl<C, R: 'static> LlmAgent<C, R, Infallible> {
     /// Creates an LLM agent without tools.
     pub fn new(client: C) -> Self {
         Self::with_executor(Executor::new(client))
     }
 }
 
-impl<C, R, E> LlmAgent<C, R, E> {
+impl<C, R: 'static, E> LlmAgent<C, R, E> {
     /// Creates an LLM agent with a preconfigured executor.
     pub fn with_executor(executor: Executor<C, R, E>) -> Self {
         Self {
@@ -66,5 +71,49 @@ impl<C, R, E> LlmAgent<C, R, E> {
     ) -> LlmRepairPlanner<C, R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError, E>
     {
         LlmRepairPlanner::from_shared_executor(self.executor.clone(), build_request, decode_input)
+    }
+
+    /// Creates a JSON-decoding task from a system prompt, user-prompt builder, and output type.
+    ///
+    /// This is a convenience wrapper for the common pattern of:
+    /// - sending a static system prompt
+    /// - building a user prompt from the input
+    /// - decoding the assistant response as JSON into `Output`
+    pub fn json_task<Input, Output, BuildUser, BuildError>(
+        &self,
+        model: String,
+        system_prompt: String,
+        build_user_prompt: BuildUser,
+        decode: fn(ExecutionOutcome) -> Result<Output, serde_json::Error>,
+        label: String,
+    ) -> impl Task<
+        Runtime = R,
+        Input = Input,
+        Output = Output,
+        Error = crate::error::AdapterError<BuildError, C::Error, E, serde_json::Error>,
+    > + use<C, R, E, Input, Output, BuildError, BuildUser>
+    where
+        C: crate::client::LlmClient<Runtime = R> + 'static,
+        C::Error: std::fmt::Debug + 'static,
+        E: std::fmt::Debug + 'static,
+        BuildError: std::fmt::Debug + 'static,
+        BuildUser: Fn(Input) -> Result<String, BuildError> + 'static,
+        Output: DeserializeOwned + std::fmt::Debug + 'static,
+        Input: std::fmt::Debug + 'static,
+    {
+        self.task(
+            move |_runtime: &R, input: Input| {
+                let user_content = build_user_prompt(input)?;
+                Ok::<_, BuildError>(CompletionRequest::new(
+                    model.clone(),
+                    vec![
+                        Message::system(system_prompt.clone()),
+                        Message::user(user_content),
+                    ],
+                ))
+            },
+            decode,
+        )
+        .observed_as(label)
     }
 }

@@ -1,0 +1,12 @@
+[package]
+name = "naaf-workspace"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+naaf-core = { path = "../core" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
