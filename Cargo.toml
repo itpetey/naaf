@@ -10,6 +10,7 @@ members = [
   "crates/process",
   "crates/qdrant",
   "crates/tui",
+  "crates/ws",
   "examples/build-test",
   "examples/composed-workflow",
   "examples/dynamic-workflow",
@@ -55,3 +56,4 @@ unicode-width = { version = "0.2", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 uuid = { version = "1.23", default-features = false, features = ["serde", "v4"] }
+axum = { version = "0.8", default-features = false }
