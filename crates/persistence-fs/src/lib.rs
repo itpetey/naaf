@@ -15,10 +15,27 @@
 //! The checkpointer organizes checkpoints by workflow run ID:
 //! - `/base_dir/{run_id}/workflow.json` — workflow-level checkpoint
 //! - `/base_dir/{run_id}/steps/{node_id}.json` — per-step checkpoints
+//!
+//! # Artifact Store
+//!
+//! For generic typed artifact persistence, use `ArtifactStore`:
+//!
+//! ```ignore
+//! use naaf_persistence_fs::ArtifactStore;
+//!
+//! let store = ArtifactStore::create("/tmp/my-run")?;
+//! store.write_json("plan.json", &my_plan)?;
+//! ```
 
-use std::path::PathBuf;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use naaf_core::{NodeId, StepCheckpoint, WorkflowCheckpoint, WorkflowRunId};
+use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -27,6 +44,88 @@ pub enum FsCheckpointerError {
     Io(#[from] std::io::Error),
     #[error("serialisation error: {0}")]
     Serialisation(#[from] serde_json::Error),
+}
+
+/// Generic filesystem artifact store for typed JSON artifacts.
+///
+/// Creates a directory at `run_root` and writes serialisable values
+/// to named JSON files within it. Sub-directories are created on demand
+/// when the artifact name contains path separators.
+#[derive(Clone, Debug)]
+pub struct ArtifactStore {
+    run_root: PathBuf,
+}
+
+impl ArtifactStore {
+    /// Creates a new artifact store at `run_root`, creating the directory
+    /// and any missing parents.
+    pub fn create(run_root: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let run_root = run_root.into();
+        fs::create_dir_all(&run_root)?;
+        Ok(Self { run_root })
+    }
+
+    /// Returns the root directory for this store.
+    pub fn run_root(&self) -> &Path {
+        &self.run_root
+    }
+
+    /// Serialises `value` as pretty JSON and writes it to `artifact_name`
+    /// relative to the run root.
+    pub fn write_json<T: Serialize + ?Sized>(
+        &self,
+        artifact_name: &str,
+        value: &T,
+    ) -> std::io::Result<()> {
+        let path = self.run_root.join(artifact_name);
+        let payload = serde_json::to_string_pretty(value).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to serialise artifact `{artifact_name}`: {error}"),
+            )
+        })?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, payload)
+    }
+
+    /// Reads and deserialises a previously written artifact.
+    pub fn read_json<T: serde::de::DeserializeOwned>(
+        &self,
+        artifact_name: &str,
+    ) -> std::io::Result<Option<T>> {
+        let path = self.run_root.join(artifact_name);
+        match fs::read_to_string(&path) {
+            Ok(data) => serde_json::from_str(&data).map(Some).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("failed to parse artifact `{artifact_name}`: {error}"),
+                )
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// Generates a unique run identifier suitable for use as a directory name.
+pub fn generate_run_id() -> std::io::Result<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to read system clock for run id: {error}"),
+            )
+        })?;
+
+    Ok(format!(
+        "run-{}-{:09}-{}",
+        now.as_secs(),
+        now.subsec_nanos(),
+        process::id()
+    ))
 }
 
 pub struct FsCheckpointer {
