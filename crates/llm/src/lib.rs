@@ -321,7 +321,7 @@ pub use crate::{
 };
 
 #[cfg(feature = "openai")]
-pub use crate::openai::{OpenAiClient, OpenAiConfig, OpenAiError};
+pub use crate::openai::{OpenAiClient, OpenAiConfig, OpenAiError, OpenAiStreamObserver};
 #[cfg(feature = "web-search")]
 pub use crate::web_search::{WebSearchError, WebSearchParams, WebSearchTool};
 

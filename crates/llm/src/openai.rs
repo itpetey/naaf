@@ -1,9 +1,9 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use futures::future::LocalBoxFuture;
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::client::LlmClient;
@@ -12,6 +12,12 @@ use crate::message::{
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+
+pub trait OpenAiStreamObserver<R>: Send + Sync {
+    fn on_reasoning_delta(&self, _runtime: &R, _delta: &str) {}
+
+    fn on_response_complete(&self, _runtime: &R, _message: &AssistantMessage) {}
+}
 
 #[derive(Clone, Debug)]
 pub struct OpenAiConfig {
@@ -85,6 +91,7 @@ pub enum OpenAiError {
 pub struct OpenAiClient<R> {
     config: OpenAiConfig,
     http: Client,
+    stream_observer: Option<Arc<dyn OpenAiStreamObserver<R>>>,
     _marker: PhantomData<R>,
 }
 
@@ -93,6 +100,7 @@ impl<R> OpenAiClient<R> {
         Self {
             config,
             http: Client::new(),
+            stream_observer: None,
             _marker: PhantomData,
         }
     }
@@ -104,6 +112,11 @@ impl<R> OpenAiClient<R> {
     pub fn config(&self) -> &OpenAiConfig {
         &self.config
     }
+
+    pub fn with_stream_observer(mut self, observer: Arc<dyn OpenAiStreamObserver<R>>) -> Self {
+        self.stream_observer = Some(observer);
+        self
+    }
 }
 
 impl<R> LlmClient for OpenAiClient<R> {
@@ -112,11 +125,16 @@ impl<R> LlmClient for OpenAiClient<R> {
 
     fn complete<'a>(
         &'a self,
-        _runtime: &'a Self::Runtime,
+        runtime: &'a Self::Runtime,
         request: CompletionRequest,
     ) -> LocalBoxFuture<'a, Result<CompletionResponse, Self::Error>> {
         Box::pin(async move {
             let body = build_request_body(&request)?;
+            let body = if self.stream_observer.is_some() {
+                with_streaming_enabled(body)
+            } else {
+                body
+            };
 
             let url = format!("{}/chat/completions", self.config.base_url);
             let mut builder = self
@@ -151,10 +169,35 @@ impl<R> LlmClient for OpenAiClient<R> {
                 };
             }
 
+            if let Some(observer) = self.stream_observer.as_ref() {
+                let content_type = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+
+                if content_type.starts_with("text/event-stream") {
+                    return parse_stream_response(response, observer.as_ref(), runtime).await;
+                }
+
+                let api_response = response.json::<ApiResponse>().await?;
+                let response = convert_response(api_response)?;
+                emit_non_streaming_response(observer.as_ref(), runtime, &response);
+                return Ok(response);
+            }
+
             let api_response = response.json::<ApiResponse>().await?;
             convert_response(api_response)
         })
     }
+}
+
+fn with_streaming_enabled(mut body: Value) -> Value {
+    if let Value::Object(map) = &mut body {
+        map.insert("stream".to_string(), Value::Bool(true));
+    }
+    body
 }
 
 fn build_request_body(request: &CompletionRequest) -> Result<Value, OpenAiError> {
@@ -258,6 +301,7 @@ fn convert_response(response: ApiResponse) -> Result<CompletionResponse, OpenAiE
         .into_iter()
         .next()
         .ok_or_else(|| OpenAiError::Conversion("no choices in response".to_string()))?;
+    let metadata = build_message_metadata(&choice.message);
 
     let tool_calls = match choice.message.tool_calls {
         Some(calls) => calls
@@ -291,7 +335,256 @@ fn convert_response(response: ApiResponse) -> Result<CompletionResponse, OpenAiE
     if let Some(usage) = response_usage {
         response = response.with_usage(usage);
     }
-    Ok(response.with_metadata(Value::Null))
+    Ok(response.with_metadata(metadata))
+}
+
+fn build_message_metadata(message: &ApiMessageResponse) -> Value {
+    let mut metadata = Map::new();
+
+    if let Some(reasoning_content) = message.reasoning_content.as_ref()
+        && !reasoning_content.trim().is_empty()
+    {
+        metadata.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning_content.clone()),
+        );
+    }
+
+    if let Some(reasoning) = message.reasoning.as_ref()
+        && !reasoning.trim().is_empty()
+    {
+        metadata.insert("reasoning".to_string(), Value::String(reasoning.clone()));
+    }
+
+    Value::Object(metadata)
+}
+
+fn emit_non_streaming_response<R>(
+    observer: &dyn OpenAiStreamObserver<R>,
+    runtime: &R,
+    response: &CompletionResponse,
+) {
+    if let Some(reasoning) = response
+        .metadata
+        .get("reasoning_content")
+        .or_else(|| response.metadata.get("reasoning"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        observer.on_reasoning_delta(runtime, reasoning);
+    }
+
+    observer.on_response_complete(runtime, &response.message);
+}
+
+async fn parse_stream_response<R>(
+    mut response: reqwest::Response,
+    observer: &dyn OpenAiStreamObserver<R>,
+    runtime: &R,
+) -> Result<CompletionResponse, OpenAiError> {
+    let mut state = StreamState::default();
+    let mut line_buffer = String::new();
+    let mut data_lines = Vec::new();
+
+    while let Some(chunk) = response.chunk().await? {
+        let chunk_text = std::str::from_utf8(&chunk)
+            .map_err(|error| OpenAiError::Conversion(format!("invalid stream utf-8: {error}")))?;
+
+        for ch in chunk_text.chars() {
+            if ch == '\n' {
+                process_stream_line(
+                    std::mem::take(&mut line_buffer),
+                    &mut data_lines,
+                    &mut state,
+                    observer,
+                    runtime,
+                )?;
+            } else {
+                line_buffer.push(ch);
+            }
+        }
+    }
+
+    if !line_buffer.is_empty() {
+        process_stream_line(line_buffer, &mut data_lines, &mut state, observer, runtime)?;
+    }
+
+    if !data_lines.is_empty() {
+        process_stream_event_data(&data_lines.join("\n"), &mut state, observer, runtime)?;
+    }
+
+    let response = state.into_response()?;
+    observer.on_response_complete(runtime, &response.message);
+    Ok(response)
+}
+
+fn process_stream_line<R>(
+    mut line: String,
+    data_lines: &mut Vec<String>,
+    state: &mut StreamState,
+    observer: &dyn OpenAiStreamObserver<R>,
+    runtime: &R,
+) -> Result<(), OpenAiError> {
+    if line.ends_with('\r') {
+        line.pop();
+    }
+
+    if line.is_empty() {
+        if !data_lines.is_empty() {
+            process_stream_event_data(&data_lines.join("\n"), state, observer, runtime)?;
+            data_lines.clear();
+        }
+        return Ok(());
+    }
+
+    if let Some(data) = line.strip_prefix("data:") {
+        data_lines.push(data.trim_start().to_string());
+    }
+
+    Ok(())
+}
+
+fn process_stream_event_data<R>(
+    data: &str,
+    state: &mut StreamState,
+    observer: &dyn OpenAiStreamObserver<R>,
+    runtime: &R,
+) -> Result<(), OpenAiError> {
+    let data = data.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return Ok(());
+    }
+
+    let chunk: ApiStreamChunk = serde_json::from_str(data)
+        .map_err(|error| OpenAiError::Conversion(format!("invalid stream chunk: {error}")))?;
+    state.apply_chunk(chunk, observer, runtime)
+}
+
+#[derive(Default)]
+struct StreamState {
+    content: String,
+    reasoning: String,
+    tool_calls: Vec<StreamToolCall>,
+    usage: Option<Usage>,
+}
+
+impl StreamState {
+    fn apply_chunk<R>(
+        &mut self,
+        chunk: ApiStreamChunk,
+        observer: &dyn OpenAiStreamObserver<R>,
+        runtime: &R,
+    ) -> Result<(), OpenAiError> {
+        if let Some(usage) = chunk.usage {
+            self.usage = Some(Usage {
+                input_tokens: usage.prompt_tokens,
+                output_tokens: usage.completion_tokens,
+            });
+        }
+
+        for choice in chunk.choices {
+            if let Some(reasoning) = choice
+                .delta
+                .reasoning_content
+                .or(choice.delta.reasoning)
+                .filter(|value| !value.is_empty())
+            {
+                self.reasoning.push_str(&reasoning);
+                observer.on_reasoning_delta(runtime, &reasoning);
+            }
+
+            if let Some(content) = choice.delta.content {
+                self.content.push_str(&content);
+            }
+
+            if let Some(tool_calls) = choice.delta.tool_calls {
+                for tool_call in tool_calls {
+                    self.append_tool_call_delta(tool_call);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn append_tool_call_delta(&mut self, delta: ApiToolCallDelta) {
+        while self.tool_calls.len() <= delta.index {
+            self.tool_calls.push(StreamToolCall::default());
+        }
+
+        let tool_call = &mut self.tool_calls[delta.index];
+        if let Some(id) = delta.id {
+            tool_call.id = Some(id);
+        }
+
+        if let Some(function) = delta.function {
+            if let Some(name) = function.name {
+                tool_call.name = name;
+            }
+            if let Some(arguments) = function.arguments {
+                tool_call.arguments.push_str(&arguments);
+            }
+        }
+    }
+
+    fn into_response(self) -> Result<CompletionResponse, OpenAiError> {
+        let tool_calls = self
+            .tool_calls
+            .into_iter()
+            .enumerate()
+            .map(|(index, tool_call)| {
+                let call_id = tool_call.id.ok_or_else(|| {
+                    OpenAiError::Conversion(format!(
+                        "missing streamed tool call id at index {index}"
+                    ))
+                })?;
+                let arguments = if tool_call.arguments.trim().is_empty() {
+                    Value::Object(Map::new())
+                } else {
+                    serde_json::from_str(&tool_call.arguments).map_err(|error| {
+                        OpenAiError::Conversion(format!(
+                            "invalid streamed tool call arguments for '{}': {error}",
+                            tool_call.name
+                        ))
+                    })?
+                };
+
+                Ok(ToolCall {
+                    call_id,
+                    tool_name: tool_call.name,
+                    arguments,
+                })
+            })
+            .collect::<Result<Vec<_>, OpenAiError>>()?;
+
+        let mut response = CompletionResponse::new(AssistantMessage {
+            content: (!self.content.is_empty()).then_some(self.content),
+            tool_calls,
+        });
+
+        if let Some(usage) = self.usage {
+            response = response.with_usage(usage);
+        }
+
+        let metadata = if self.reasoning.trim().is_empty() {
+            Value::Object(Map::new())
+        } else {
+            Value::Object(Map::from_iter([(
+                "reasoning_content".to_string(),
+                Value::String(self.reasoning),
+            )]))
+        };
+
+        Ok(response.with_metadata(metadata))
+    }
+}
+
+#[derive(Default)]
+struct StreamToolCall {
+    id: Option<String>,
+    name: String,
+    arguments: String,
 }
 
 #[derive(Deserialize)]
@@ -308,7 +601,41 @@ struct ApiChoice {
 #[derive(Deserialize)]
 struct ApiMessageResponse {
     content: Option<String>,
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
     tool_calls: Option<Vec<ApiToolCallResponse>>,
+}
+
+#[derive(Deserialize)]
+struct ApiStreamChunk {
+    choices: Vec<ApiStreamChoice>,
+    usage: Option<ApiUsage>,
+}
+
+#[derive(Deserialize)]
+struct ApiStreamChoice {
+    delta: ApiStreamDelta,
+}
+
+#[derive(Default, Deserialize)]
+struct ApiStreamDelta {
+    content: Option<String>,
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
+    tool_calls: Option<Vec<ApiToolCallDelta>>,
+}
+
+#[derive(Deserialize)]
+struct ApiToolCallDelta {
+    index: usize,
+    id: Option<String>,
+    function: Option<ApiFunctionDelta>,
+}
+
+#[derive(Deserialize)]
+struct ApiFunctionDelta {
+    name: Option<String>,
+    arguments: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -343,6 +670,8 @@ struct ApiErrorDetail {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use serde_json::json;
 
     use super::*;
@@ -468,6 +797,8 @@ mod tests {
             choices: vec![ApiChoice {
                 message: ApiMessageResponse {
                     content: Some("Hello!".to_string()),
+                    reasoning_content: None,
+                    reasoning: None,
                     tool_calls: None,
                 },
             }],
@@ -490,6 +821,8 @@ mod tests {
             choices: vec![ApiChoice {
                 message: ApiMessageResponse {
                     content: None,
+                    reasoning_content: None,
+                    reasoning: None,
                     tool_calls: Some(vec![ApiToolCallResponse {
                         id: "call-1".to_string(),
                         function: ApiFunctionResponse {
@@ -528,6 +861,8 @@ mod tests {
             choices: vec![ApiChoice {
                 message: ApiMessageResponse {
                     content: None,
+                    reasoning_content: None,
+                    reasoning: None,
                     tool_calls: Some(vec![ApiToolCallResponse {
                         id: "call-1".to_string(),
                         function: ApiFunctionResponse {
@@ -541,5 +876,91 @@ mod tests {
         };
         let result = convert_response(api_response);
         assert!(matches!(result, Err(OpenAiError::Conversion(_))));
+    }
+
+    #[test]
+    fn convert_response_preserves_reasoning_metadata() {
+        let api_response = ApiResponse {
+            choices: vec![ApiChoice {
+                message: ApiMessageResponse {
+                    content: Some("Hello!".to_string()),
+                    reasoning_content: Some("Thinking through the answer".to_string()),
+                    reasoning: None,
+                    tool_calls: None,
+                },
+            }],
+            usage: None,
+        };
+
+        let response = convert_response(api_response).unwrap();
+        assert_eq!(
+            response.metadata["reasoning_content"].as_str(),
+            Some("Thinking through the answer")
+        );
+    }
+
+    #[test]
+    fn stream_events_accumulate_reasoning_and_tool_calls() {
+        let observer = TestObserver::default();
+        let mut state = StreamState::default();
+        let first_chunk = json!({
+            "choices": [{
+                "delta": {
+                    "reasoning_content": "First thought. ",
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call-1",
+                        "function": {
+                            "name": "add",
+                            "arguments": "{"
+                        }
+                    }]
+                }
+            }]
+        })
+        .to_string();
+        let second_chunk = json!({
+            "choices": [{
+                "delta": {
+                    "reasoning_content": "Second thought.",
+                    "content": "Done",
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {
+                            "arguments": "\"left\":2}"
+                        }
+                    }]
+                }
+            }]
+        })
+        .to_string();
+
+        process_stream_event_data(&first_chunk, &mut state, &observer, &()).unwrap();
+        process_stream_event_data(&second_chunk, &mut state, &observer, &()).unwrap();
+
+        let response = state.into_response().unwrap();
+        assert_eq!(
+            observer.reasoning.lock().unwrap().as_slice(),
+            ["First thought. ".to_string(), "Second thought.".to_string()]
+        );
+        assert_eq!(response.message.content.as_deref(), Some("Done"));
+        assert_eq!(response.message.tool_calls.len(), 1);
+        assert_eq!(response.message.tool_calls[0].tool_name, "add");
+        assert_eq!(response.message.tool_calls[0].arguments, json!({"left": 2}));
+        assert_eq!(
+            response.metadata["reasoning_content"].as_str(),
+            Some("First thought. Second thought.")
+        );
+    }
+
+    #[derive(Default)]
+    struct TestObserver {
+        reasoning: Mutex<Vec<String>>,
+    }
+
+    impl OpenAiStreamObserver<()> for TestObserver {
+        fn on_reasoning_delta(&self, _runtime: &(), delta: &str) {
+            self.reasoning.lock().unwrap().push(delta.to_string());
+        }
     }
 }
