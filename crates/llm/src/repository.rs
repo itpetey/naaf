@@ -51,12 +51,14 @@ struct SearchFilesParams {
     case_sensitive: bool,
 }
 
+/// Tool that reads a workspace file and returns numbered lines.
 pub struct ReadFileTool<R> {
     root: PathBuf,
     _marker: PhantomData<R>,
 }
 
 impl<R> ReadFileTool<R> {
+    /// Creates a file-reading tool rooted at the given workspace path.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
@@ -112,12 +114,14 @@ impl<R> Tool for ReadFileTool<R> {
     }
 }
 
+/// Tool that lists workspace paths matching a glob pattern.
 pub struct GlobPathsTool<R> {
     root: PathBuf,
     _marker: PhantomData<R>,
 }
 
 impl<R> GlobPathsTool<R> {
+    /// Creates a glob tool rooted at the given workspace path.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
@@ -169,12 +173,14 @@ impl<R> Tool for GlobPathsTool<R> {
     }
 }
 
+/// Tool that performs literal text search across workspace files.
 pub struct SearchFilesTool<R> {
     root: PathBuf,
     _marker: PhantomData<R>,
 }
 
 impl<R> SearchFilesTool<R> {
+    /// Creates a search tool rooted at the given workspace path.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),

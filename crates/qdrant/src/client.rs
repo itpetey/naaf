@@ -49,6 +49,7 @@ fn retrieved_point_to_search(point: RetrievedPoint) -> Option<SearchResult> {
     })
 }
 
+/// Thin wrapper around the generated Qdrant client with crate-specific helpers.
 #[derive(Clone)]
 pub struct QdrantClient {
     inner: Qdrant,
@@ -57,6 +58,7 @@ pub struct QdrantClient {
 }
 
 impl QdrantClient {
+    /// Creates a client from a base Qdrant URL.
     pub fn from_url(url: &str) -> Result<Self, QdrantError> {
         let inner = Qdrant::from_url(url)
             .build()
@@ -68,6 +70,7 @@ impl QdrantClient {
         })
     }
 
+    /// Returns a copy of this client configured with an API key.
     pub fn with_api_key(self, api_key: &str) -> Result<Self, QdrantError> {
         let inner = Qdrant::from_url(&self.url)
             .api_key(api_key)
@@ -80,19 +83,23 @@ impl QdrantClient {
         })
     }
 
+    /// Overrides the target collection name.
     pub fn with_collection(mut self, collection: &str) -> Self {
         self.collection = collection.to_string();
         self
     }
 
+    /// Returns the underlying generated Qdrant client.
     pub fn inner(&self) -> &Qdrant {
         &self.inner
     }
 
+    /// Returns the collection name used by this client.
     pub fn collection(&self) -> &str {
         &self.collection
     }
 
+    /// Creates the configured collection when it does not already exist.
     pub async fn create_collection_if_not_exists(
         &self,
         dimension: usize,
@@ -117,6 +124,7 @@ impl QdrantClient {
         Ok(())
     }
 
+    /// Upserts a batch of already-embedded points.
     pub async fn upsert_points(&self, points: Vec<PointData>) -> Result<(), QdrantError> {
         let qdrant_points: Vec<PointStruct> = points
             .iter()
@@ -136,6 +144,7 @@ impl QdrantClient {
         Ok(())
     }
 
+    /// Searches the collection using a precomputed query vector.
     pub async fn search(
         &self,
         query_vector: Vec<f32>,
@@ -168,6 +177,7 @@ impl QdrantClient {
         Ok(results)
     }
 
+    /// Scrolls through stored points and returns payload-bearing results.
     pub async fn scroll(
         &self,
         limit: usize,
@@ -197,12 +207,17 @@ impl QdrantClient {
     }
 }
 
+/// Fully prepared point data ready to be written to Qdrant.
 pub struct PointData {
+    /// Identifier to store for the point.
     pub id: Uuid,
+    /// Embedding vector associated with the payload.
     pub vector: Vec<f32>,
+    /// Payload stored alongside the vector.
     pub payload: KnowledgePayload,
 }
 
+/// Shared high-level agent that combines a Qdrant client with an embedder.
 pub struct QdrantAgent<R> {
     client: QdrantClient,
     embedder: Box<dyn Embedder>,
@@ -210,6 +225,7 @@ pub struct QdrantAgent<R> {
 }
 
 impl<R> QdrantAgent<R> {
+    /// Creates a shared agent from a client and embedder.
     pub fn new(client: QdrantClient, embedder: Box<dyn Embedder>) -> Self {
         Self {
             client,
@@ -218,19 +234,23 @@ impl<R> QdrantAgent<R> {
         }
     }
 
+    /// Returns the underlying Qdrant client.
     pub fn client(&self) -> &QdrantClient {
         &self.client
     }
 
+    /// Returns the embedder used by this agent.
     pub fn embedder(&self) -> &dyn Embedder {
         self.embedder.as_ref()
     }
 
+    /// Ensures the target collection exists with the embedder's vector dimension.
     pub async fn init_collection(&self) -> Result<(), QdrantError> {
         let dimension = self.embedder.dimension();
         self.client.create_collection_if_not_exists(dimension).await
     }
 
+    /// Embeds a natural-language query and searches the configured collection.
     pub async fn search(
         &self,
         query: &str,
@@ -245,6 +265,7 @@ impl<R> QdrantAgent<R> {
             .await
     }
 
+    /// Embeds chunks and upserts them as source entries.
     pub async fn upsert_chunks(
         &self,
         chunks: Vec<crate::chunker::Chunk>,
@@ -310,6 +331,7 @@ impl<R> QdrantAgent<R> {
         Ok(ids)
     }
 
+    /// Upserts pre-built knowledge payloads together with their vectors.
     pub async fn upsert_knowledge(
         &self,
         entries: Vec<(KnowledgePayload, Vec<f32>)>,

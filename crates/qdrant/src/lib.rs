@@ -1,4 +1,5 @@
 //! Qdrant vector database integration for `naaf`.
+#![warn(missing_docs)]
 //!
 //! `naaf-qdrant` provides typed adapters for Qdrant operations — upsert, search,
 //! and similarity check — that plug into `naaf_core`'s `Task`, `Materialiser`,
@@ -31,13 +32,21 @@
 //!
 //! `ContentChunker` auto-detects the right chunker from a file path.
 
+/// Content chunking primitives used before embedding and upsert.
 pub mod chunker;
+/// Low-level Qdrant client wrappers and the high-level shared agent.
 pub mod client;
+/// Conversation transcript types consumed by the conversation chunker.
 pub mod conversation;
+/// Embedding abstractions and provider implementations.
 pub mod embedder;
+/// Error and result types for this crate.
 pub mod error;
+/// Search payload and metadata types stored in Qdrant.
 pub mod payload;
+/// `naaf-core` task, materialiser, and check adapters built on Qdrant.
 pub mod task;
+/// LLM tool adapters backed by Qdrant search.
 pub mod tool;
 
 pub use chunker::{

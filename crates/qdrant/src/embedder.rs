@@ -2,16 +2,20 @@ use futures::future::LocalBoxFuture;
 
 use crate::error::QdrantError;
 
+/// Produces embedding vectors for text inputs.
 pub trait Embedder {
+    /// Embeds the provided texts in request order.
     fn embed<'a>(
         &'a self,
         texts: Vec<String>,
     ) -> LocalBoxFuture<'a, Result<Vec<Vec<f32>>, QdrantError>>;
 
+    /// Returns the vector dimension produced by this embedder.
     fn dimension(&self) -> usize;
 }
 
 #[cfg(feature = "openai")]
+/// OpenAI-backed embedding implementation.
 pub mod openai {
     use futures::future::LocalBoxFuture;
     use reqwest::Client;
@@ -31,6 +35,7 @@ pub mod openai {
         embedding: Vec<f32>,
     }
 
+    /// [`Embedder`] implementation backed by the OpenAI embeddings API.
     pub struct OpenAiEmbedder {
         client: Client,
         api_key: String,
@@ -40,10 +45,12 @@ pub mod openai {
     }
 
     impl OpenAiEmbedder {
+        /// Creates an embedder using the default OpenAI embedding model.
         pub fn new(api_key: String) -> Self {
             Self::with_model(api_key, "text-embedding-3-small".to_string(), 1536)
         }
 
+        /// Creates an embedder with an explicit model name and vector dimension.
         pub fn with_model(api_key: String, model: String, dimension: usize) -> Self {
             Self {
                 client: Client::new(),
@@ -54,6 +61,7 @@ pub mod openai {
             }
         }
 
+        /// Overrides the base URL used for embedding requests.
         pub fn with_base_url(mut self, url: String) -> Self {
             self.base_url = url;
             self

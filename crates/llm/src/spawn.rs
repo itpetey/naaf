@@ -174,13 +174,24 @@ impl<R> Tool for SpawnTool<R> {
 pub enum SpawnResolveError {
     /// A requested node name has no registered template.
     #[error("no template registered for node name '{name}'")]
-    UnknownTemplate { name: String },
+    UnknownTemplate {
+        /// Name requested by the spawn payload.
+        name: String,
+    },
     /// An edge referenced a node index outside the request's node list.
     #[error("edge references node index {index} but the request has {count} node(s)")]
-    InvalidNodeIndex { index: usize, count: usize },
+    InvalidNodeIndex {
+        /// The invalid node index referenced by the edge.
+        index: usize,
+        /// Total number of nodes available in the request.
+        count: usize,
+    },
     /// An edge that does not originate from the parent has no source node index.
     #[error("edge at index {edge_index} is missing from_node (from_parent is false)")]
-    MissingFromNode { edge_index: usize },
+    MissingFromNode {
+        /// Position of the invalid edge in the request.
+        edge_index: usize,
+    },
 }
 
 /// Looks up a node runner by name and returns it for graph patch construction.

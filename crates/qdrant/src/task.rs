@@ -7,6 +7,7 @@ use crate::embedder::Embedder;
 use crate::error::QdrantError;
 use crate::payload::{KnowledgePayload, SearchResult};
 
+/// `Task` adapter that turns a query string into Qdrant search results.
 pub struct QdrantSearch<R> {
     client: QdrantClient,
     embedder: Box<dyn Embedder>,
@@ -17,6 +18,7 @@ pub struct QdrantSearch<R> {
 }
 
 impl<R> QdrantSearch<R> {
+    /// Creates a search task with fixed retrieval defaults.
     pub fn new(
         client: QdrantClient,
         embedder: Box<dyn Embedder>,
@@ -33,6 +35,7 @@ impl<R> QdrantSearch<R> {
         }
     }
 
+    /// Restricts searches to a single repository label.
     pub fn with_repo(mut self, repo: impl Into<String>) -> Self {
         self.repo = Some(repo.into());
         self
@@ -65,6 +68,7 @@ impl<R: 'static> Task for QdrantSearch<R> {
     }
 }
 
+/// `Materialiser` adapter that embeds and upserts knowledge payloads.
 pub struct QdrantUpsert<R> {
     client: QdrantClient,
     embedder: Box<dyn Embedder>,
@@ -72,6 +76,7 @@ pub struct QdrantUpsert<R> {
 }
 
 impl<R> QdrantUpsert<R> {
+    /// Creates an upsert materialiser using the supplied client and embedder.
     pub fn new(client: QdrantClient, embedder: Box<dyn Embedder>) -> Self {
         Self {
             client,
@@ -114,6 +119,7 @@ impl<R: 'static> Materialiser for QdrantUpsert<R> {
     }
 }
 
+/// `Check` adapter that reports sufficiently similar existing entries.
 pub struct QdrantSimilarityCheck<R> {
     client: QdrantClient,
     embedder: Box<dyn Embedder>,
@@ -122,6 +128,7 @@ pub struct QdrantSimilarityCheck<R> {
 }
 
 impl<R> QdrantSimilarityCheck<R> {
+    /// Creates a similarity check with a fixed similarity threshold.
     pub fn new(client: QdrantClient, embedder: Box<dyn Embedder>, threshold: f32) -> Self {
         Self {
             client,

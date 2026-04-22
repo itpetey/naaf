@@ -13,7 +13,10 @@ pub enum ExecutorError<ClientError, ToolError> {
     Tool(#[from] ToolCallError<ToolError>),
     /// The model never produced a final answer before the turn budget ran out.
     #[error("LLM execution exceeded the turn limit ({max_turns})")]
-    TurnLimitExceeded { max_turns: usize },
+    TurnLimitExceeded {
+        /// Maximum number of model turns permitted for the execution.
+        max_turns: usize,
+    },
 }
 
 /// Errors raised by the generic `naaf_core` role adapters.

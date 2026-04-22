@@ -6,6 +6,7 @@ use crate::client::QdrantClient;
 use crate::embedder::Embedder;
 use crate::error::QdrantError;
 
+/// LLM tool that exposes vector search over the configured Qdrant collection.
 pub struct QdrantSearchTool<R> {
     client: QdrantClient,
     embedder: Box<dyn Embedder>,
@@ -15,6 +16,7 @@ pub struct QdrantSearchTool<R> {
 }
 
 impl<R> QdrantSearchTool<R> {
+    /// Creates a search tool with default retrieval parameters.
     pub fn new(
         client: QdrantClient,
         embedder: Box<dyn Embedder>,

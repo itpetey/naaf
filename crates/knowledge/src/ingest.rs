@@ -16,6 +16,7 @@ static BINARY_EXTENSIONS: &[&str] = &[
     ".eot", ".gz", ".zip", ".tar", ".rar", ".7z", ".bz2", ".xz", ".zst", ".class", ".jar", ".war",
 ];
 
+/// Ingests one file into Qdrant as source chunks.
 pub async fn ingest_file<R>(
     qdrant: &QdrantAgent<R>,
     path: &Path,
@@ -48,6 +49,7 @@ pub async fn ingest_file<R>(
     })
 }
 
+/// Recursively ingests all supported files beneath a directory.
 pub async fn ingest_directory<R>(
     qdrant: &QdrantAgent<R>,
     dir: &Path,
@@ -83,6 +85,7 @@ pub async fn ingest_directory<R>(
     })
 }
 
+/// Ingests in-memory content using the supplied source metadata.
 pub async fn ingest_content<R>(
     qdrant: &QdrantAgent<R>,
     content: &str,
@@ -178,11 +181,17 @@ fn walk_dir(dir: &Path) -> Vec<std::path::PathBuf> {
     files
 }
 
+/// Aggregate report produced by [`ingest_directory`].
 #[derive(Debug)]
 pub struct DirectoryIngestReport {
+    /// Number of files ingested successfully.
     pub files_ingested: usize,
+    /// Number of files skipped because ingestion failed.
     pub files_skipped: usize,
+    /// Total number of chunks written across successful files.
     pub total_chunks: usize,
+    /// Source point identifiers created during ingestion.
     pub total_source_ids: Vec<uuid::Uuid>,
+    /// Per-file ingestion result, keyed by file path.
     pub reports: Vec<(std::path::PathBuf, Result<IngestReport, KnowledgeError>)>,
 }

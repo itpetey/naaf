@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 use crate::error::KnowledgeError;
 
+/// LLM tool that exposes knowledge query and lint operations.
 pub struct KnowledgeTool<R> {
     client: QdrantClient,
     embedder: Box<dyn Embedder>,
@@ -14,6 +15,7 @@ pub struct KnowledgeTool<R> {
 }
 
 impl<R> KnowledgeTool<R> {
+    /// Creates a knowledge tool with fixed retrieval defaults.
     pub fn new(
         client: QdrantClient,
         embedder: Box<dyn Embedder>,

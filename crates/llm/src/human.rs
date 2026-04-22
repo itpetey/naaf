@@ -10,39 +10,53 @@ use tokio::sync::Mutex;
 use crate::message::ToolSpec;
 use crate::tool::Tool;
 
+/// Question to present to a human operator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HumanQuestion {
+    /// Prompt shown to the human.
     pub question: String,
     #[serde(default)]
+    /// Optional fixed choices the human may select from.
     pub choices: Option<Vec<String>>,
 }
 
+/// Answer returned by a human operator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HumanAnswer {
+    /// Free-form answer content.
     pub content: String,
 }
 
+/// Abstraction over systems that can ask questions of a human.
 pub trait HumanIO {
+    /// Error type returned when asking the human fails.
     type Error;
+
+    /// Presents a question and resolves once an answer is available.
     fn ask<'a>(
         &'a self,
         question: HumanQuestion,
     ) -> LocalBoxFuture<'a, Result<HumanAnswer, Self::Error>>;
 }
 
+/// Errors returned by [`StdinHumanIO`].
 #[derive(Debug, Error)]
 pub enum StdinError {
+    /// Reading from or writing to standard IO failed.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// A numeric menu choice did not map to an offered option.
     #[error("invalid choice: {0}")]
     InvalidChoice(String),
 }
 
+/// [`HumanIO`] implementation that interacts through standard input and output.
 pub struct StdinHumanIO {
     reader: Arc<Mutex<BufReader<tokio::io::Stdin>>>,
 }
 
 impl StdinHumanIO {
+    /// Creates a standard-input backed human IO implementation.
     pub fn new() -> Self {
         Self {
             reader: Arc::new(Mutex::new(BufReader::new(tokio::io::stdin()))),
@@ -99,16 +113,21 @@ impl HumanIO for StdinHumanIO {
     }
 }
 
+/// Question sent through [`ChannelHumanIO`] and awaiting a reply.
 pub struct PendingQuestion {
+    /// Question presented to the receiver side of the channel.
     pub question: HumanQuestion,
+    /// One-shot sender used to deliver the answer back to the caller.
     pub reply: tokio::sync::oneshot::Sender<HumanAnswer>,
 }
 
+/// [`HumanIO`] implementation that forwards questions over a Tokio channel.
 pub struct ChannelHumanIO {
     pending: tokio::sync::mpsc::Sender<PendingQuestion>,
 }
 
 impl ChannelHumanIO {
+    /// Creates a channel-backed human IO pair and its receiving end.
     pub fn new(buffer: usize) -> (Self, tokio::sync::mpsc::Receiver<PendingQuestion>) {
         let (tx, rx) = tokio::sync::mpsc::channel(buffer);
         (Self { pending: tx }, rx)
@@ -137,11 +156,13 @@ impl HumanIO for ChannelHumanIO {
     }
 }
 
+/// Tool that lets the model explicitly ask the user for information.
 pub struct QuestionTool<R> {
     _marker: PhantomData<R>,
 }
 
 impl<R> QuestionTool<R> {
+    /// Creates a question tool for the given runtime type.
     pub fn new() -> Self {
         Self {
             _marker: PhantomData,

@@ -15,10 +15,13 @@ fn default_max_results() -> usize {
     DEFAULT_MAX_RESULTS
 }
 
+/// Parameters accepted by [`WebSearchTool`].
 #[derive(Clone, Debug, Deserialize)]
 pub struct WebSearchParams {
+    /// Free-form search query text.
     pub query: String,
     #[serde(default = "default_max_results")]
+    /// Maximum number of results requested from the backing service.
     pub max_results: usize,
 }
 
@@ -28,14 +31,18 @@ struct SearchQuery<'a> {
     count: usize,
 }
 
+/// Errors returned by [`WebSearchTool`].
 #[derive(Debug, Error)]
 pub enum WebSearchError {
+    /// The HTTP request to the search service failed.
     #[error("web search request failed: {0}")]
     Http(#[from] reqwest::Error),
+    /// Tool arguments could not be deserialised.
     #[error("invalid arguments: {0}")]
     InvalidArguments(String),
 }
 
+/// Tool that proxies a simple web search HTTP endpoint.
 pub struct WebSearchTool<R> {
     client: Client,
     base_url: String,
@@ -44,6 +51,7 @@ pub struct WebSearchTool<R> {
 }
 
 impl<R> WebSearchTool<R> {
+    /// Creates a search tool targeting the given endpoint.
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             client: Client::new(),
@@ -53,6 +61,7 @@ impl<R> WebSearchTool<R> {
         }
     }
 
+    /// Configures a bearer token used for outbound requests.
     pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
         self

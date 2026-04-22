@@ -13,14 +13,19 @@ use crate::message::{
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
+/// Receives incremental output while an OpenAI response is streamed.
 pub trait OpenAiStreamObserver<R>: Send + Sync {
+    /// Called when the model emits a visible content delta.
     fn on_content_delta(&self, _runtime: &R, _delta: &str) {}
 
+    /// Called when the model emits a reasoning delta.
     fn on_reasoning_delta(&self, _runtime: &R, _delta: &str) {}
 
+    /// Called once the assistant message has been fully assembled.
     fn on_response_complete(&self, _runtime: &R, _message: &AssistantMessage) {}
 }
 
+/// Configuration for the OpenAI chat completions client.
 #[derive(Clone, Debug)]
 pub struct OpenAiConfig {
     api_key: String,
@@ -29,6 +34,7 @@ pub struct OpenAiConfig {
 }
 
 impl OpenAiConfig {
+    /// Creates a configuration using the default OpenAI API base URL.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
@@ -37,6 +43,7 @@ impl OpenAiConfig {
         }
     }
 
+    /// Builds a configuration from `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_ORG_ID`.
     pub fn from_env() -> Result<Self, OpenAiError> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| OpenAiError::Config("OPENAI_API_KEY not set".to_string()))?;
@@ -50,45 +57,59 @@ impl OpenAiConfig {
         Ok(config)
     }
 
+    /// Overrides the API base URL.
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
         self
     }
 
+    /// Sets the optional organisation header.
     pub fn with_organisation(mut self, organisation: impl Into<String>) -> Self {
         self.organisation = Some(organisation.into());
         self
     }
 
+    /// Returns the API key used for authentication.
     pub fn api_key(&self) -> &str {
         &self.api_key
     }
 
+    /// Returns the configured API base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
 
+    /// Returns the configured organisation identifier, if any.
     pub fn organisation(&self) -> Option<&str> {
         self.organisation.as_deref()
     }
 }
 
+/// Errors returned by the OpenAI client integration.
 #[derive(Debug, Error)]
 pub enum OpenAiError {
+    /// The underlying HTTP request failed.
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
+    /// The OpenAI API returned a structured error response.
     #[error("OpenAI API error: {message}")]
     Api {
+        /// Human-readable error message returned by the API.
         message: String,
+        /// Provider-specific error type.
         error_type: String,
+        /// Optional provider-specific error code.
         code: Option<String>,
     },
+    /// Environment or client configuration was invalid.
     #[error("configuration error: {0}")]
     Config(String),
+    /// The provider response could not be converted into crate types.
     #[error("failed to convert response: {0}")]
     Conversion(String),
 }
 
+/// [`LlmClient`] implementation backed by OpenAI chat completions.
 #[derive(Clone)]
 pub struct OpenAiClient<R> {
     config: OpenAiConfig,
@@ -98,6 +119,7 @@ pub struct OpenAiClient<R> {
 }
 
 impl<R> OpenAiClient<R> {
+    /// Creates a client from an explicit configuration.
     pub fn new(config: OpenAiConfig) -> Self {
         Self {
             config,
@@ -107,14 +129,17 @@ impl<R> OpenAiClient<R> {
         }
     }
 
+    /// Creates a client from the current environment.
     pub fn from_env() -> Result<Self, OpenAiError> {
         Ok(Self::new(OpenAiConfig::from_env()?))
     }
 
+    /// Returns the configuration used by this client.
     pub fn config(&self) -> &OpenAiConfig {
         &self.config
     }
 
+    /// Enables streaming callbacks for incremental response handling.
     pub fn with_stream_observer(mut self, observer: Arc<dyn OpenAiStreamObserver<R>>) -> Self {
         self.stream_observer = Some(observer);
         self

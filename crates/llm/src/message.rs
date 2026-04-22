@@ -65,9 +65,15 @@ impl AssistantMessage {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Message {
     /// A system instruction.
-    System { content: String },
+    System {
+        /// Raw instruction content sent as the system prompt.
+        content: String,
+    },
     /// A user message.
-    User { content: String },
+    User {
+        /// Raw user-authored content.
+        content: String,
+    },
     /// A prior assistant response.
     Assistant(AssistantMessage),
     /// A tool result produced by the executor.

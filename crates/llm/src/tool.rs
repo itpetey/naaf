@@ -127,7 +127,10 @@ impl<R, E> ToolRegistry<R, E> {
 pub enum RegisterToolError {
     /// Two tools used the same public name.
     #[error("tool '{name}' is already registered")]
-    DuplicateTool { name: String },
+    DuplicateTool {
+        /// The duplicated tool name.
+        name: String,
+    },
 }
 
 /// Errors raised while dispatching or executing a tool call.
@@ -135,13 +138,21 @@ pub enum RegisterToolError {
 pub enum ToolCallError<E> {
     /// The assistant requested a tool that was not registered.
     #[error("tool '{tool}' is not registered for call '{call_id}'")]
-    UnknownTool { tool: String, call_id: String },
+    UnknownTool {
+        /// Name of the requested tool.
+        tool: String,
+        /// Provider call identifier for the failed invocation.
+        call_id: String,
+    },
     /// The selected tool returned an execution error.
     #[error("tool '{tool}' failed for call '{call_id}': {error}")]
     Execution {
+        /// Name of the tool that failed.
         tool: String,
+        /// Provider call identifier for the failed invocation.
         call_id: String,
         #[source]
+        /// Underlying tool error.
         error: E,
     },
 }

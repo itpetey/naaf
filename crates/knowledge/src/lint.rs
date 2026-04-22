@@ -3,6 +3,7 @@ use naaf_qdrant::QdrantClient;
 use crate::error::KnowledgeError;
 use crate::knowledge::{LintIssue, LintIssueType, LintReport};
 
+/// Scans the configured collection for basic graph and metadata issues.
 pub async fn lint_collection(client: &QdrantClient) -> Result<LintReport, KnowledgeError> {
     let all_entries = client
         .scroll(100, None)

@@ -3,36 +3,55 @@ use std::path::Path;
 use crate::error::QdrantError;
 use crate::payload::SourceType;
 
+/// A chunk of source text ready for embedding and storage.
 #[derive(Clone, Debug)]
 pub struct Chunk {
+    /// Chunk text submitted to the embedder.
     pub text: String,
+    /// Metadata describing the chunk's origin.
     pub metadata: ChunkMetadata,
 }
 
+/// Metadata attached to one chunk of content.
 #[derive(Clone, Debug)]
 pub struct ChunkMetadata {
+    /// Zero-based position of the chunk within its source.
     pub index: usize,
+    /// Source content type from which this chunk was derived.
     pub source_type: SourceType,
+    /// Starting character offset within the source.
     pub start_char: usize,
+    /// Ending character offset within the source.
     pub end_char: usize,
+    /// Source path, when the content came from a file.
     pub path: Option<String>,
+    /// Source language, when it could be detected.
     pub language: Option<String>,
+    /// Section heading associated with the chunk, when available.
     pub heading: Option<String>,
 }
 
+/// Splits source content into one or more semantically useful chunks.
 pub trait Chunker {
+    /// Chunks `content` using the supplied source metadata.
     fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError>;
 }
 
+/// Minimal information required to chunk and label a source.
 #[derive(Clone, Debug)]
 pub struct SourceInfo {
+    /// High-level source classification.
     pub source_type: SourceType,
+    /// Source path, when the content originated from a file.
     pub path: Option<String>,
+    /// Detected language, when applicable.
     pub language: Option<String>,
+    /// Human-readable title derived from the source.
     pub title: Option<String>,
 }
 
 impl SourceInfo {
+    /// Builds source metadata from a file path.
     pub fn from_path(path: &Path) -> Result<Self, QdrantError> {
         let source_type = detect_source_type(path);
         let language = detect_language(path);
@@ -45,6 +64,7 @@ impl SourceInfo {
         })
     }
 
+    /// Creates metadata for in-memory markdown content.
     pub fn markdown(_content: &str, title: Option<String>) -> Self {
         Self {
             source_type: SourceType::Markdown,
@@ -54,6 +74,7 @@ impl SourceInfo {
         }
     }
 
+    /// Creates metadata for an in-memory conversation transcript.
     pub fn conversation(title: Option<String>) -> Self {
         Self {
             source_type: SourceType::Conversation,
@@ -86,12 +107,14 @@ fn detect_language(path: &Path) -> Option<String> {
     }
 }
 
+/// Chunks markdown-like prose by heading with optional overlap.
 pub struct MarkdownChunker {
     max_chunk_size: usize,
     overlap: usize,
 }
 
 impl MarkdownChunker {
+    /// Creates a markdown chunker with the given size and overlap settings.
     pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
         Self {
             max_chunk_size,
@@ -198,11 +221,13 @@ fn split_by_headings(content: &str) -> Vec<Section> {
     sections
 }
 
+/// Chunks source code around common declaration boundaries.
 pub struct CodeChunker {
     max_chunk_size: usize,
 }
 
 impl CodeChunker {
+    /// Creates a code chunker with the given maximum chunk size.
     pub fn new(max_chunk_size: usize) -> Self {
         Self { max_chunk_size }
     }
@@ -278,11 +303,13 @@ impl Chunker for CodeChunker {
     }
 }
 
+/// Chunks JSON conversation transcripts by grouped messages.
 pub struct ConversationChunker {
     max_chunk_size: usize,
 }
 
 impl ConversationChunker {
+    /// Creates a conversation chunker with the given maximum chunk size.
     pub fn new(max_chunk_size: usize) -> Self {
         Self { max_chunk_size }
     }
@@ -343,17 +370,20 @@ impl Chunker for ConversationChunker {
     }
 }
 
+/// Extracts PDF text and chunks it using markdown-style splitting.
 pub struct PdfChunker {
     inner: MarkdownChunker,
 }
 
 impl PdfChunker {
+    /// Creates a PDF chunker backed by an inner markdown chunker.
     pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
         Self {
             inner: MarkdownChunker::new(max_chunk_size, overlap),
         }
     }
 
+    /// Extracts plain text from the given PDF path.
     pub fn extract_text(&self, path: &Path) -> Result<String, QdrantError> {
         pdf_extract::extract_text(path)
             .map_err(|e| QdrantError::PdfExtraction(format!("failed to extract PDF text: {e}")))
@@ -376,14 +406,20 @@ impl Chunker for PdfChunker {
     }
 }
 
+/// Convenience enum that selects an appropriate chunker for a source.
 pub enum ContentChunker {
+    /// Markdown-oriented chunker.
     Markdown(MarkdownChunker),
+    /// Source-code chunker.
     Code(CodeChunker),
+    /// Conversation transcript chunker.
     Conversation(ConversationChunker),
+    /// PDF chunker.
     Pdf(PdfChunker),
 }
 
 impl ContentChunker {
+    /// Chooses a chunker based on the file extension of `path`.
     pub fn from_path(path: &Path) -> Result<Self, QdrantError> {
         match path.extension().and_then(|e| e.to_str()) {
             Some("pdf") => Ok(Self::Pdf(PdfChunker::default())),

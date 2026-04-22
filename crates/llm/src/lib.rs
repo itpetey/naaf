@@ -1,4 +1,5 @@
 //! LLM-backed `naaf_core` role infrastructure.
+#![warn(missing_docs)]
 //!
 //! `naaf-llm` keeps the outer workflow contract in `naaf-core` while handling
 //! the inner model execution loop, including tool calls. Callers stay in
@@ -333,6 +334,7 @@ mod human;
 mod message;
 #[cfg(feature = "openai")]
 mod openai;
+/// Repository-aware tools for reading and searching a workspace from an LLM.
 pub mod repository;
 mod spawn;
 mod task;
