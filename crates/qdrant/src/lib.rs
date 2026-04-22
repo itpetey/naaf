@@ -41,6 +41,10 @@ pub use embedder::Embedder;
 #[cfg(feature = "openai")]
 pub use embedder::openai::OpenAiEmbedder;
 pub use error::{QdrantError, Result};
+pub use group::{
+    KnowledgeGroup, KnowledgeGroupStore, KnowledgeGroupStoreFuture, KnowledgeGroupStoreResult,
+    format_knowledge_groups_for_prompt,
+};
 pub use payload::{EntityType, KnowledgePayload, SearchResult, SourceMetadata, SourceType};
 pub use task::{QdrantSearch, QdrantSimilarityCheck, QdrantUpsert};
 pub use tool::QdrantSearchTool;
@@ -55,6 +59,8 @@ pub mod conversation;
 pub mod embedder;
 /// Error and result types for this crate.
 pub mod error;
+/// Knowledge-group metadata types and persistence traits.
+pub mod group;
 /// Search payload and metadata types stored in Qdrant.
 pub mod payload;
 /// `naaf-core` task, materialiser, and check adapters built on Qdrant.

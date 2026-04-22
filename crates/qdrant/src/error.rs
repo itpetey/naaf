@@ -45,4 +45,8 @@ pub enum QdrantError {
     /// JSON serialisation or deserialisation failed.
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+
+    /// Persisting knowledge-group metadata failed.
+    #[error("Knowledge group store error: {0}")]
+    KnowledgeGroupStore(String),
 }

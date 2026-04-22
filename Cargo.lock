@@ -1579,6 +1579,7 @@ name = "naaf-persistence-fs"
 version = "0.1.0"
 dependencies = [
  "naaf-core",
+ "naaf-qdrant",
  "serde",
  "serde_json",
  "tempfile",
@@ -1591,6 +1592,7 @@ name = "naaf-persistence-sqlite"
 version = "0.1.0"
 dependencies = [
  "naaf-core",
+ "naaf-qdrant",
  "parking_lot",
  "rusqlite",
  "serde_json",

@@ -107,7 +107,7 @@ pub fn apply_file_deltas(root: &Path, delta: &FileDeltaSet) -> Result<(), Worksp
                     });
                 };
                 if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent).map_err(|error| WorkspaceError::CreateDir(error))?;
+                    fs::create_dir_all(parent).map_err(WorkspaceError::CreateDir)?;
                 }
                 fs::write(&path, content).map_err(|error| WorkspaceError::WriteFile {
                     path: change.path.clone(),
@@ -204,7 +204,7 @@ pub fn create_baseline_snapshot(
 ) -> Result<PathBuf, WorkspaceError> {
     let snapshot_root = worktree_path(project_root, name);
     remove_directory_if_exists(&snapshot_root)?;
-    fs::create_dir_all(&snapshot_root).map_err(|error| WorkspaceError::CreateDir(error))?;
+    fs::create_dir_all(&snapshot_root).map_err(WorkspaceError::CreateDir)?;
     sync_workspace_state(project_root, &snapshot_root)?;
     Ok(snapshot_root)
 }
@@ -255,7 +255,7 @@ pub async fn merge_file_versions(
     item: &str,
 ) -> Result<String, WorkspaceError> {
     let temp_root = worktree_path(project_root, "merge-temp");
-    fs::create_dir_all(&temp_root).map_err(|error| WorkspaceError::CreateDir(error))?;
+    fs::create_dir_all(&temp_root).map_err(WorkspaceError::CreateDir)?;
     let current_path = temp_root.join("current.tmp");
     let base_path = temp_root.join("base.tmp");
     let item_path = temp_root.join("item.tmp");
@@ -329,7 +329,7 @@ pub async fn prepare_worktree(
     let worktree_parent = worktree_root
         .parent()
         .expect("worktree path should have a parent");
-    fs::create_dir_all(worktree_parent).map_err(|error| WorkspaceError::CreateDir(error))?;
+    fs::create_dir_all(worktree_parent).map_err(WorkspaceError::CreateDir)?;
 
     run_git_command(
         project_root,
@@ -481,7 +481,7 @@ pub fn write_workspace_file(
 ) -> Result<(), WorkspaceError> {
     let path = resolve_project_path(project_root, relative)?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| WorkspaceError::CreateDir(error))?;
+        fs::create_dir_all(parent).map_err(WorkspaceError::CreateDir)?;
     }
     fs::write(path, content).map_err(|error| WorkspaceError::WriteFile {
         path: relative.to_string(),
