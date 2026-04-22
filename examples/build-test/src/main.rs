@@ -55,13 +55,13 @@ enum TestFinding {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Error;
 
+impl std::error::Error for Error {}
+
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("build error")
     }
 }
-
-impl std::error::Error for Error {}
 
 #[tokio::main]
 async fn main() {

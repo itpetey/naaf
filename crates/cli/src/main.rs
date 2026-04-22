@@ -1,7 +1,7 @@
-mod config;
-
 use clap::{Parser, Subcommand};
 use tracing::info;
+
+mod config;
 
 #[derive(Parser)]
 #[command(name = "naaf", about = "Knowledge base management CLI")]
@@ -45,36 +45,6 @@ enum KbCommands {
         #[arg(short, long, default_value = "20")]
         limit: usize,
     },
-}
-
-fn make_embedder(config: &config::Config) -> Box<dyn naaf_qdrant::Embedder> {
-    let base_url = config.embedder.base_url.clone();
-    match config.embedder.provider.as_str() {
-        "lm_studio" => {
-            let model = config.embedder.model.clone();
-            let dimension = 768;
-            let mut embedder =
-                naaf_qdrant::OpenAiEmbedder::with_model(String::new(), model, dimension);
-            embedder = embedder.with_base_url(base_url.unwrap_or_else(|| {
-                config::EmbedderConfig::lm_studio_default_base_url().to_string()
-            }));
-            Box::new(embedder)
-        }
-        _ => {
-            let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
-            let model = config.embedder.model.clone();
-            let dimension = if model.contains("text-embedding-3-large") {
-                3072
-            } else {
-                1536
-            };
-            let mut embedder = naaf_qdrant::OpenAiEmbedder::with_model(api_key, model, dimension);
-            if let Some(url) = base_url {
-                embedder = embedder.with_base_url(url);
-            }
-            Box::new(embedder)
-        }
-    }
 }
 
 #[tokio::main]
@@ -246,6 +216,36 @@ async fn main() {
                 }
             }
         },
+    }
+}
+
+fn make_embedder(config: &config::Config) -> Box<dyn naaf_qdrant::Embedder> {
+    let base_url = config.embedder.base_url.clone();
+    match config.embedder.provider.as_str() {
+        "lm_studio" => {
+            let model = config.embedder.model.clone();
+            let dimension = 768;
+            let mut embedder =
+                naaf_qdrant::OpenAiEmbedder::with_model(String::new(), model, dimension);
+            embedder = embedder.with_base_url(base_url.unwrap_or_else(|| {
+                config::EmbedderConfig::lm_studio_default_base_url().to_string()
+            }));
+            Box::new(embedder)
+        }
+        _ => {
+            let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
+            let model = config.embedder.model.clone();
+            let dimension = if model.contains("text-embedding-3-large") {
+                3072
+            } else {
+                1536
+            };
+            let mut embedder = naaf_qdrant::OpenAiEmbedder::with_model(api_key, model, dimension);
+            if let Some(url) = base_url {
+                embedder = embedder.with_base_url(url);
+            }
+            Box::new(embedder)
+        }
     }
 }
 

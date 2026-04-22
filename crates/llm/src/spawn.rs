@@ -13,6 +13,35 @@ use thiserror::Error;
 use crate::message::ToolSpec;
 use crate::tool::Tool;
 
+/// Looks up a node runner by name and returns it for graph patch construction.
+///
+/// Implementers map a template name to a specific node runner, typically by
+/// looking up a pre-built step wrapped in a [`naaf_core::StepNode`].
+pub trait NodeTemplate<R, E> {
+    /// Returns a shared runner for the given template name, or `None`.
+    fn lookup(
+        &self,
+        name: &str,
+        context: &NodeContext,
+    ) -> Option<Arc<dyn WorkflowNode<Runtime = R, Error = E>>>;
+}
+
+/// A complete spawn request recorded by one tool call.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SpawnRequest {
+    /// Nodes to add to the workflow graph.
+    pub nodes: Vec<SpawnNode>,
+    /// Edges connecting the new nodes to each other and to the parent.
+    #[serde(default)]
+    pub edges: Vec<SpawnEdge>,
+}
+
+/// Shared accumulator for spawn requests issued during one LLM execution.
+#[derive(Clone, Default)]
+pub struct SpawnStore {
+    requests: Arc<Mutex<Vec<SpawnRequest>>>,
+}
+
 /// JSON-friendly declaration of one node to spawn.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpawnNode {
@@ -37,20 +66,38 @@ pub struct SpawnEdge {
     pub to: usize,
 }
 
-/// A complete spawn request recorded by one tool call.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SpawnRequest {
-    /// Nodes to add to the workflow graph.
-    pub nodes: Vec<SpawnNode>,
-    /// Edges connecting the new nodes to each other and to the parent.
-    #[serde(default)]
-    pub edges: Vec<SpawnEdge>,
+/// A tool that records spawn requests into a shared store.
+///
+/// The tool always succeeds and returns a confirmation JSON to the model.
+/// Invalid arguments return an error message as JSON rather than failing.
+pub struct SpawnTool<R> {
+    store: SpawnStore,
+    _marker: PhantomData<R>,
 }
 
-/// Shared accumulator for spawn requests issued during one LLM execution.
-#[derive(Clone, Default)]
-pub struct SpawnStore {
-    requests: Arc<Mutex<Vec<SpawnRequest>>>,
+/// Errors produced while resolving spawn requests into a graph patch.
+#[derive(Debug, Error)]
+pub enum SpawnResolveError {
+    /// A requested node name has no registered template.
+    #[error("no template registered for node name '{name}'")]
+    UnknownTemplate {
+        /// Name requested by the spawn payload.
+        name: String,
+    },
+    /// An edge referenced a node index outside the request's node list.
+    #[error("edge references node index {index} but the request has {count} node(s)")]
+    InvalidNodeIndex {
+        /// The invalid node index referenced by the edge.
+        index: usize,
+        /// Total number of nodes available in the request.
+        count: usize,
+    },
+    /// An edge that does not originate from the parent has no source node index.
+    #[error("edge at index {edge_index} is missing from_node (from_parent is false)")]
+    MissingFromNode {
+        /// Position of the invalid edge in the request.
+        edge_index: usize,
+    },
 }
 
 impl SpawnStore {
@@ -71,15 +118,6 @@ impl SpawnStore {
     pub fn take(&self) -> Vec<SpawnRequest> {
         std::mem::take(&mut *self.requests.lock().expect("spawn store lock"))
     }
-}
-
-/// A tool that records spawn requests into a shared store.
-///
-/// The tool always succeeds and returns a confirmation JSON to the model.
-/// Invalid arguments return an error message as JSON rather than failing.
-pub struct SpawnTool<R> {
-    store: SpawnStore,
-    _marker: PhantomData<R>,
 }
 
 impl<R> SpawnTool<R> {
@@ -167,44 +205,6 @@ impl<R> Tool for SpawnTool<R> {
         };
         Box::pin(async move { Ok(result) })
     }
-}
-
-/// Errors produced while resolving spawn requests into a graph patch.
-#[derive(Debug, Error)]
-pub enum SpawnResolveError {
-    /// A requested node name has no registered template.
-    #[error("no template registered for node name '{name}'")]
-    UnknownTemplate {
-        /// Name requested by the spawn payload.
-        name: String,
-    },
-    /// An edge referenced a node index outside the request's node list.
-    #[error("edge references node index {index} but the request has {count} node(s)")]
-    InvalidNodeIndex {
-        /// The invalid node index referenced by the edge.
-        index: usize,
-        /// Total number of nodes available in the request.
-        count: usize,
-    },
-    /// An edge that does not originate from the parent has no source node index.
-    #[error("edge at index {edge_index} is missing from_node (from_parent is false)")]
-    MissingFromNode {
-        /// Position of the invalid edge in the request.
-        edge_index: usize,
-    },
-}
-
-/// Looks up a node runner by name and returns it for graph patch construction.
-///
-/// Implementers map a template name to a specific node runner, typically by
-/// looking up a pre-built step wrapped in a [`naaf_core::StepNode`].
-pub trait NodeTemplate<R, E> {
-    /// Returns a shared runner for the given template name, or `None`.
-    fn lookup(
-        &self,
-        name: &str,
-        context: &NodeContext,
-    ) -> Option<Arc<dyn WorkflowNode<Runtime = R, Error = E>>>;
 }
 
 impl<R, E, F> NodeTemplate<R, E> for F

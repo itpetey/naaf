@@ -16,22 +16,33 @@ static BINARY_EXTENSIONS: &[&str] = &[
     ".eot", ".gz", ".zip", ".tar", ".rar", ".7z", ".bz2", ".xz", ".zst", ".class", ".jar", ".war",
 ];
 
-/// Ingests one file into Qdrant as source chunks.
-pub async fn ingest_file<R>(
+/// Aggregate report produced by [`ingest_directory`].
+#[derive(Debug)]
+pub struct DirectoryIngestReport {
+    /// Number of files ingested successfully.
+    pub files_ingested: usize,
+    /// Number of files skipped because ingestion failed.
+    pub files_skipped: usize,
+    /// Total number of chunks written across successful files.
+    pub total_chunks: usize,
+    /// Source point identifiers created during ingestion.
+    pub total_source_ids: Vec<uuid::Uuid>,
+    /// Per-file ingestion result, keyed by file path.
+    pub reports: Vec<(std::path::PathBuf, Result<IngestReport, KnowledgeError>)>,
+}
+
+/// Ingests in-memory content using the supplied source metadata.
+pub async fn ingest_content<R>(
     qdrant: &QdrantAgent<R>,
-    path: &Path,
+    content: &str,
+    source_info: &SourceInfo,
     repo: Option<&str>,
 ) -> Result<IngestReport, KnowledgeError> {
-    let source_info = SourceInfo::from_path(path)?;
-    let content = std::fs::read_to_string(path)?;
+    let qdrant_source_info = convert_source_info(source_info)?;
 
-    let qdrant_source_info = convert_source_info(&source_info)?;
-
-    let chunker =
-        ContentChunker::from_path(path).map_err(|e| KnowledgeError::Ingest(e.to_string()))?;
-
+    let chunker = ContentChunker::Markdown(naaf_qdrant::MarkdownChunker::default());
     let chunks = chunker
-        .chunk(&content, &qdrant_source_info)
+        .chunk(content, &qdrant_source_info)
         .map_err(|e| KnowledgeError::Ingest(e.to_string()))?;
 
     let chunks_count = chunks.len();
@@ -85,18 +96,22 @@ pub async fn ingest_directory<R>(
     })
 }
 
-/// Ingests in-memory content using the supplied source metadata.
-pub async fn ingest_content<R>(
+/// Ingests one file into Qdrant as source chunks.
+pub async fn ingest_file<R>(
     qdrant: &QdrantAgent<R>,
-    content: &str,
-    source_info: &SourceInfo,
+    path: &Path,
     repo: Option<&str>,
 ) -> Result<IngestReport, KnowledgeError> {
-    let qdrant_source_info = convert_source_info(source_info)?;
+    let source_info = SourceInfo::from_path(path)?;
+    let content = std::fs::read_to_string(path)?;
 
-    let chunker = ContentChunker::Markdown(naaf_qdrant::MarkdownChunker::default());
+    let qdrant_source_info = convert_source_info(&source_info)?;
+
+    let chunker =
+        ContentChunker::from_path(path).map_err(|e| KnowledgeError::Ingest(e.to_string()))?;
+
     let chunks = chunker
-        .chunk(content, &qdrant_source_info)
+        .chunk(&content, &qdrant_source_info)
         .map_err(|e| KnowledgeError::Ingest(e.to_string()))?;
 
     let chunks_count = chunks.len();
@@ -179,19 +194,4 @@ fn walk_dir(dir: &Path) -> Vec<std::path::PathBuf> {
 
     files.sort();
     files
-}
-
-/// Aggregate report produced by [`ingest_directory`].
-#[derive(Debug)]
-pub struct DirectoryIngestReport {
-    /// Number of files ingested successfully.
-    pub files_ingested: usize,
-    /// Number of files skipped because ingestion failed.
-    pub files_skipped: usize,
-    /// Total number of chunks written across successful files.
-    pub total_chunks: usize,
-    /// Source point identifiers created during ingestion.
-    pub total_source_ids: Vec<uuid::Uuid>,
-    /// Per-file ingestion result, keyed by file path.
-    pub reports: Vec<(std::path::PathBuf, Result<IngestReport, KnowledgeError>)>,
 }

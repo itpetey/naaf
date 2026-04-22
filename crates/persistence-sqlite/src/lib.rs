@@ -14,7 +14,7 @@
 //!
 //! The checkpointer uses two tables:
 //! - `workflow_checkpoints` — stores workflow-level checkpoints by run ID
-//! - `step_checkpoints` — stores per-step checkpoints by run ID and node ID
+//! - `step_checkpoints` — stores per-step checkpoints by run ID and node
 
 use std::sync::Arc;
 

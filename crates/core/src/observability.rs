@@ -8,31 +8,6 @@ use crate::{
     span::{action, component, name},
 };
 
-/// Extension trait for wrapping tasks with structured `tracing` events.
-pub trait TaskExt: Task + Sized {
-    /// Wraps the task and emits lifecycle events, inputs, and outputs.
-    fn observed(self) -> ObservedTask<Self>
-    where
-        Self::Input: Debug,
-        Self::Output: Debug,
-        Self::Error: Debug,
-    {
-        ObservedTask::new(self, type_name::<Self>())
-    }
-
-    /// Wraps the task and uses a custom component name in emitted events.
-    fn observed_as(self, name: impl Into<Cow<'static, str>>) -> ObservedTask<Self>
-    where
-        Self::Input: Debug,
-        Self::Output: Debug,
-        Self::Error: Debug,
-    {
-        ObservedTask::new(self, name)
-    }
-}
-
-impl<T> TaskExt for T where T: Task {}
-
 /// Extension trait for wrapping checks with structured `tracing` events.
 pub trait CheckExt: Check + Sized {
     /// Wraps the check and emits lifecycle events, inputs, and findings.
@@ -56,8 +31,6 @@ pub trait CheckExt: Check + Sized {
     }
 }
 
-impl<T> CheckExt for T where T: Check {}
-
 /// Extension trait for wrapping materialisers with structured `tracing` events.
 pub trait MaterialiserExt: Materialiser + Sized {
     /// Wraps the materialiser and emits lifecycle events, inputs, and outputs.
@@ -80,8 +53,6 @@ pub trait MaterialiserExt: Materialiser + Sized {
         ObservedMaterialiser::new(self, name)
     }
 }
-
-impl<T> MaterialiserExt for T where T: Materialiser {}
 
 /// Extension trait for wrapping repair planners with structured `tracing` events.
 pub trait RepairPlannerExt: RepairPlanner + Sized {
@@ -108,13 +79,60 @@ pub trait RepairPlannerExt: RepairPlanner + Sized {
     }
 }
 
-impl<T> RepairPlannerExt for T where T: RepairPlanner {}
+/// Extension trait for wrapping tasks with structured `tracing` events.
+pub trait TaskExt: Task + Sized {
+    /// Wraps the task and emits lifecycle events, inputs, and outputs.
+    fn observed(self) -> ObservedTask<Self>
+    where
+        Self::Input: Debug,
+        Self::Output: Debug,
+        Self::Error: Debug,
+    {
+        ObservedTask::new(self, type_name::<Self>())
+    }
+
+    /// Wraps the task and uses a custom component name in emitted events.
+    fn observed_as(self, name: impl Into<Cow<'static, str>>) -> ObservedTask<Self>
+    where
+        Self::Input: Debug,
+        Self::Output: Debug,
+        Self::Error: Debug,
+    {
+        ObservedTask::new(self, name)
+    }
+}
 
 /// A task wrapper that emits structured `tracing` events around execution.
 pub struct ObservedTask<T> {
     inner: T,
     name: Cow<'static, str>,
 }
+
+/// A check wrapper that emits structured `tracing` events around execution.
+pub struct ObservedCheck<C> {
+    inner: C,
+    name: Cow<'static, str>,
+}
+
+/// A materialiser wrapper that emits structured `tracing` events around execution.
+pub struct ObservedMaterialiser<M> {
+    inner: M,
+    name: Cow<'static, str>,
+}
+
+/// A repair planner wrapper that emits structured `tracing` events around execution.
+pub struct ObservedRepairPlanner<P> {
+    inner: P,
+    name: Cow<'static, str>,
+}
+
+impl<T> TaskExt for T where T: Task {}
+
+impl<T> CheckExt for T where T: Check {}
+
+impl<T> MaterialiserExt for T where T: Materialiser {}
+
+impl<T> RepairPlannerExt for T where T: RepairPlanner {}
 
 impl<T> ObservedTask<T> {
     fn new(inner: T, name: impl Into<Cow<'static, str>>) -> Self {
@@ -177,12 +195,6 @@ where
     fn label(&self) -> Option<Cow<'static, str>> {
         Some(self.name.clone())
     }
-}
-
-/// A check wrapper that emits structured `tracing` events around execution.
-pub struct ObservedCheck<C> {
-    inner: C,
-    name: Cow<'static, str>,
 }
 
 impl<C> ObservedCheck<C> {
@@ -248,12 +260,6 @@ where
     }
 }
 
-/// A materialiser wrapper that emits structured `tracing` events around execution.
-pub struct ObservedMaterialiser<M> {
-    inner: M,
-    name: Cow<'static, str>,
-}
-
 impl<M> ObservedMaterialiser<M> {
     fn new(inner: M, name: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -311,12 +317,6 @@ where
             .instrument(span),
         )
     }
-}
-
-/// A repair planner wrapper that emits structured `tracing` events around execution.
-pub struct ObservedRepairPlanner<P> {
-    inner: P,
-    name: Cow<'static, str>,
 }
 
 impl<P> ObservedRepairPlanner<P> {

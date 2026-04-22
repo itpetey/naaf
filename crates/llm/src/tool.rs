@@ -6,6 +6,8 @@ use thiserror::Error;
 
 use crate::message::{ToolCall, ToolResultMessage, ToolSpec};
 
+type RegisteredTool<R, E> = Arc<dyn Tool<Runtime = R, Error = E>>;
+
 /// Executes one named tool against JSON arguments.
 pub trait Tool {
     /// Shared runtime capabilities used by this tool.
@@ -24,12 +26,45 @@ pub trait Tool {
     ) -> LocalBoxFuture<'a, Result<Value, Self::Error>>;
 }
 
-type RegisteredTool<R, E> = Arc<dyn Tool<Runtime = R, Error = E>>;
-
 /// A registry of tools exposed to the model.
 #[derive(Clone)]
 pub struct ToolRegistry<R, E = Infallible> {
     tools: BTreeMap<String, RegisteredTool<R, E>>,
+}
+
+/// Errors raised while building a registry.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RegisterToolError {
+    /// Two tools used the same public name.
+    #[error("tool '{name}' is already registered")]
+    DuplicateTool {
+        /// The duplicated tool name.
+        name: String,
+    },
+}
+
+/// Errors raised while dispatching or executing a tool call.
+#[derive(Debug, Error)]
+pub enum ToolCallError<E> {
+    /// The assistant requested a tool that was not registered.
+    #[error("tool '{tool}' is not registered for call '{call_id}'")]
+    UnknownTool {
+        /// Name of the requested tool.
+        tool: String,
+        /// Provider call identifier for the failed invocation.
+        call_id: String,
+    },
+    /// The selected tool returned an execution error.
+    #[error("tool '{tool}' failed for call '{call_id}': {error}")]
+    Execution {
+        /// Name of the tool that failed.
+        tool: String,
+        /// Provider call identifier for the failed invocation.
+        call_id: String,
+        #[source]
+        /// Underlying tool error.
+        error: E,
+    },
 }
 
 impl<R, E> Default for ToolRegistry<R, E> {
@@ -120,39 +155,4 @@ impl<R, E> ToolRegistry<R, E> {
             })
         })
     }
-}
-
-/// Errors raised while building a registry.
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum RegisterToolError {
-    /// Two tools used the same public name.
-    #[error("tool '{name}' is already registered")]
-    DuplicateTool {
-        /// The duplicated tool name.
-        name: String,
-    },
-}
-
-/// Errors raised while dispatching or executing a tool call.
-#[derive(Debug, Error)]
-pub enum ToolCallError<E> {
-    /// The assistant requested a tool that was not registered.
-    #[error("tool '{tool}' is not registered for call '{call_id}'")]
-    UnknownTool {
-        /// Name of the requested tool.
-        tool: String,
-        /// Provider call identifier for the failed invocation.
-        call_id: String,
-    },
-    /// The selected tool returned an execution error.
-    #[error("tool '{tool}' failed for call '{call_id}': {error}")]
-    Execution {
-        /// Name of the tool that failed.
-        tool: String,
-        /// Provider call identifier for the failed invocation.
-        call_id: String,
-        #[source]
-        /// Underlying tool error.
-        error: E,
-    },
 }

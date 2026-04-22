@@ -12,49 +12,29 @@ use crate::embedder::Embedder;
 use crate::error::QdrantError;
 use crate::payload::{EntityType, KnowledgePayload, SearchResult, SourceType};
 
-fn scored_point_to_search(point: ScoredPoint, min_score: f32) -> Option<SearchResult> {
-    if point.score < min_score {
-        return None;
-    }
-    let id = point.id.and_then(|id| match id.point_id_options? {
-        PointIdOptions::Num(n) => Some(Uuid::from_u128(n as u128)),
-        PointIdOptions::Uuid(s) => s.parse().ok(),
-    })?;
-    let payload: Payload = point.payload.into();
-    let payload: KnowledgePayload = serde_json::from_value(serde_json::Value::from(payload))
-        .unwrap_or_else(|_| {
-            KnowledgePayload::new(String::new(), String::new(), EntityType::Source)
-        });
-    Some(SearchResult {
-        id,
-        score: point.score,
-        payload,
-    })
-}
-
-fn retrieved_point_to_search(point: RetrievedPoint) -> Option<SearchResult> {
-    let id = point.id.and_then(|id| match id.point_id_options? {
-        PointIdOptions::Num(n) => Some(Uuid::from_u128(n as u128)),
-        PointIdOptions::Uuid(s) => s.parse().ok(),
-    })?;
-    let payload: Payload = point.payload.into();
-    let payload: KnowledgePayload = serde_json::from_value(serde_json::Value::from(payload))
-        .unwrap_or_else(|_| {
-            KnowledgePayload::new(String::new(), String::new(), EntityType::Source)
-        });
-    Some(SearchResult {
-        id,
-        score: 1.0,
-        payload,
-    })
-}
-
 /// Thin wrapper around the generated Qdrant client with crate-specific helpers.
 #[derive(Clone)]
 pub struct QdrantClient {
     inner: Qdrant,
     collection: String,
     url: String,
+}
+
+/// Fully prepared point data ready to be written to Qdrant.
+pub struct PointData {
+    /// Identifier to store for the point.
+    pub id: Uuid,
+    /// Embedding vector associated with the payload.
+    pub vector: Vec<f32>,
+    /// Payload stored alongside the vector.
+    pub payload: KnowledgePayload,
+}
+
+/// Shared high-level agent that combines a Qdrant client with an embedder.
+pub struct QdrantAgent<R> {
+    client: QdrantClient,
+    embedder: Box<dyn Embedder>,
+    _marker: std::marker::PhantomData<R>,
 }
 
 impl QdrantClient {
@@ -207,23 +187,6 @@ impl QdrantClient {
     }
 }
 
-/// Fully prepared point data ready to be written to Qdrant.
-pub struct PointData {
-    /// Identifier to store for the point.
-    pub id: Uuid,
-    /// Embedding vector associated with the payload.
-    pub vector: Vec<f32>,
-    /// Payload stored alongside the vector.
-    pub payload: KnowledgePayload,
-}
-
-/// Shared high-level agent that combines a Qdrant client with an embedder.
-pub struct QdrantAgent<R> {
-    client: QdrantClient,
-    embedder: Box<dyn Embedder>,
-    _marker: std::marker::PhantomData<R>,
-}
-
 impl<R> QdrantAgent<R> {
     /// Creates a shared agent from a client and embedder.
     pub fn new(client: QdrantClient, embedder: Box<dyn Embedder>) -> Self {
@@ -352,4 +315,41 @@ impl<R> QdrantAgent<R> {
         self.client.upsert_points(points).await?;
         Ok(ids)
     }
+}
+
+fn retrieved_point_to_search(point: RetrievedPoint) -> Option<SearchResult> {
+    let id = point.id.and_then(|id| match id.point_id_options? {
+        PointIdOptions::Num(n) => Some(Uuid::from_u128(n as u128)),
+        PointIdOptions::Uuid(s) => s.parse().ok(),
+    })?;
+    let payload: Payload = point.payload.into();
+    let payload: KnowledgePayload = serde_json::from_value(serde_json::Value::from(payload))
+        .unwrap_or_else(|_| {
+            KnowledgePayload::new(String::new(), String::new(), EntityType::Source)
+        });
+    Some(SearchResult {
+        id,
+        score: 1.0,
+        payload,
+    })
+}
+
+fn scored_point_to_search(point: ScoredPoint, min_score: f32) -> Option<SearchResult> {
+    if point.score < min_score {
+        return None;
+    }
+    let id = point.id.and_then(|id| match id.point_id_options? {
+        PointIdOptions::Num(n) => Some(Uuid::from_u128(n as u128)),
+        PointIdOptions::Uuid(s) => s.parse().ok(),
+    })?;
+    let payload: Payload = point.payload.into();
+    let payload: KnowledgePayload = serde_json::from_value(serde_json::Value::from(payload))
+        .unwrap_or_else(|_| {
+            KnowledgePayload::new(String::new(), String::new(), EntityType::Source)
+        });
+    Some(SearchResult {
+        id,
+        score: point.score,
+        payload,
+    })
 }

@@ -2,6 +2,19 @@ use thiserror::Error;
 
 use crate::tool::ToolCallError;
 
+/// Errors raised by the generic `naaf_core::Check` adapter.
+pub type CheckError<BuildError, ClientError, ToolError, DecodeError> =
+    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
+/// Errors raised by the generic `naaf_core::Materialiser` adapter.
+pub type MaterialiserError<BuildError, ClientError, ToolError, DecodeError> =
+    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
+/// Errors raised by the generic `naaf_core::RepairPlanner` adapter.
+pub type RepairPlannerError<BuildError, ClientError, ToolError, DecodeError> =
+    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
+/// Errors raised by the generic `naaf_core::Task` adapter.
+pub type TaskError<BuildError, ClientError, ToolError, DecodeError> =
+    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
+
 /// Errors raised while executing an LLM conversation.
 #[derive(Debug, Error)]
 pub enum ExecutorError<ClientError, ToolError> {
@@ -32,19 +45,3 @@ pub enum AdapterError<BuildError, ClientError, ToolError, DecodeError> {
     #[error("failed to decode completion output: {0}")]
     Decode(#[source] DecodeError),
 }
-
-/// Errors raised by the generic `naaf_core::Task` adapter.
-pub type TaskError<BuildError, ClientError, ToolError, DecodeError> =
-    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
-
-/// Errors raised by the generic `naaf_core::Check` adapter.
-pub type CheckError<BuildError, ClientError, ToolError, DecodeError> =
-    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
-
-/// Errors raised by the generic `naaf_core::Materialiser` adapter.
-pub type MaterialiserError<BuildError, ClientError, ToolError, DecodeError> =
-    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
-
-/// Errors raised by the generic `naaf_core::RepairPlanner` adapter.
-pub type RepairPlannerError<BuildError, ClientError, ToolError, DecodeError> =
-    AdapterError<BuildError, ClientError, ToolError, DecodeError>;

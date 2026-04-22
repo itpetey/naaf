@@ -5,14 +5,14 @@ use naaf_core::{
 use naaf_persistence_fs::FsCheckpointer;
 
 #[tokio::test]
-async fn fs_checkpointer_saves_and_loads_workflow() {
+async fn fs_checkpointer_deletes_workflow() {
     let dir = tempfile::tempdir().expect("temp dir");
     let checkpointer = FsCheckpointer::new(dir.path());
 
     let run_id = WorkflowRunId::new();
     let checkpoint = WorkflowCheckpoint {
         run_id,
-        max_concurrency: 2,
+        max_concurrency: 1,
         nodes: Default::default(),
     };
 
@@ -21,12 +21,16 @@ async fn fs_checkpointer_saves_and_loads_workflow() {
         .await
         .expect("save should succeed");
 
+    checkpointer
+        .delete_workflow(run_id)
+        .await
+        .expect("delete should succeed");
+
     let loaded = checkpointer
         .load_workflow(run_id)
         .await
         .expect("load should succeed");
-    assert!(loaded.is_some());
-    assert_eq!(loaded.unwrap().max_concurrency, 2);
+    assert!(loaded.is_none());
 }
 
 #[tokio::test]
@@ -73,14 +77,14 @@ async fn fs_checkpointer_saves_and_loads_step() {
 }
 
 #[tokio::test]
-async fn fs_checkpointer_deletes_workflow() {
+async fn fs_checkpointer_saves_and_loads_workflow() {
     let dir = tempfile::tempdir().expect("temp dir");
     let checkpointer = FsCheckpointer::new(dir.path());
 
     let run_id = WorkflowRunId::new();
     let checkpoint = WorkflowCheckpoint {
         run_id,
-        max_concurrency: 1,
+        max_concurrency: 2,
         nodes: Default::default(),
     };
 
@@ -89,14 +93,10 @@ async fn fs_checkpointer_deletes_workflow() {
         .await
         .expect("save should succeed");
 
-    checkpointer
-        .delete_workflow(run_id)
-        .await
-        .expect("delete should succeed");
-
     let loaded = checkpointer
         .load_workflow(run_id)
         .await
         .expect("load should succeed");
-    assert!(loaded.is_none());
+    assert!(loaded.is_some());
+    assert_eq!(loaded.unwrap().max_concurrency, 2);
 }

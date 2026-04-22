@@ -16,6 +16,21 @@ pub struct ExecutorConfig {
     max_turns: usize,
 }
 
+/// The completed conversation captured by the executor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExecutionOutcome {
+    messages: Vec<Message>,
+    responses: Vec<CompletionResponse>,
+}
+
+/// Executes provider turns until a final assistant answer is produced.
+#[derive(Clone)]
+pub struct Executor<C, R, E = Infallible> {
+    client: C,
+    tools: ToolRegistry<R, E>,
+    config: ExecutorConfig,
+}
+
 impl ExecutorConfig {
     /// Creates a config with the given maximum number of model turns.
     pub fn new(max_turns: usize) -> Self {
@@ -33,13 +48,6 @@ impl Default for ExecutorConfig {
     fn default() -> Self {
         Self::new(8)
     }
-}
-
-/// The completed conversation captured by the executor.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ExecutionOutcome {
-    messages: Vec<Message>,
-    responses: Vec<CompletionResponse>,
 }
 
 impl ExecutionOutcome {
@@ -78,14 +86,6 @@ impl ExecutionOutcome {
     pub fn into_parts(self) -> (Vec<Message>, Vec<CompletionResponse>) {
         (self.messages, self.responses)
     }
-}
-
-/// Executes provider turns until a final assistant answer is produced.
-#[derive(Clone)]
-pub struct Executor<C, R, E = Infallible> {
-    client: C,
-    tools: ToolRegistry<R, E>,
-    config: ExecutorConfig,
 }
 
 impl<C, R> Executor<C, R, Infallible> {

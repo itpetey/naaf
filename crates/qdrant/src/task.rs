@@ -17,6 +17,21 @@ pub struct QdrantSearch<R> {
     _marker: std::marker::PhantomData<R>,
 }
 
+/// `Materialiser` adapter that embeds and upserts knowledge payloads.
+pub struct QdrantUpsert<R> {
+    client: QdrantClient,
+    embedder: Box<dyn Embedder>,
+    _marker: std::marker::PhantomData<R>,
+}
+
+/// `Check` adapter that reports sufficiently similar existing entries.
+pub struct QdrantSimilarityCheck<R> {
+    client: QdrantClient,
+    embedder: Box<dyn Embedder>,
+    threshold: f32,
+    _marker: std::marker::PhantomData<R>,
+}
+
 impl<R> QdrantSearch<R> {
     /// Creates a search task with fixed retrieval defaults.
     pub fn new(
@@ -68,13 +83,6 @@ impl<R: 'static> Task for QdrantSearch<R> {
     }
 }
 
-/// `Materialiser` adapter that embeds and upserts knowledge payloads.
-pub struct QdrantUpsert<R> {
-    client: QdrantClient,
-    embedder: Box<dyn Embedder>,
-    _marker: std::marker::PhantomData<R>,
-}
-
 impl<R> QdrantUpsert<R> {
     /// Creates an upsert materialiser using the supplied client and embedder.
     pub fn new(client: QdrantClient, embedder: Box<dyn Embedder>) -> Self {
@@ -117,14 +125,6 @@ impl<R: 'static> Materialiser for QdrantUpsert<R> {
             Ok(ids)
         })
     }
-}
-
-/// `Check` adapter that reports sufficiently similar existing entries.
-pub struct QdrantSimilarityCheck<R> {
-    client: QdrantClient,
-    embedder: Box<dyn Embedder>,
-    threshold: f32,
-    _marker: std::marker::PhantomData<R>,
 }
 
 impl<R> QdrantSimilarityCheck<R> {

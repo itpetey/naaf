@@ -13,16 +13,8 @@ use serde_json::Value;
 use crate::message::ToolSpec;
 use crate::tool::Tool;
 
-const DEFAULT_MAX_RESULTS: usize = 50;
 const DEFAULT_MAX_LINES: usize = 200;
-
-fn default_max_results() -> usize {
-    DEFAULT_MAX_RESULTS
-}
-
-fn default_max_lines() -> usize {
-    DEFAULT_MAX_LINES
-}
+const DEFAULT_MAX_RESULTS: usize = 50;
 
 #[derive(Clone, Debug, Deserialize)]
 struct ReadFileParams {
@@ -53,6 +45,18 @@ struct SearchFilesParams {
 
 /// Tool that reads a workspace file and returns numbered lines.
 pub struct ReadFileTool<R> {
+    root: PathBuf,
+    _marker: PhantomData<R>,
+}
+
+/// Tool that lists workspace paths matching a glob pattern.
+pub struct GlobPathsTool<R> {
+    root: PathBuf,
+    _marker: PhantomData<R>,
+}
+
+/// Tool that performs literal text search across workspace files.
+pub struct SearchFilesTool<R> {
     root: PathBuf,
     _marker: PhantomData<R>,
 }
@@ -114,12 +118,6 @@ impl<R> Tool for ReadFileTool<R> {
     }
 }
 
-/// Tool that lists workspace paths matching a glob pattern.
-pub struct GlobPathsTool<R> {
-    root: PathBuf,
-    _marker: PhantomData<R>,
-}
-
 impl<R> GlobPathsTool<R> {
     /// Creates a glob tool rooted at the given workspace path.
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -171,12 +169,6 @@ impl<R> Tool for GlobPathsTool<R> {
             Ok(result)
         })
     }
-}
-
-/// Tool that performs literal text search across workspace files.
-pub struct SearchFilesTool<R> {
-    root: PathBuf,
-    _marker: PhantomData<R>,
 }
 
 impl<R> SearchFilesTool<R> {
@@ -241,32 +233,17 @@ impl<R> Tool for SearchFilesTool<R> {
     }
 }
 
-fn read_file(root: &Path, params: ReadFileParams) -> Value {
-    let path = match resolve_workspace_path(root, &params.path) {
-        Ok(path) => path,
-        Err(message) => return error_value(message),
-    };
+fn default_max_lines() -> usize {
+    DEFAULT_MAX_LINES
+}
 
-    let content = match fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(error) => return error_value(format!("failed to read file: {error}")),
-    };
+fn default_max_results() -> usize {
+    DEFAULT_MAX_RESULTS
+}
 
-    let all_lines: Vec<&str> = content.lines().collect();
-    let start = params.start_line.min(all_lines.len());
-    let end = start.saturating_add(params.max_lines).min(all_lines.len());
-    let lines = all_lines[start..end]
-        .iter()
-        .enumerate()
-        .map(|(offset, line)| format!("{}: {}", start + offset + 1, line))
-        .collect::<Vec<_>>();
-
+fn error_value(message: impl Into<String>) -> Value {
     serde_json::json!({
-        "path": params.path,
-        "start_line": start + 1,
-        "end_line": end,
-        "truncated": end < all_lines.len(),
-        "content": lines.join("\n"),
+        "error": message.into(),
     })
 }
 
@@ -298,6 +275,68 @@ fn glob_paths(root: &Path, params: GlobPathsParams) -> Value {
         "matches": matches,
         "truncated": truncated,
     })
+}
+
+fn is_ignored_directory(name: &str) -> bool {
+    matches!(name, ".git" | "target")
+}
+
+fn read_file(root: &Path, params: ReadFileParams) -> Value {
+    let path = match resolve_workspace_path(root, &params.path) {
+        Ok(path) => path,
+        Err(message) => return error_value(message),
+    };
+
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) => return error_value(format!("failed to read file: {error}")),
+    };
+
+    let all_lines: Vec<&str> = content.lines().collect();
+    let start = params.start_line.min(all_lines.len());
+    let end = start.saturating_add(params.max_lines).min(all_lines.len());
+    let lines = all_lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(offset, line)| format!("{}: {}", start + offset + 1, line))
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "path": params.path,
+        "start_line": start + 1,
+        "end_line": end,
+        "truncated": end < all_lines.len(),
+        "content": lines.join("\n"),
+    })
+}
+
+fn relative_path_string(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn resolve_workspace_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let relative_path = Path::new(relative);
+    if relative_path.components().any(|component| {
+        matches!(
+            component,
+            Component::Prefix(_) | Component::RootDir | Component::ParentDir
+        )
+    }) {
+        return Err("path must stay within the workspace root".to_string());
+    }
+
+    let path = root.join(relative_path);
+    if !path.starts_with(root) {
+        return Err("path resolved outside the workspace root".to_string());
+    }
+
+    Ok(path)
 }
 
 fn search_files(root: &Path, params: SearchFilesParams) -> Value {
@@ -375,31 +414,6 @@ fn search_files(root: &Path, params: SearchFilesParams) -> Value {
     })
 }
 
-fn error_value(message: impl Into<String>) -> Value {
-    serde_json::json!({
-        "error": message.into(),
-    })
-}
-
-fn resolve_workspace_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
-    let relative_path = Path::new(relative);
-    if relative_path.components().any(|component| {
-        matches!(
-            component,
-            Component::Prefix(_) | Component::RootDir | Component::ParentDir
-        )
-    }) {
-        return Err("path must stay within the workspace root".to_string());
-    }
-
-    let path = root.join(relative_path);
-    if !path.starts_with(root) {
-        return Err("path resolved outside the workspace root".to_string());
-    }
-
-    Ok(path)
-}
-
 fn walk_workspace(root: &Path) -> Vec<PathBuf> {
     let mut stack = vec![root.to_path_buf()];
     let mut paths = Vec::new();
@@ -428,20 +442,6 @@ fn walk_workspace(root: &Path) -> Vec<PathBuf> {
 
     paths.sort();
     paths
-}
-
-fn is_ignored_directory(name: &str) -> bool {
-    matches!(name, ".git" | "target")
-}
-
-fn relative_path_string(path: &Path) -> String {
-    path.components()
-        .filter_map(|component| match component {
-            Component::Normal(part) => Some(part.to_string_lossy()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 #[cfg(test)]

@@ -10,6 +10,31 @@ use tokio::sync::Mutex;
 use crate::message::ToolSpec;
 use crate::tool::Tool;
 
+/// Abstraction over systems that can ask questions of a human.
+pub trait HumanIO {
+    /// Error type returned when asking the human fails.
+    type Error;
+
+    /// Presents a question and resolves once an answer is available.
+    fn ask<'a>(
+        &'a self,
+        question: HumanQuestion,
+    ) -> LocalBoxFuture<'a, Result<HumanAnswer, Self::Error>>;
+}
+
+/// Question sent through [`ChannelHumanIO`] and awaiting a reply.
+pub struct PendingQuestion {
+    /// Question presented to the receiver side of the channel.
+    pub question: HumanQuestion,
+    /// One-shot sender used to deliver the answer back to the caller.
+    pub reply: tokio::sync::oneshot::Sender<HumanAnswer>,
+}
+
+/// [`HumanIO`] implementation that forwards questions over a Tokio channel.
+pub struct ChannelHumanIO {
+    pending: tokio::sync::mpsc::Sender<PendingQuestion>,
+}
+
 /// Question to present to a human operator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HumanQuestion {
@@ -27,18 +52,6 @@ pub struct HumanAnswer {
     pub content: String,
 }
 
-/// Abstraction over systems that can ask questions of a human.
-pub trait HumanIO {
-    /// Error type returned when asking the human fails.
-    type Error;
-
-    /// Presents a question and resolves once an answer is available.
-    fn ask<'a>(
-        &'a self,
-        question: HumanQuestion,
-    ) -> LocalBoxFuture<'a, Result<HumanAnswer, Self::Error>>;
-}
-
 /// Errors returned by [`StdinHumanIO`].
 #[derive(Debug, Error)]
 pub enum StdinError {
@@ -53,6 +66,11 @@ pub enum StdinError {
 /// [`HumanIO`] implementation that interacts through standard input and output.
 pub struct StdinHumanIO {
     reader: Arc<Mutex<BufReader<tokio::io::Stdin>>>,
+}
+
+/// Tool that lets the model explicitly ask the user for information.
+pub struct QuestionTool<R> {
+    _marker: PhantomData<R>,
 }
 
 impl StdinHumanIO {
@@ -113,19 +131,6 @@ impl HumanIO for StdinHumanIO {
     }
 }
 
-/// Question sent through [`ChannelHumanIO`] and awaiting a reply.
-pub struct PendingQuestion {
-    /// Question presented to the receiver side of the channel.
-    pub question: HumanQuestion,
-    /// One-shot sender used to deliver the answer back to the caller.
-    pub reply: tokio::sync::oneshot::Sender<HumanAnswer>,
-}
-
-/// [`HumanIO`] implementation that forwards questions over a Tokio channel.
-pub struct ChannelHumanIO {
-    pending: tokio::sync::mpsc::Sender<PendingQuestion>,
-}
-
 impl ChannelHumanIO {
     /// Creates a channel-backed human IO pair and its receiving end.
     pub fn new(buffer: usize) -> (Self, tokio::sync::mpsc::Receiver<PendingQuestion>) {
@@ -154,11 +159,6 @@ impl HumanIO for ChannelHumanIO {
             Ok(reply_rx.await.expect("reply channel not dropped"))
         })
     }
-}
-
-/// Tool that lets the model explicitly ask the user for information.
-pub struct QuestionTool<R> {
-    _marker: PhantomData<R>,
 }
 
 impl<R> QuestionTool<R> {

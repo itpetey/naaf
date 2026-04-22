@@ -1,72 +1,8 @@
-use std::path::PathBuf;
-
 use std::fmt;
+use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-/// Semantic type assigned to a stored knowledge entry.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum EntityType {
-    /// A general concept or topic.
-    Concept,
-    /// A concrete entity such as a person, system, or component.
-    Entity,
-    /// A summary distilled from source material.
-    Summary,
-    /// A comparison between multiple entities or concepts.
-    Comparison,
-    /// An analytical conclusion or interpretation.
-    Analysis,
-    /// A question-and-answer style entry.
-    QuestionAnswer,
-    /// Raw source material chunked directly from input content.
-    Source,
-}
-
-impl fmt::Display for EntityType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EntityType::Concept => write!(f, "concept"),
-            EntityType::Entity => write!(f, "entity"),
-            EntityType::Summary => write!(f, "summary"),
-            EntityType::Comparison => write!(f, "comparison"),
-            EntityType::Analysis => write!(f, "analysis"),
-            EntityType::QuestionAnswer => write!(f, "qa"),
-            EntityType::Source => write!(f, "source"),
-        }
-    }
-}
-
-/// Metadata describing where a knowledge payload originated.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceMetadata {
-    /// High-level source classification.
-    pub source_type: SourceType,
-    /// Path to the originating file, when known.
-    pub path: Option<PathBuf>,
-    /// Human-readable source title.
-    pub title: Option<String>,
-    /// Programming or markup language associated with the source.
-    pub language: Option<String>,
-    /// Recorded span within the source material.
-    pub line_range: Option<(usize, usize)>,
-}
-
-/// Type of source content stored in the vector database.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum SourceType {
-    /// Markdown or other heading-oriented prose.
-    Markdown,
-    /// Source code.
-    Code,
-    /// Conversation transcript data.
-    Conversation,
-    /// PDF or paper-like document content.
-    Paper,
-    /// Plain text content without richer structure.
-    PlainText,
-}
 
 /// Payload stored in each Qdrant point.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,6 +29,80 @@ pub struct KnowledgePayload {
     pub created_at: DateTime<Utc>,
     /// Last update timestamp in UTC.
     pub updated_at: DateTime<Utc>,
+}
+
+/// Metadata describing where a knowledge payload originated.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceMetadata {
+    /// High-level source classification.
+    pub source_type: SourceType,
+    /// Path to the originating file, when known.
+    pub path: Option<PathBuf>,
+    /// Human-readable source title.
+    pub title: Option<String>,
+    /// Programming or markup language associated with the source.
+    pub language: Option<String>,
+    /// Recorded span within the source material.
+    pub line_range: Option<(usize, usize)>,
+}
+
+/// One scored search hit returned from Qdrant.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SearchResult {
+    /// Identifier of the matched point.
+    pub id: uuid::Uuid,
+    /// Similarity score returned by Qdrant.
+    pub score: f32,
+    /// Stored payload for the matched point.
+    pub payload: KnowledgePayload,
+}
+
+/// Semantic type assigned to a stored knowledge entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum EntityType {
+    /// A general concept or topic.
+    Concept,
+    /// A concrete entity such as a person, system, or component.
+    Entity,
+    /// A summary distilled from source material.
+    Summary,
+    /// A comparison between multiple entities or concepts.
+    Comparison,
+    /// An analytical conclusion or interpretation.
+    Analysis,
+    /// A question-and-answer style entry.
+    QuestionAnswer,
+    /// Raw source material chunked directly from input content.
+    Source,
+}
+
+/// Type of source content stored in the vector database.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SourceType {
+    /// Markdown or other heading-oriented prose.
+    Markdown,
+    /// Source code.
+    Code,
+    /// Conversation transcript data.
+    Conversation,
+    /// PDF or paper-like document content.
+    Paper,
+    /// Plain text content without richer structure.
+    PlainText,
+}
+
+impl fmt::Display for EntityType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EntityType::Concept => write!(f, "concept"),
+            EntityType::Entity => write!(f, "entity"),
+            EntityType::Summary => write!(f, "summary"),
+            EntityType::Comparison => write!(f, "comparison"),
+            EntityType::Analysis => write!(f, "analysis"),
+            EntityType::QuestionAnswer => write!(f, "qa"),
+            EntityType::Source => write!(f, "source"),
+        }
+    }
 }
 
 impl KnowledgePayload {
@@ -149,15 +159,4 @@ impl KnowledgePayload {
         self.source_metadata = Some(metadata);
         self
     }
-}
-
-/// One scored search hit returned from Qdrant.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SearchResult {
-    /// Identifier of the matched point.
-    pub id: uuid::Uuid,
-    /// Similarity score returned by Qdrant.
-    pub score: f32,
-    /// Stored payload for the matched point.
-    pub payload: KnowledgePayload,
 }

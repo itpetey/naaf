@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+/// Convenience result type used by this crate.
+pub type Result<T> = std::result::Result<T, QdrantError>;
+
 /// Errors returned by Qdrant integration and content processing code.
 #[derive(Error, Debug)]
 pub enum QdrantError {
@@ -43,6 +46,3 @@ pub enum QdrantError {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 }
-
-/// Convenience result type used by this crate.
-pub type Result<T> = std::result::Result<T, QdrantError>;

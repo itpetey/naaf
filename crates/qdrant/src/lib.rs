@@ -32,6 +32,19 @@
 //!
 //! `ContentChunker` auto-detects the right chunker from a file path.
 
+pub use chunker::{
+    Chunk, ChunkMetadata, Chunker, CodeChunker, ContentChunker, ConversationChunker,
+    MarkdownChunker, PdfChunker, SourceInfo,
+};
+pub use client::{PointData, QdrantAgent, QdrantClient};
+pub use embedder::Embedder;
+#[cfg(feature = "openai")]
+pub use embedder::openai::OpenAiEmbedder;
+pub use error::{QdrantError, Result};
+pub use payload::{EntityType, KnowledgePayload, SearchResult, SourceMetadata, SourceType};
+pub use task::{QdrantSearch, QdrantSimilarityCheck, QdrantUpsert};
+pub use tool::QdrantSearchTool;
+
 /// Content chunking primitives used before embedding and upsert.
 pub mod chunker;
 /// Low-level Qdrant client wrappers and the high-level shared agent.
@@ -48,17 +61,3 @@ pub mod payload;
 pub mod task;
 /// LLM tool adapters backed by Qdrant search.
 pub mod tool;
-
-pub use chunker::{
-    Chunk, ChunkMetadata, Chunker, CodeChunker, ContentChunker, ConversationChunker,
-    MarkdownChunker, PdfChunker, SourceInfo,
-};
-pub use client::{PointData, QdrantAgent, QdrantClient};
-pub use embedder::Embedder;
-pub use error::{QdrantError, Result};
-pub use payload::{EntityType, KnowledgePayload, SearchResult, SourceMetadata, SourceType};
-pub use task::{QdrantSearch, QdrantSimilarityCheck, QdrantUpsert};
-pub use tool::QdrantSearchTool;
-
-#[cfg(feature = "openai")]
-pub use embedder::openai::OpenAiEmbedder;

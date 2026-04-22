@@ -2,6 +2,15 @@ use std::process::ExitStatus;
 
 use thiserror::Error;
 
+/// Errors raised by the generic `naaf_core::Check` adapter.
+pub type CheckError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
+/// Errors raised by the generic `naaf_core::Materialiser` adapter.
+pub type MaterialiserError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
+/// Errors raised by the generic `naaf_core::RepairPlanner` adapter.
+pub type RepairPlannerError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
+/// Errors raised by the generic `naaf_core::Task` adapter.
+pub type TaskError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
+
 /// Errors raised while executing a process.
 #[derive(Debug, Error)]
 pub enum ProcessError {
@@ -30,15 +39,3 @@ pub enum AdapterError<BuildError, DecodeError> {
     #[error("failed to decode process output: {0}")]
     Decode(#[source] DecodeError),
 }
-
-/// Errors raised by the generic `naaf_core::Task` adapter.
-pub type TaskError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
-
-/// Errors raised by the generic `naaf_core::Check` adapter.
-pub type CheckError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
-
-/// Errors raised by the generic `naaf_core::Materialiser` adapter.
-pub type MaterialiserError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
-
-/// Errors raised by the generic `naaf_core::RepairPlanner` adapter.
-pub type RepairPlannerError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;

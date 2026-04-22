@@ -11,7 +11,6 @@ pub mod action {
     pub const INPUT: &str = "input";
     pub const OUTPUT: &str = "output";
 }
-
 pub mod component {
     pub const STEP: &str = "step";
     pub const TASK: &str = "task";
@@ -19,7 +18,6 @@ pub mod component {
     pub const MATERIALISER: &str = "materialiser";
     pub const REPAIR: &str = "repair";
 }
-
 pub mod name {
     pub const STEP: &str = "step_run";
     pub const TASK: &str = "task_run";
@@ -27,7 +25,6 @@ pub mod name {
     pub const MATERIALISER: &str = "materialiser_run";
     pub const REPAIR: &str = "repair_run";
 }
-
 pub mod reason {
     pub const RETRY_LIMIT_REACHED: &str = "retry_limit_reached";
     pub const REPAIR_UNAVAILABLE: &str = "repair_unavailable";

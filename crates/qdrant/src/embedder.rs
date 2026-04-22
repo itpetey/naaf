@@ -2,18 +2,6 @@ use futures::future::LocalBoxFuture;
 
 use crate::error::QdrantError;
 
-/// Produces embedding vectors for text inputs.
-pub trait Embedder {
-    /// Embeds the provided texts in request order.
-    fn embed<'a>(
-        &'a self,
-        texts: Vec<String>,
-    ) -> LocalBoxFuture<'a, Result<Vec<Vec<f32>>, QdrantError>>;
-
-    /// Returns the vector dimension produced by this embedder.
-    fn dimension(&self) -> usize;
-}
-
 #[cfg(feature = "openai")]
 /// OpenAI-backed embedding implementation.
 pub mod openai {
@@ -111,4 +99,16 @@ pub mod openai {
             self.dimension
         }
     }
+}
+
+/// Produces embedding vectors for text inputs.
+pub trait Embedder {
+    /// Embeds the provided texts in request order.
+    fn embed<'a>(
+        &'a self,
+        texts: Vec<String>,
+    ) -> LocalBoxFuture<'a, Result<Vec<Vec<f32>>, QdrantError>>;
+
+    /// Returns the vector dimension produced by this embedder.
+    fn dimension(&self) -> usize;
 }

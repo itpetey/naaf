@@ -1,6 +1,41 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// One provider-neutral completion request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompletionRequest {
+    /// The model identifier to execute.
+    pub model: String,
+    /// Conversation history sent to the model.
+    pub messages: Vec<Message>,
+    /// Tools available to this request.
+    pub tools: Vec<ToolSpec>,
+    /// Provider-neutral tool selection policy.
+    pub tool_choice: ToolChoice,
+    /// Opaque provider-specific request metadata.
+    pub metadata: Value,
+}
+
+/// One provider-neutral completion response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompletionResponse {
+    /// Assistant message produced for the turn.
+    pub message: AssistantMessage,
+    /// Optional provider token usage.
+    pub usage: Option<Usage>,
+    /// Opaque provider-specific response metadata.
+    pub metadata: Value,
+}
+
+/// The assistant message returned for one model turn.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AssistantMessage {
+    /// Optional assistant text content.
+    pub content: Option<String>,
+    /// Requested tool calls to execute before the next turn.
+    pub tool_calls: Vec<ToolCall>,
+}
+
 /// A tool exposed to the model.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSpec {
@@ -34,13 +69,44 @@ pub struct ToolResultMessage {
     pub content: Value,
 }
 
-/// The assistant message returned for one model turn.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct AssistantMessage {
-    /// Optional assistant text content.
-    pub content: Option<String>,
-    /// Requested tool calls to execute before the next turn.
-    pub tool_calls: Vec<ToolCall>,
+/// A provider-neutral conversation message.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Message {
+    /// A system instruction.
+    System {
+        /// Raw instruction content sent as the system prompt.
+        content: String,
+    },
+    /// A user message.
+    User {
+        /// Raw user-authored content.
+        content: String,
+    },
+    /// A prior assistant response.
+    Assistant(AssistantMessage),
+    /// A tool result produced by the executor.
+    Tool(ToolResultMessage),
+}
+
+/// Tool selection behaviour requested from the provider.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolChoice {
+    /// Let the model decide whether to call tools.
+    #[default]
+    Auto,
+    /// Disable tool calls for this request.
+    None,
+    /// Require the model to call a specific tool.
+    Required(String),
+}
+
+/// Provider token usage accounting for one response.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    /// Input tokens sent to the provider.
+    pub input_tokens: u64,
+    /// Output tokens returned by the provider.
+    pub output_tokens: u64,
 }
 
 impl AssistantMessage {
@@ -59,25 +125,6 @@ impl AssistantMessage {
             tool_calls,
         }
     }
-}
-
-/// A provider-neutral conversation message.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Message {
-    /// A system instruction.
-    System {
-        /// Raw instruction content sent as the system prompt.
-        content: String,
-    },
-    /// A user message.
-    User {
-        /// Raw user-authored content.
-        content: String,
-    },
-    /// A prior assistant response.
-    Assistant(AssistantMessage),
-    /// A tool result produced by the executor.
-    Tool(ToolResultMessage),
 }
 
 impl Message {
@@ -104,42 +151,6 @@ impl Message {
     pub fn tool(message: ToolResultMessage) -> Self {
         Self::Tool(message)
     }
-}
-
-/// Tool selection behaviour requested from the provider.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ToolChoice {
-    /// Let the model decide whether to call tools.
-    #[default]
-    Auto,
-    /// Disable tool calls for this request.
-    None,
-    /// Require the model to call a specific tool.
-    Required(String),
-}
-
-/// Provider token usage accounting for one response.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Usage {
-    /// Input tokens sent to the provider.
-    pub input_tokens: u64,
-    /// Output tokens returned by the provider.
-    pub output_tokens: u64,
-}
-
-/// One provider-neutral completion request.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CompletionRequest {
-    /// The model identifier to execute.
-    pub model: String,
-    /// Conversation history sent to the model.
-    pub messages: Vec<Message>,
-    /// Tools available to this request.
-    pub tools: Vec<ToolSpec>,
-    /// Provider-neutral tool selection policy.
-    pub tool_choice: ToolChoice,
-    /// Opaque provider-specific request metadata.
-    pub metadata: Value,
 }
 
 impl CompletionRequest {
@@ -171,17 +182,6 @@ impl CompletionRequest {
         self.metadata = metadata;
         self
     }
-}
-
-/// One provider-neutral completion response.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CompletionResponse {
-    /// Assistant message produced for the turn.
-    pub message: AssistantMessage,
-    /// Optional provider token usage.
-    pub usage: Option<Usage>,
-    /// Opaque provider-specific response metadata.
-    pub metadata: Value,
 }
 
 impl CompletionResponse {

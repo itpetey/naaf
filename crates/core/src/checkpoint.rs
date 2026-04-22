@@ -13,57 +13,6 @@ use crate::{NodeId, NodeReport, RetryPolicy, StepReport, WorkflowRunId, graph::W
 
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NodeCheckpointState {
-    Pending,
-    Running,
-    Succeeded,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub enum NodeCheckpointReport {
-    #[default]
-    Empty,
-    Step(StepReport<Value>),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AttemptCheckpoint {
-    pub input: Value,
-    pub artefact: Value,
-    pub findings: Vec<Value>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NodeCheckpoint {
-    pub id: NodeId,
-    pub name: String,
-    pub runner_key: Option<String>,
-    pub seed: Option<Value>,
-    pub parent: Option<NodeId>,
-    pub dependencies: BTreeSet<NodeId>,
-    pub downstream: BTreeSet<NodeId>,
-    pub state: NodeCheckpointState,
-    pub output: Option<Value>,
-    pub report: NodeCheckpointReport,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WorkflowCheckpoint {
-    pub run_id: WorkflowRunId,
-    pub max_concurrency: usize,
-    pub nodes: BTreeMap<NodeId, NodeCheckpoint>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct StepCheckpoint {
-    pub initial_input: Value,
-    pub current_input: Value,
-    pub repair_attempts: Vec<AttemptCheckpoint>,
-    pub report_attempts: Vec<crate::repair::AttemptReport<Value>>,
-    pub retry_policy: RetryPolicy,
-}
-
 /// Pluggable persistence backend for saving and loading workflow state.
 ///
 /// All methods return pinned boxed futures so the trait is dyn-compatible
@@ -105,6 +54,57 @@ pub trait StepCheckpointer: Send + Sync + 'static {
     fn checkpoint(&self, checkpoint: StepCheckpoint) -> BoxFuture<()>;
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NodeCheckpoint {
+    pub id: NodeId,
+    pub name: String,
+    pub runner_key: Option<String>,
+    pub seed: Option<Value>,
+    pub parent: Option<NodeId>,
+    pub dependencies: BTreeSet<NodeId>,
+    pub downstream: BTreeSet<NodeId>,
+    pub state: NodeCheckpointState,
+    pub output: Option<Value>,
+    pub report: NodeCheckpointReport,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkflowCheckpoint {
+    pub run_id: WorkflowRunId,
+    pub max_concurrency: usize,
+    pub nodes: BTreeMap<NodeId, NodeCheckpoint>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StepCheckpoint {
+    pub initial_input: Value,
+    pub current_input: Value,
+    pub repair_attempts: Vec<AttemptCheckpoint>,
+    pub report_attempts: Vec<crate::repair::AttemptReport<Value>>,
+    pub retry_policy: RetryPolicy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NodeCheckpointState {
+    Pending,
+    Running,
+    Succeeded,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub enum NodeCheckpointReport {
+    #[default]
+    Empty,
+    Step(StepReport<Value>),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AttemptCheckpoint {
+    pub input: Value,
+    pub artefact: Value,
+    pub findings: Vec<Value>,
+}
+
 #[derive(Debug, Error)]
 pub enum ResumeError {
     #[error("no runner registered for key '{key}'")]
@@ -117,6 +117,29 @@ pub enum ResumeError {
 
 pub struct RunnerRegistry<R, E> {
     runners: BTreeMap<String, Arc<dyn WorkflowNode<Runtime = R, Error = E>>>,
+}
+
+impl NodeCheckpointState {
+    pub fn from_pending() -> Self {
+        Self::Pending
+    }
+
+    pub fn from_running() -> Self {
+        Self::Running
+    }
+
+    pub fn from_succeeded() -> Self {
+        Self::Succeeded
+    }
+}
+
+impl NodeCheckpointReport {
+    pub fn from_node_report(report: &NodeReport) -> Self {
+        match report {
+            NodeReport::Empty => Self::Empty,
+            NodeReport::Step(step_report) => Self::Step(step_report.clone()),
+        }
+    }
 }
 
 impl<R, E> Default for RunnerRegistry<R, E> {
@@ -146,29 +169,6 @@ impl<R, E> RunnerRegistry<R, E> {
 
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.runners.keys().map(|k| k.as_str())
-    }
-}
-
-impl NodeCheckpointReport {
-    pub fn from_node_report(report: &NodeReport) -> Self {
-        match report {
-            NodeReport::Empty => Self::Empty,
-            NodeReport::Step(step_report) => Self::Step(step_report.clone()),
-        }
-    }
-}
-
-impl NodeCheckpointState {
-    pub fn from_pending() -> Self {
-        Self::Pending
-    }
-
-    pub fn from_running() -> Self {
-        Self::Running
-    }
-
-    pub fn from_succeeded() -> Self {
-        Self::Succeeded
     }
 }
 

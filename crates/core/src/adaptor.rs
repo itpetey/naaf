@@ -11,6 +11,26 @@ pub struct TaskFn<R, I, O, E, F> {
     _marker: PhantomData<fn() -> (R, I, O, E)>,
 }
 
+pub struct CheckFn<R, S, F, E, Fun> {
+    f: Fun,
+    _marker: PhantomData<fn() -> (R, S, F, E)>,
+}
+
+pub struct MaterialiserFn<R, I, O, E, F> {
+    f: F,
+    _marker: PhantomData<fn() -> (R, I, O, E)>,
+}
+
+pub struct RepairFn<R, I, A, F, E, Fun> {
+    f: Fun,
+    _marker: PhantomData<fn() -> (R, I, A, F, E)>,
+}
+
+pub struct RepairLastFn<R, I, A, F, E, Fun> {
+    f: Fun,
+    _marker: PhantomData<fn() -> (R, I, A, F, E)>,
+}
+
 impl<R, I, O, E, F> TaskFn<R, I, O, E, F> {
     pub fn new(f: F) -> Self {
         Self {
@@ -40,18 +60,6 @@ where
     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
         (self.f)(runtime, input)
     }
-}
-
-pub fn task_fn<R, I, O, E, F>(f: F) -> TaskFn<R, I, O, E, F>
-where
-    F: Fn(&R, I) -> LocalBoxFuture<'_, Result<O, E>>,
-{
-    TaskFn::new(f)
-}
-
-pub struct CheckFn<R, S, F, E, Fun> {
-    f: Fun,
-    _marker: PhantomData<fn() -> (R, S, F, E)>,
 }
 
 impl<R, S, F, E, Fun> CheckFn<R, S, F, E, Fun> {
@@ -85,18 +93,6 @@ where
     }
 }
 
-pub fn check_fn<R, S, F, E, Fun>(f: Fun) -> CheckFn<R, S, F, E, Fun>
-where
-    Fun: Fn(&R, S) -> LocalBoxFuture<'_, Result<Vec<F>, E>>,
-{
-    CheckFn::new(f)
-}
-
-pub struct MaterialiserFn<R, I, O, E, F> {
-    f: F,
-    _marker: PhantomData<fn() -> (R, I, O, E)>,
-}
-
 impl<R, I, O, E, F> MaterialiserFn<R, I, O, E, F> {
     pub fn new(f: F) -> Self {
         Self {
@@ -126,18 +122,6 @@ where
     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
         (self.f)(runtime, input)
     }
-}
-
-pub fn materialiser_fn<R, I, O, E, F>(f: F) -> MaterialiserFn<R, I, O, E, F>
-where
-    F: Fn(&R, I) -> LocalBoxFuture<'_, Result<O, E>>,
-{
-    MaterialiserFn::new(f)
-}
-
-pub struct RepairFn<R, I, A, F, E, Fun> {
-    f: Fun,
-    _marker: PhantomData<fn() -> (R, I, A, F, E)>,
 }
 
 impl<R, I, A, F, E, Fun> RepairFn<R, I, A, F, E, Fun> {
@@ -171,18 +155,6 @@ where
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
         (self.f)(runtime, attempts)
     }
-}
-
-pub fn repair_fn<R, I, A, F, E, Fun>(f: Fun) -> RepairFn<R, I, A, F, E, Fun>
-where
-    Fun: Fn(&R, Vec<Attempt<I, A, F>>) -> LocalBoxFuture<'_, Result<I, E>>,
-{
-    RepairFn::new(f)
-}
-
-pub struct RepairLastFn<R, I, A, F, E, Fun> {
-    f: Fun,
-    _marker: PhantomData<fn() -> (R, I, A, F, E)>,
 }
 
 impl<R, I, A, F, E, Fun> RepairLastFn<R, I, A, F, E, Fun> {
@@ -219,11 +191,39 @@ where
     }
 }
 
+pub fn check_fn<R, S, F, E, Fun>(f: Fun) -> CheckFn<R, S, F, E, Fun>
+where
+    Fun: Fn(&R, S) -> LocalBoxFuture<'_, Result<Vec<F>, E>>,
+{
+    CheckFn::new(f)
+}
+
+pub fn materialiser_fn<R, I, O, E, F>(f: F) -> MaterialiserFn<R, I, O, E, F>
+where
+    F: Fn(&R, I) -> LocalBoxFuture<'_, Result<O, E>>,
+{
+    MaterialiserFn::new(f)
+}
+
+pub fn repair_fn<R, I, A, F, E, Fun>(f: Fun) -> RepairFn<R, I, A, F, E, Fun>
+where
+    Fun: Fn(&R, Vec<Attempt<I, A, F>>) -> LocalBoxFuture<'_, Result<I, E>>,
+{
+    RepairFn::new(f)
+}
+
 pub fn repair_last_fn<R, I, A, F, E, Fun>(f: Fun) -> RepairLastFn<R, I, A, F, E, Fun>
 where
     Fun: Fn(&R, Attempt<I, A, F>) -> LocalBoxFuture<'_, Result<I, E>>,
 {
     RepairLastFn::new(f)
+}
+
+pub fn task_fn<R, I, O, E, F>(f: F) -> TaskFn<R, I, O, E, F>
+where
+    F: Fn(&R, I) -> LocalBoxFuture<'_, Result<O, E>>,
+{
+    TaskFn::new(f)
 }
 
 #[cfg(test)]

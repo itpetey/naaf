@@ -14,6 +14,14 @@
 //! All operations compose through `naaf_core`'s `Task`, `Check`, `Materialiser`,
 //! and `Step` types.
 
+pub use error::{KnowledgeError, Result};
+pub use ingest::DirectoryIngestReport;
+pub use knowledge::{
+    EntityType, IngestReport, KnowledgeEntry, LintIssue, LintIssueType, LintReport,
+};
+pub use source::{SourceInfo, SourceType};
+pub use tool::KnowledgeTool;
+
 /// Error and result types for knowledge workflows.
 pub mod error;
 /// Ingestion helpers for files, directories, and in-memory content.
@@ -28,11 +36,3 @@ pub mod query;
 pub mod source;
 /// LLM tool wrapper for querying and linting the knowledge base.
 pub mod tool;
-
-pub use error::{KnowledgeError, Result};
-pub use ingest::DirectoryIngestReport;
-pub use knowledge::{
-    EntityType, IngestReport, KnowledgeEntry, LintIssue, LintIssueType, LintReport,
-};
-pub use source::{SourceInfo, SourceType};
-pub use tool::KnowledgeTool;

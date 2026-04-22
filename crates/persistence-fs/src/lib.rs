@@ -56,6 +56,10 @@ pub struct ArtifactStore {
     run_root: PathBuf,
 }
 
+pub struct FsCheckpointer {
+    base_dir: PathBuf,
+}
+
 impl ArtifactStore {
     /// Creates a new artifact store at `run_root`, creating the directory
     /// and any missing parents.
@@ -107,29 +111,6 @@ impl ArtifactStore {
             Err(error) => Err(error),
         }
     }
-}
-
-/// Generates a unique run identifier suitable for use as a directory name.
-pub fn generate_run_id() -> std::io::Result<String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed to read system clock for run id: {error}"),
-            )
-        })?;
-
-    Ok(format!(
-        "run-{}-{:09}-{}",
-        now.as_secs(),
-        now.subsec_nanos(),
-        process::id()
-    ))
-}
-
-pub struct FsCheckpointer {
-    base_dir: PathBuf,
 }
 
 impl FsCheckpointer {
@@ -276,4 +257,23 @@ impl naaf_core::Checkpointer for FsCheckpointer {
             }
         })
     }
+}
+
+/// Generates a unique run identifier suitable for use as a directory name.
+pub fn generate_run_id() -> std::io::Result<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to read system clock for run id: {error}"),
+            )
+        })?;
+
+    Ok(format!(
+        "run-{}-{:09}-{}",
+        now.as_secs(),
+        now.subsec_nanos(),
+        process::id()
+    ))
 }

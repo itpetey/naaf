@@ -23,56 +23,33 @@ use crate::{
     repair::NeverFinding,
 };
 
-type NodeRunner<R, E> = dyn WorkflowNode<Runtime = R, Error = E>;
-type NodeResult<R, E> = Result<NodeOutcome<R, E>, NodeExecutionError<E>>;
-type NodeFuture<'a, R, E> = LocalBoxFuture<'a, NodeResult<R, E>>;
-type InFlightNode<'a, R, E> = LocalBoxFuture<'a, (NodeId, NodeResult<R, E>)>;
 type BuildPatch<R, O, E> = dyn Fn(&NodeContext, &O) -> GraphPatch<R, E>;
+type InFlightNode<'a, R, E> = LocalBoxFuture<'a, (NodeId, NodeResult<R, E>)>;
+type NodeFuture<'a, R, E> = LocalBoxFuture<'a, NodeResult<R, E>>;
+type NodeResult<R, E> = Result<NodeOutcome<R, E>, NodeExecutionError<E>>;
+type NodeRunner<R, E> = dyn WorkflowNode<Runtime = R, Error = E>;
 
-/// Unique identifier for one workflow run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct WorkflowRunId(Uuid);
+/// A runnable node in the dynamic workflow graph.
+pub trait WorkflowNode {
+    /// Shared runtime capabilities used by this node.
+    type Runtime;
+    /// Errors returned by the wrapped task logic.
+    type Error;
 
-impl WorkflowRunId {
-    /// Creates a fresh workflow run identifier.
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
+    /// Executes the node and optionally returns new downstream work.
+    fn run<'a>(
+        &'a self,
+        runtime: &'a Self::Runtime,
+        context: NodeContext,
+        input: NodeInput,
+    ) -> NodeFuture<'a, Self::Runtime, Self::Error>;
 }
 
-impl Default for WorkflowRunId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Display for WorkflowRunId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-/// Unique identifier for one node within a workflow graph.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct NodeId(Uuid);
-
-impl NodeId {
-    /// Creates a fresh node identifier.
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
-
-impl Default for NodeId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Display for NodeId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
+/// Final graph state after a successful workflow run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkflowRunReport {
+    run_id: WorkflowRunId,
+    nodes: BTreeMap<NodeId, NodeSummary>,
 }
 
 /// Immutable execution metadata passed into a running workflow node.
@@ -83,30 +60,14 @@ pub struct NodeContext {
     parent_id: Option<NodeId>,
 }
 
-impl NodeContext {
-    /// Creates a node context for the given run, node, and optional parent.
-    pub fn new(run_id: WorkflowRunId, node_id: NodeId, parent_id: Option<NodeId>) -> Self {
-        Self {
-            run_id,
-            node_id,
-            parent_id,
-        }
-    }
-
-    /// Returns the current workflow run identifier.
-    pub fn run_id(&self) -> WorkflowRunId {
-        self.run_id
-    }
-
-    /// Returns the currently executing node identifier.
-    pub fn node_id(&self) -> NodeId {
-        self.node_id
-    }
-
-    /// Returns the node that created this node, if any.
-    pub fn parent_id(&self) -> Option<NodeId> {
-        self.parent_id
-    }
+/// Summary for one node after a successful workflow run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeSummary {
+    id: NodeId,
+    name: String,
+    parent_id: Option<NodeId>,
+    output: Value,
+    report: NodeReport,
 }
 
 /// Input visible to one dynamic workflow node.
@@ -114,53 +75,6 @@ impl NodeContext {
 pub struct NodeInput {
     seed: Option<Value>,
     upstream: BTreeMap<NodeId, Value>,
-}
-
-impl NodeInput {
-    /// Creates a node input from an optional seed and upstream outputs.
-    pub fn new(seed: Option<Value>, upstream: BTreeMap<NodeId, Value>) -> Self {
-        Self { seed, upstream }
-    }
-
-    /// Returns the seed value configured for this node, if any.
-    pub fn seed(&self) -> Option<&Value> {
-        self.seed.as_ref()
-    }
-
-    /// Decodes the seed value into a typed input.
-    pub fn seed_as<T>(&self) -> Result<T, InputSelectionError>
-    where
-        T: DeserializeOwned,
-    {
-        let seed = self
-            .seed
-            .clone()
-            .ok_or(InputSelectionError::MissingSeedInput)?;
-        serde_json::from_value(seed).map_err(InputSelectionError::DecodeInput)
-    }
-
-    /// Returns every upstream output keyed by node identifier.
-    pub fn upstream(&self) -> &BTreeMap<NodeId, Value> {
-        &self.upstream
-    }
-
-    /// Returns the output from one upstream node, if present.
-    pub fn output(&self, node_id: NodeId) -> Option<&Value> {
-        self.upstream.get(&node_id)
-    }
-
-    /// Decodes one upstream output into a typed value.
-    pub fn output_as<T>(&self, node_id: NodeId) -> Result<T, InputSelectionError>
-    where
-        T: DeserializeOwned,
-    {
-        let output = self
-            .upstream
-            .get(&node_id)
-            .cloned()
-            .ok_or(InputSelectionError::MissingUpstreamOutput { upstream: node_id })?;
-        serde_json::from_value(output).map_err(InputSelectionError::DecodeInput)
-    }
 }
 
 /// Input-selection failures while adapting dynamic node inputs into typed values.
@@ -176,6 +90,58 @@ pub enum InputSelectionError {
     #[error("failed to decode node input: {0}")]
     DecodeInput(#[source] serde_json::Error),
 }
+
+/// Invalid additive graph mutations rejected by the scheduler.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum InvalidPatchError {
+    /// The patch introduced a node identifier that already existed.
+    #[error("node '{node_id}' already exists in the workflow")]
+    DuplicateNodeId { node_id: NodeId },
+    /// The patch repeated the same edge twice.
+    #[error("edge '{from}' -> '{to}' is duplicated in the patch")]
+    DuplicateEdge { from: NodeId, to: NodeId },
+    /// The patch referenced a source node that does not exist.
+    #[error("edge source '{node_id}' does not exist")]
+    UnknownEdgeSource { node_id: NodeId },
+    /// The patch referenced a target node that does not exist.
+    #[error("edge target '{node_id}' does not exist")]
+    UnknownEdgeTarget { node_id: NodeId },
+    /// Additive patches may only target nodes created by the patch itself.
+    #[error("edge target '{node_id}' must be newly added by the patch")]
+    ExistingTarget { node_id: NodeId },
+    /// The patch would make the graph cyclic.
+    #[error("patch would introduce a cycle in the workflow graph")]
+    CycleDetected,
+}
+
+/// One additive edge insertion from an upstream node into a new downstream node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EdgeSpec {
+    from: NodeId,
+    to: NodeId,
+}
+
+struct NodeRecord<R, E> {
+    id: NodeId,
+    name: String,
+    runner_key: Option<String>,
+    seed: Option<Value>,
+    parent: Option<NodeId>,
+    dependencies: BTreeSet<NodeId>,
+    downstream: BTreeSet<NodeId>,
+    state: NodeState,
+    output: Option<Value>,
+    report: NodeReport,
+    runner: Arc<NodeRunner<R, E>>,
+}
+
+/// Unique identifier for one workflow run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct WorkflowRunId(Uuid);
+
+/// Unique identifier for one node within a workflow graph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct NodeId(Uuid);
 
 /// Dynamic node execution errors.
 #[derive(Debug, Error)]
@@ -225,29 +191,6 @@ pub enum WorkflowError<E> {
     Stalled { pending: Vec<NodeId> },
 }
 
-/// Invalid additive graph mutations rejected by the scheduler.
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-pub enum InvalidPatchError {
-    /// The patch introduced a node identifier that already existed.
-    #[error("node '{node_id}' already exists in the workflow")]
-    DuplicateNodeId { node_id: NodeId },
-    /// The patch repeated the same edge twice.
-    #[error("edge '{from}' -> '{to}' is duplicated in the patch")]
-    DuplicateEdge { from: NodeId, to: NodeId },
-    /// The patch referenced a source node that does not exist.
-    #[error("edge source '{node_id}' does not exist")]
-    UnknownEdgeSource { node_id: NodeId },
-    /// The patch referenced a target node that does not exist.
-    #[error("edge target '{node_id}' does not exist")]
-    UnknownEdgeTarget { node_id: NodeId },
-    /// Additive patches may only target nodes created by the patch itself.
-    #[error("edge target '{node_id}' must be newly added by the patch")]
-    ExistingTarget { node_id: NodeId },
-    /// The patch would make the graph cyclic.
-    #[error("patch would introduce a cycle in the workflow graph")]
-    CycleDetected,
-}
-
 /// Per-node execution metadata returned after a successful workflow run.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum NodeReport {
@@ -263,6 +206,173 @@ pub struct NodeOutcome<R, E> {
     output: Value,
     patch: GraphPatch<R, E>,
     report: NodeReport,
+}
+
+/// A planned node insertion accepted by the graph scheduler.
+pub struct NodeSpec<R, E> {
+    id: NodeId,
+    name: String,
+    runner_key: Option<String>,
+    seed: Option<Value>,
+    parent: Option<NodeId>,
+    runner: Arc<NodeRunner<R, E>>,
+}
+
+/// An additive mutation applied to the running workflow graph.
+pub struct GraphPatch<R, E> {
+    nodes: Vec<NodeSpec<R, E>>,
+    edges: Vec<EdgeSpec>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+enum NodeState {
+    Pending,
+    Running,
+    Succeeded,
+}
+
+/// Runs a mutable workflow graph with additive downstream node insertion.
+pub struct Workflow<R, E> {
+    run_id: WorkflowRunId,
+    max_concurrency: usize,
+    checkpointer: Option<Arc<dyn Checkpointer>>,
+    registry: Option<RunnerRegistry<R, E>>,
+    nodes: BTreeMap<NodeId, NodeRecord<R, E>>,
+}
+
+/// Adapts a typed `Step` into a dynamic workflow node with optional downstream spawning.
+pub struct StepNode<R, I, O, F, E, Select> {
+    step: Step<R, I, O, F, E>,
+    select_input: Select,
+    build_patch: Option<Arc<BuildPatch<R, O, E>>>,
+}
+
+impl EdgeSpec {
+    /// Creates a directed dependency edge.
+    pub fn new(from: NodeId, to: NodeId) -> Self {
+        Self { from, to }
+    }
+
+    /// Returns the edge source node.
+    pub fn from(&self) -> NodeId {
+        self.from
+    }
+
+    /// Returns the edge target node.
+    pub fn to(&self) -> NodeId {
+        self.to
+    }
+}
+
+impl WorkflowRunId {
+    /// Creates a fresh workflow run identifier.
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for WorkflowRunId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NodeId {
+    /// Creates a fresh node identifier.
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for NodeId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Display for WorkflowRunId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Display for NodeId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl NodeContext {
+    /// Creates a node context for the given run, node, and optional parent.
+    pub fn new(run_id: WorkflowRunId, node_id: NodeId, parent_id: Option<NodeId>) -> Self {
+        Self {
+            run_id,
+            node_id,
+            parent_id,
+        }
+    }
+
+    /// Returns the current workflow run identifier.
+    pub fn run_id(&self) -> WorkflowRunId {
+        self.run_id
+    }
+
+    /// Returns the currently executing node identifier.
+    pub fn node_id(&self) -> NodeId {
+        self.node_id
+    }
+
+    /// Returns the node that created this node, if any.
+    pub fn parent_id(&self) -> Option<NodeId> {
+        self.parent_id
+    }
+}
+
+impl NodeInput {
+    /// Creates a node input from an optional seed and upstream outputs.
+    pub fn new(seed: Option<Value>, upstream: BTreeMap<NodeId, Value>) -> Self {
+        Self { seed, upstream }
+    }
+
+    /// Returns the seed value configured for this node, if any.
+    pub fn seed(&self) -> Option<&Value> {
+        self.seed.as_ref()
+    }
+
+    /// Decodes the seed value into a typed input.
+    pub fn seed_as<T>(&self) -> Result<T, InputSelectionError>
+    where
+        T: DeserializeOwned,
+    {
+        let seed = self
+            .seed
+            .clone()
+            .ok_or(InputSelectionError::MissingSeedInput)?;
+        serde_json::from_value(seed).map_err(InputSelectionError::DecodeInput)
+    }
+
+    /// Returns every upstream output keyed by node identifier.
+    pub fn upstream(&self) -> &BTreeMap<NodeId, Value> {
+        &self.upstream
+    }
+
+    /// Returns the output from one upstream node, if present.
+    pub fn output(&self, node_id: NodeId) -> Option<&Value> {
+        self.upstream.get(&node_id)
+    }
+
+    /// Decodes one upstream output into a typed value.
+    pub fn output_as<T>(&self, node_id: NodeId) -> Result<T, InputSelectionError>
+    where
+        T: DeserializeOwned,
+    {
+        let output = self
+            .upstream
+            .get(&node_id)
+            .cloned()
+            .ok_or(InputSelectionError::MissingUpstreamOutput { upstream: node_id })?;
+        serde_json::from_value(output).map_err(InputSelectionError::DecodeInput)
+    }
 }
 
 impl<R, E> NodeOutcome<R, E> {
@@ -286,32 +396,6 @@ impl<R, E> NodeOutcome<R, E> {
         self.report = report;
         self
     }
-}
-
-/// A runnable node in the dynamic workflow graph.
-pub trait WorkflowNode {
-    /// Shared runtime capabilities used by this node.
-    type Runtime;
-    /// Errors returned by the wrapped task logic.
-    type Error;
-
-    /// Executes the node and optionally returns new downstream work.
-    fn run<'a>(
-        &'a self,
-        runtime: &'a Self::Runtime,
-        context: NodeContext,
-        input: NodeInput,
-    ) -> NodeFuture<'a, Self::Runtime, Self::Error>;
-}
-
-/// A planned node insertion accepted by the graph scheduler.
-pub struct NodeSpec<R, E> {
-    id: NodeId,
-    name: String,
-    runner_key: Option<String>,
-    seed: Option<Value>,
-    parent: Option<NodeId>,
-    runner: Arc<NodeRunner<R, E>>,
 }
 
 impl<R, E> Clone for NodeSpec<R, E> {
@@ -399,36 +483,6 @@ impl<R, E> NodeSpec<R, E> {
     }
 }
 
-/// One additive edge insertion from an upstream node into a new downstream node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EdgeSpec {
-    from: NodeId,
-    to: NodeId,
-}
-
-impl EdgeSpec {
-    /// Creates a directed dependency edge.
-    pub fn new(from: NodeId, to: NodeId) -> Self {
-        Self { from, to }
-    }
-
-    /// Returns the edge source node.
-    pub fn from(&self) -> NodeId {
-        self.from
-    }
-
-    /// Returns the edge target node.
-    pub fn to(&self) -> NodeId {
-        self.to
-    }
-}
-
-/// An additive mutation applied to the running workflow graph.
-pub struct GraphPatch<R, E> {
-    nodes: Vec<NodeSpec<R, E>>,
-    edges: Vec<EdgeSpec>,
-}
-
 impl<R, E> Default for GraphPatch<R, E> {
     fn default() -> Self {
         Self::new()
@@ -471,37 +525,6 @@ impl<R, E> GraphPatch<R, E> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-enum NodeState {
-    Pending,
-    Running,
-    Succeeded,
-}
-
-struct NodeRecord<R, E> {
-    id: NodeId,
-    name: String,
-    runner_key: Option<String>,
-    seed: Option<Value>,
-    parent: Option<NodeId>,
-    dependencies: BTreeSet<NodeId>,
-    downstream: BTreeSet<NodeId>,
-    state: NodeState,
-    output: Option<Value>,
-    report: NodeReport,
-    runner: Arc<NodeRunner<R, E>>,
-}
-
-/// Summary for one node after a successful workflow run.
-#[derive(Clone, Debug, PartialEq)]
-pub struct NodeSummary {
-    id: NodeId,
-    name: String,
-    parent_id: Option<NodeId>,
-    output: Value,
-    report: NodeReport,
-}
-
 impl NodeSummary {
     /// Returns the node identifier.
     pub fn id(&self) -> NodeId {
@@ -529,13 +552,6 @@ impl NodeSummary {
     }
 }
 
-/// Final graph state after a successful workflow run.
-#[derive(Clone, Debug, PartialEq)]
-pub struct WorkflowRunReport {
-    run_id: WorkflowRunId,
-    nodes: BTreeMap<NodeId, NodeSummary>,
-}
-
 impl WorkflowRunReport {
     /// Returns the workflow run identifier.
     pub fn run_id(&self) -> WorkflowRunId {
@@ -551,15 +567,6 @@ impl WorkflowRunReport {
     pub fn node(&self, node_id: NodeId) -> Option<&NodeSummary> {
         self.nodes.get(&node_id)
     }
-}
-
-/// Runs a mutable workflow graph with additive downstream node insertion.
-pub struct Workflow<R, E> {
-    run_id: WorkflowRunId,
-    max_concurrency: usize,
-    checkpointer: Option<Arc<dyn Checkpointer>>,
-    registry: Option<RunnerRegistry<R, E>>,
-    nodes: BTreeMap<NodeId, NodeRecord<R, E>>,
 }
 
 impl<R, E> Default for Workflow<R, E> {
@@ -1014,36 +1021,6 @@ impl<R, E> Workflow<R, E> {
     }
 }
 
-fn encode_step_report<F>(report: &StepReport<F>) -> Result<StepReport<Value>, serde_json::Error>
-where
-    F: Serialize + Clone,
-{
-    let attempts = report
-        .attempts()
-        .iter()
-        .map(|attempt| {
-            Ok(AttemptReport {
-                findings: attempt
-                    .findings
-                    .iter()
-                    .cloned()
-                    .map(serde_json::to_value)
-                    .collect::<Result<Vec<_>, _>>()?,
-                accepted: attempt.accepted,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(StepReport::new(attempts))
-}
-
-/// Adapts a typed `Step` into a dynamic workflow node with optional downstream spawning.
-pub struct StepNode<R, I, O, F, E, Select> {
-    step: Step<R, I, O, F, E>,
-    select_input: Select,
-    build_patch: Option<Arc<BuildPatch<R, O, E>>>,
-}
-
 impl<R, I, O, F, E, Select> StepNode<R, I, O, F, E, Select> {
     /// Creates a dynamic node from a typed step and input selector.
     pub fn new(step: Step<R, I, O, F, E>, select_input: Select) -> Self {
@@ -1119,4 +1096,27 @@ impl<R, I, O, E, Select> StepNode<R, I, O, NeverFinding, E, Select> {
     pub fn without_findings(step: Step<R, I, O, NeverFinding, E>, select_input: Select) -> Self {
         Self::new(step, select_input)
     }
+}
+
+fn encode_step_report<F>(report: &StepReport<F>) -> Result<StepReport<Value>, serde_json::Error>
+where
+    F: Serialize + Clone,
+{
+    let attempts = report
+        .attempts()
+        .iter()
+        .map(|attempt| {
+            Ok(AttemptReport {
+                findings: attempt
+                    .findings
+                    .iter()
+                    .cloned()
+                    .map(serde_json::to_value)
+                    .collect::<Result<Vec<_>, _>>()?,
+                accepted: attempt.accepted,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(StepReport::new(attempts))
 }

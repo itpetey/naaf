@@ -20,10 +20,41 @@ use crate::{
     task::Task,
 };
 
-type Runner<R, I, O, F, E> = dyn for<'a> Fn(&'a R, StepInput<I>) -> LocalBoxFuture<'a, Result<Traced<O, F>, StepError<F, E>>>
-    + 'static;
+/// Builder alias used after the step's public finding type has been selected.
+pub type BoundStepBuilder<R, I, A, S, F, E> = StepBuilder<R, I, A, S, F, E, FindingBound>;
+/// Builder alias used before the step's public finding type has been selected.
+pub type OpenStepBuilder<R, I, A, S, E> = StepBuilder<R, I, A, S, (), E, FindingOpen>;
+type BuilderFor<T> = OpenStepBuilder<
+    <T as Task>::Runtime,
+    <T as Task>::Input,
+    <T as Task>::Output,
+    <T as Task>::Output,
+    <T as Task>::Error,
+>;
+type BuilderMarker<R, I, A, S, F, E, State> = PhantomData<fn() -> (R, I, A, S, F, E, State)>;
 type PipelineRunner<R, A, S, F, E> =
     dyn for<'a> Fn(&'a R, A) -> LocalBoxFuture<'a, Result<(S, Vec<F>), E>> + 'static;
+type Runner<R, I, O, F, E> = dyn for<'a> Fn(&'a R, StepInput<I>) -> LocalBoxFuture<'a, Result<Traced<O, F>, StepError<F, E>>>
+    + 'static;
+
+/// A composable workflow node with a local task-check-repair loop.
+pub struct Step<R, I, O, F, E> {
+    runner: Arc<Runner<R, I, O, F, E>>,
+}
+
+/// Builder for configuring a step's checks, materialisation, and repair loop.
+pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
+    task_name: &'static str,
+    task_label: Option<Cow<'static, str>>,
+    task: Arc<dyn Task<Runtime = R, Input = I, Output = A, Error = E>>,
+    pipeline: ValidationPipeline<R, A, S, F, E>,
+    repair: Option<
+        Arc<dyn RepairPlanner<Runtime = R, Input = I, Artefact = A, Finding = F, Error = E>>,
+    >,
+    retry_policy: RetryPolicy,
+    step_checkpointer: Option<Arc<dyn StepCheckpointer>>,
+    marker: BuilderMarker<R, I, A, S, F, E, State>,
+}
 
 enum StepInput<I> {
     Fresh {
@@ -34,27 +65,6 @@ enum StepInput<I> {
         checkpoint: StepCheckpoint,
     },
 }
-type BuilderMarker<R, I, A, S, F, E, State> = PhantomData<fn() -> (R, I, A, S, F, E, State)>;
-type BuilderFor<T> = OpenStepBuilder<
-    <T as Task>::Runtime,
-    <T as Task>::Input,
-    <T as Task>::Output,
-    <T as Task>::Output,
-    <T as Task>::Error,
->;
-
-/// A composable workflow node with a local task-check-repair loop.
-pub struct Step<R, I, O, F, E> {
-    runner: Arc<Runner<R, I, O, F, E>>,
-}
-
-impl<R, I, O, F, E> Clone for Step<R, I, O, F, E> {
-    fn clone(&self) -> Self {
-        Self {
-            runner: self.runner.clone(),
-        }
-    }
-}
 
 /// Marker state used before a builder has bound its public finding type.
 pub struct FindingOpen;
@@ -62,11 +72,29 @@ pub struct FindingOpen;
 /// Marker state used after a builder has bound its public finding type.
 pub struct FindingBound;
 
-/// Builder alias used before the step's public finding type has been selected.
-pub type OpenStepBuilder<R, I, A, S, E> = StepBuilder<R, I, A, S, (), E, FindingOpen>;
+/// Identifies the subsystem that produced a system-level step error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemStage {
+    /// The task itself failed to execute.
+    Task,
+    /// A check or materialiser failed to execute.
+    Validation,
+    /// The repair planner failed to produce a new input.
+    Repair,
+}
 
-/// Builder alias used after the step's public finding type has been selected.
-pub type BoundStepBuilder<R, I, A, S, F, E> = StepBuilder<R, I, A, S, F, E, FindingBound>;
+/// Errors returned while running a step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StepError<F, E> {
+    /// An unrecoverable infrastructure error occurred.
+    System { stage: SystemStage, error: E },
+    /// The step exhausted retries or had no repair planner to continue.
+    Rejected(StepReport<F>),
+}
+
+struct ValidationPipeline<R, A, S, F, E> {
+    run: Arc<PipelineRunner<R, A, S, F, E>>,
+}
 
 impl Step<(), (), (), (), ()> {
     /// Starts building a step around the given task.
@@ -100,6 +128,14 @@ impl Step<(), (), (), (), ()> {
         F: Fn(&R, I) -> LocalBoxFuture<'_, Result<O, E>> + 'static,
     {
         Step::builder(crate::adaptor::TaskFn::new(f)).build()
+    }
+}
+
+impl<R, I, O, F, E> Clone for Step<R, I, O, F, E> {
+    fn clone(&self) -> Self {
+        Self {
+            runner: self.runner.clone(),
+        }
     }
 }
 
@@ -335,68 +371,6 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
             }),
         }
     }
-}
-
-fn build_step_checkpoint<I, A, F>(
-    initial_input: &Value,
-    current_input: &I,
-    repair_attempts: &[Attempt<I, A, F>],
-    report_attempts: &[AttemptReport<F>],
-    retry_policy: RetryPolicy,
-) -> StepCheckpoint
-where
-    I: Serialize,
-    A: Serialize,
-    F: Serialize + Clone,
-{
-    let report_attempts: Vec<crate::repair::AttemptReport<Value>> = report_attempts
-        .iter()
-        .map(|ar| crate::repair::AttemptReport {
-            findings: ar
-                .findings
-                .iter()
-                .cloned()
-                .map(|f| serde_json::to_value(f).unwrap_or(Value::Null))
-                .collect(),
-            accepted: ar.accepted,
-        })
-        .collect();
-
-    let repair_attempts: Vec<AttemptCheckpoint> = repair_attempts
-        .iter()
-        .map(|a| AttemptCheckpoint {
-            input: serde_json::to_value(&a.input).unwrap_or(Value::Null),
-            artefact: serde_json::to_value(&a.artefact).unwrap_or(Value::Null),
-            findings: a
-                .findings
-                .iter()
-                .cloned()
-                .map(|f| serde_json::to_value(f).unwrap_or(Value::Null))
-                .collect(),
-        })
-        .collect();
-
-    StepCheckpoint {
-        initial_input: initial_input.clone(),
-        current_input: serde_json::to_value(current_input).unwrap_or(Value::Null),
-        repair_attempts,
-        report_attempts,
-        retry_policy,
-    }
-}
-
-/// Builder for configuring a step's checks, materialisation, and repair loop.
-pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
-    task_name: &'static str,
-    task_label: Option<Cow<'static, str>>,
-    task: Arc<dyn Task<Runtime = R, Input = I, Output = A, Error = E>>,
-    pipeline: ValidationPipeline<R, A, S, F, E>,
-    repair: Option<
-        Arc<dyn RepairPlanner<Runtime = R, Input = I, Artefact = A, Finding = F, Error = E>>,
-    >,
-    retry_policy: RetryPolicy,
-    step_checkpointer: Option<Arc<dyn StepCheckpointer>>,
-    marker: BuilderMarker<R, I, A, S, F, E, State>,
 }
 
 impl<R, I, A, S, E> OpenStepBuilder<R, I, A, S, E>
@@ -989,26 +963,6 @@ where
     }
 }
 
-/// Identifies the subsystem that produced a system-level step error.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SystemStage {
-    /// The task itself failed to execute.
-    Task,
-    /// A check or materialiser failed to execute.
-    Validation,
-    /// The repair planner failed to produce a new input.
-    Repair,
-}
-
-/// Errors returned while running a step.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StepError<F, E> {
-    /// An unrecoverable infrastructure error occurred.
-    System { stage: SystemStage, error: E },
-    /// The step exhausted retries or had no repair planner to continue.
-    Rejected(StepReport<F>),
-}
-
 impl<F, E> Display for StepError<F, E>
 where
     E: Display,
@@ -1040,10 +994,6 @@ where
     F: Debug,
     E: std::error::Error + 'static,
 {
-}
-
-struct ValidationPipeline<R, A, S, F, E> {
-    run: Arc<PipelineRunner<R, A, S, F, E>>,
 }
 
 impl<R, A, S, F, E> Clone for ValidationPipeline<R, A, S, F, E> {
@@ -1194,6 +1144,54 @@ where
                 })
             }),
         }
+    }
+}
+
+fn build_step_checkpoint<I, A, F>(
+    initial_input: &Value,
+    current_input: &I,
+    repair_attempts: &[Attempt<I, A, F>],
+    report_attempts: &[AttemptReport<F>],
+    retry_policy: RetryPolicy,
+) -> StepCheckpoint
+where
+    I: Serialize,
+    A: Serialize,
+    F: Serialize + Clone,
+{
+    let report_attempts: Vec<crate::repair::AttemptReport<Value>> = report_attempts
+        .iter()
+        .map(|ar| crate::repair::AttemptReport {
+            findings: ar
+                .findings
+                .iter()
+                .cloned()
+                .map(|f| serde_json::to_value(f).unwrap_or(Value::Null))
+                .collect(),
+            accepted: ar.accepted,
+        })
+        .collect();
+
+    let repair_attempts: Vec<AttemptCheckpoint> = repair_attempts
+        .iter()
+        .map(|a| AttemptCheckpoint {
+            input: serde_json::to_value(&a.input).unwrap_or(Value::Null),
+            artefact: serde_json::to_value(&a.artefact).unwrap_or(Value::Null),
+            findings: a
+                .findings
+                .iter()
+                .cloned()
+                .map(|f| serde_json::to_value(f).unwrap_or(Value::Null))
+                .collect(),
+        })
+        .collect();
+
+    StepCheckpoint {
+        initial_input: initial_input.clone(),
+        current_input: serde_json::to_value(current_input).unwrap_or(Value::Null),
+        repair_attempts,
+        report_attempts,
+        retry_policy,
     }
 }
 

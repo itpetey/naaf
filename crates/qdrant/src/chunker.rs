@@ -3,6 +3,24 @@ use std::path::Path;
 use crate::error::QdrantError;
 use crate::payload::SourceType;
 
+/// Splits source content into one or more semantically useful chunks.
+pub trait Chunker {
+    /// Chunks `content` using the supplied source metadata.
+    fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError>;
+}
+
+/// Convenience enum that selects an appropriate chunker for a source.
+pub enum ContentChunker {
+    /// Markdown-oriented chunker.
+    Markdown(MarkdownChunker),
+    /// Source-code chunker.
+    Code(CodeChunker),
+    /// Conversation transcript chunker.
+    Conversation(ConversationChunker),
+    /// PDF chunker.
+    Pdf(PdfChunker),
+}
+
 /// A chunk of source text ready for embedding and storage.
 #[derive(Clone, Debug)]
 pub struct Chunk {
@@ -10,6 +28,11 @@ pub struct Chunk {
     pub text: String,
     /// Metadata describing the chunk's origin.
     pub metadata: ChunkMetadata,
+}
+
+/// Extracts PDF text and chunks it using markdown-style splitting.
+pub struct PdfChunker {
+    inner: MarkdownChunker,
 }
 
 /// Metadata attached to one chunk of content.
@@ -31,12 +54,6 @@ pub struct ChunkMetadata {
     pub heading: Option<String>,
 }
 
-/// Splits source content into one or more semantically useful chunks.
-pub trait Chunker {
-    /// Chunks `content` using the supplied source metadata.
-    fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError>;
-}
-
 /// Minimal information required to chunk and label a source.
 #[derive(Clone, Debug)]
 pub struct SourceInfo {
@@ -48,6 +65,75 @@ pub struct SourceInfo {
     pub language: Option<String>,
     /// Human-readable title derived from the source.
     pub title: Option<String>,
+}
+
+/// Chunks markdown-like prose by heading with optional overlap.
+pub struct MarkdownChunker {
+    max_chunk_size: usize,
+    overlap: usize,
+}
+
+struct Section {
+    heading: Option<String>,
+    content: String,
+}
+
+/// Chunks source code around common declaration boundaries.
+pub struct CodeChunker {
+    max_chunk_size: usize,
+}
+
+/// Chunks JSON conversation transcripts by grouped messages.
+pub struct ConversationChunker {
+    max_chunk_size: usize,
+}
+
+impl Default for PdfChunker {
+    fn default() -> Self {
+        Self::new(1000, 200)
+    }
+}
+
+impl MarkdownChunker {
+    /// Creates a markdown chunker with the given size and overlap settings.
+    pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
+        Self {
+            max_chunk_size,
+            overlap,
+        }
+    }
+}
+
+impl Default for MarkdownChunker {
+    fn default() -> Self {
+        Self::new(1000, 200)
+    }
+}
+
+impl CodeChunker {
+    /// Creates a code chunker with the given maximum chunk size.
+    pub fn new(max_chunk_size: usize) -> Self {
+        Self { max_chunk_size }
+    }
+}
+
+impl Default for CodeChunker {
+    fn default() -> Self {
+        Self::new(1500)
+    }
+}
+
+impl ConversationChunker {
+    /// Creates a conversation chunker with the given maximum chunk size.
+    pub fn new(max_chunk_size: usize) -> Self {
+        Self { max_chunk_size }
+    }
+}
+
+impl Default for ConversationChunker {
+    fn default() -> Self {
+        Self::new(2000)
+    }
 }
 
 impl SourceInfo {
@@ -82,50 +168,6 @@ impl SourceInfo {
             language: None,
             title,
         }
-    }
-}
-
-fn detect_source_type(path: &Path) -> SourceType {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("pdf") => SourceType::Paper,
-        Some("md" | "txt") => SourceType::Markdown,
-        Some("json") => SourceType::Conversation,
-        Some("rs" | "py" | "ts" | "js" | "go" | "java" | "c" | "cpp" | "h") => SourceType::Code,
-        _ => SourceType::PlainText,
-    }
-}
-
-fn detect_language(path: &Path) -> Option<String> {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("rs") => Some("rust".to_string()),
-        Some("py") => Some("python".to_string()),
-        Some("ts") => Some("typescript".to_string()),
-        Some("js") => Some("javascript".to_string()),
-        Some("go") => Some("go".to_string()),
-        Some("java") => Some("java".to_string()),
-        _ => None,
-    }
-}
-
-/// Chunks markdown-like prose by heading with optional overlap.
-pub struct MarkdownChunker {
-    max_chunk_size: usize,
-    overlap: usize,
-}
-
-impl MarkdownChunker {
-    /// Creates a markdown chunker with the given size and overlap settings.
-    pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
-        Self {
-            max_chunk_size,
-            overlap,
-        }
-    }
-}
-
-impl Default for MarkdownChunker {
-    fn default() -> Self {
-        Self::new(1000, 200)
     }
 }
 
@@ -183,59 +225,6 @@ impl Chunker for MarkdownChunker {
         }
 
         Ok(chunks)
-    }
-}
-
-struct Section {
-    heading: Option<String>,
-    content: String,
-}
-
-fn split_by_headings(content: &str) -> Vec<Section> {
-    let mut sections = Vec::new();
-    let mut current_heading: Option<String> = None;
-    let mut current_content = String::new();
-
-    for line in content.lines() {
-        if line.starts_with('#') {
-            if !current_content.trim().is_empty() || current_heading.is_some() {
-                sections.push(Section {
-                    heading: current_heading.take(),
-                    content: std::mem::take(&mut current_content),
-                });
-            }
-            current_heading = Some(line.trim_start_matches('#').trim().to_string());
-        } else {
-            current_content.push_str(line);
-            current_content.push('\n');
-        }
-    }
-
-    if !current_content.trim().is_empty() || current_heading.is_some() {
-        sections.push(Section {
-            heading: current_heading,
-            content: current_content,
-        });
-    }
-
-    sections
-}
-
-/// Chunks source code around common declaration boundaries.
-pub struct CodeChunker {
-    max_chunk_size: usize,
-}
-
-impl CodeChunker {
-    /// Creates a code chunker with the given maximum chunk size.
-    pub fn new(max_chunk_size: usize) -> Self {
-        Self { max_chunk_size }
-    }
-}
-
-impl Default for CodeChunker {
-    fn default() -> Self {
-        Self::new(1500)
     }
 }
 
@@ -303,24 +292,6 @@ impl Chunker for CodeChunker {
     }
 }
 
-/// Chunks JSON conversation transcripts by grouped messages.
-pub struct ConversationChunker {
-    max_chunk_size: usize,
-}
-
-impl ConversationChunker {
-    /// Creates a conversation chunker with the given maximum chunk size.
-    pub fn new(max_chunk_size: usize) -> Self {
-        Self { max_chunk_size }
-    }
-}
-
-impl Default for ConversationChunker {
-    fn default() -> Self {
-        Self::new(2000)
-    }
-}
-
 impl Chunker for ConversationChunker {
     fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError> {
         let messages: Vec<crate::conversation::Message> = serde_json::from_str(content)
@@ -370,11 +341,6 @@ impl Chunker for ConversationChunker {
     }
 }
 
-/// Extracts PDF text and chunks it using markdown-style splitting.
-pub struct PdfChunker {
-    inner: MarkdownChunker,
-}
-
 impl PdfChunker {
     /// Creates a PDF chunker backed by an inner markdown chunker.
     pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
@@ -390,12 +356,6 @@ impl PdfChunker {
     }
 }
 
-impl Default for PdfChunker {
-    fn default() -> Self {
-        Self::new(1000, 200)
-    }
-}
-
 impl Chunker for PdfChunker {
     fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError> {
         let pdf_source_info = SourceInfo {
@@ -404,18 +364,6 @@ impl Chunker for PdfChunker {
         };
         self.inner.chunk(content, &pdf_source_info)
     }
-}
-
-/// Convenience enum that selects an appropriate chunker for a source.
-pub enum ContentChunker {
-    /// Markdown-oriented chunker.
-    Markdown(MarkdownChunker),
-    /// Source-code chunker.
-    Code(CodeChunker),
-    /// Conversation transcript chunker.
-    Conversation(ConversationChunker),
-    /// PDF chunker.
-    Pdf(PdfChunker),
 }
 
 impl ContentChunker {
@@ -442,4 +390,56 @@ impl Chunker for ContentChunker {
             Self::Pdf(c) => c.chunk(content, source_info),
         }
     }
+}
+
+fn detect_language(path: &Path) -> Option<String> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("rs") => Some("rust".to_string()),
+        Some("py") => Some("python".to_string()),
+        Some("ts") => Some("typescript".to_string()),
+        Some("js") => Some("javascript".to_string()),
+        Some("go") => Some("go".to_string()),
+        Some("java") => Some("java".to_string()),
+        _ => None,
+    }
+}
+
+fn detect_source_type(path: &Path) -> SourceType {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("pdf") => SourceType::Paper,
+        Some("md" | "txt") => SourceType::Markdown,
+        Some("json") => SourceType::Conversation,
+        Some("rs" | "py" | "ts" | "js" | "go" | "java" | "c" | "cpp" | "h") => SourceType::Code,
+        _ => SourceType::PlainText,
+    }
+}
+
+fn split_by_headings(content: &str) -> Vec<Section> {
+    let mut sections = Vec::new();
+    let mut current_heading: Option<String> = None;
+    let mut current_content = String::new();
+
+    for line in content.lines() {
+        if line.starts_with('#') {
+            if !current_content.trim().is_empty() || current_heading.is_some() {
+                sections.push(Section {
+                    heading: current_heading.take(),
+                    content: std::mem::take(&mut current_content),
+                });
+            }
+            current_heading = Some(line.trim_start_matches('#').trim().to_string());
+        } else {
+            current_content.push_str(line);
+            current_content.push('\n');
+        }
+    }
+
+    if !current_content.trim().is_empty() || current_heading.is_some() {
+        sections.push(Section {
+            heading: current_heading,
+            content: current_content,
+        });
+    }
+
+    sections
 }

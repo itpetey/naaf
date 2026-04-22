@@ -10,13 +10,12 @@ use crate::{
     message::CompletionRequest,
 };
 
+type AdapterFuture<'a, C, Output, BuildError, ToolError, DecodeError> =
+    LocalBoxFuture<'a, AdapterResult<C, Output, BuildError, ToolError, DecodeError>>;
 type AdapterMarker<Input, Output, BuildError, DecodeError> =
     PhantomData<fn(Input) -> Result<Output, (BuildError, DecodeError)>>;
 type AdapterResult<C, Output, BuildError, ToolError, DecodeError> =
     Result<Output, AdapterError<BuildError, <C as LlmClient>::Error, ToolError, DecodeError>>;
-type AdapterFuture<'a, C, Output, BuildError, ToolError, DecodeError> =
-    LocalBoxFuture<'a, AdapterResult<C, Output, BuildError, ToolError, DecodeError>>;
-type RepairAttempts<Input, Artefact, Finding> = Vec<Attempt<Input, Artefact, Finding>>;
 type RepairAdapter<
     C,
     R,
@@ -39,12 +38,95 @@ type RepairAdapter<
     DecodeError,
     ToolError,
 >;
+type RepairAttempts<Input, Artefact, Finding> = Vec<Attempt<Input, Artefact, Finding>>;
 
 struct LlmRoleAdapter<C, R, Build, Decode, Input, Output, BuildError, DecodeError, ToolError> {
     executor: Arc<Executor<C, R, ToolError>>,
     build_request: Build,
     decode_output: Decode,
     marker: AdapterMarker<Input, Output, BuildError, DecodeError>,
+}
+
+/// A generic `naaf_core::Task` backed by an LLM executor.
+pub struct LlmTask<
+    C,
+    R,
+    Build,
+    Decode,
+    Input,
+    Output,
+    BuildError,
+    DecodeError,
+    ToolError = Infallible,
+> {
+    adapter: LlmRoleAdapter<C, R, Build, Decode, Input, Output, BuildError, DecodeError, ToolError>,
+}
+
+/// A generic `naaf_core::Check` backed by an LLM executor.
+pub struct LlmCheck<
+    C,
+    R,
+    Build,
+    Decode,
+    Subject,
+    Finding,
+    BuildError,
+    DecodeError,
+    ToolError = Infallible,
+> {
+    adapter: LlmRoleAdapter<
+        C,
+        R,
+        Build,
+        Decode,
+        Subject,
+        Vec<Finding>,
+        BuildError,
+        DecodeError,
+        ToolError,
+    >,
+}
+
+/// A generic `naaf_core::Materialiser` backed by an LLM executor.
+pub struct LlmMaterialiser<
+    C,
+    R,
+    Build,
+    Decode,
+    Input,
+    Output,
+    BuildError,
+    DecodeError,
+    ToolError = Infallible,
+> {
+    adapter: LlmRoleAdapter<C, R, Build, Decode, Input, Output, BuildError, DecodeError, ToolError>,
+}
+
+/// A generic `naaf_core::RepairPlanner` backed by an LLM executor.
+pub struct LlmRepairPlanner<
+    C,
+    R,
+    Build,
+    Decode,
+    Input,
+    Artefact,
+    Finding,
+    BuildError,
+    DecodeError,
+    ToolError = Infallible,
+> {
+    adapter: RepairAdapter<
+        C,
+        R,
+        Build,
+        Decode,
+        Input,
+        Artefact,
+        Finding,
+        BuildError,
+        DecodeError,
+        ToolError,
+    >,
 }
 
 impl<C, R, Build, Decode, Input, Output, BuildError, DecodeError, ToolError>
@@ -94,21 +176,6 @@ where
             (self.decode_output)(outcome).map_err(AdapterError::Decode)
         })
     }
-}
-
-/// A generic `naaf_core::Task` backed by an LLM executor.
-pub struct LlmTask<
-    C,
-    R,
-    Build,
-    Decode,
-    Input,
-    Output,
-    BuildError,
-    DecodeError,
-    ToolError = Infallible,
-> {
-    adapter: LlmRoleAdapter<C, R, Build, Decode, Input, Output, BuildError, DecodeError, ToolError>,
 }
 
 impl<C, R, Build, Decode, Input, Output, BuildError, DecodeError>
@@ -180,31 +247,6 @@ where
     }
 }
 
-/// A generic `naaf_core::Check` backed by an LLM executor.
-pub struct LlmCheck<
-    C,
-    R,
-    Build,
-    Decode,
-    Subject,
-    Finding,
-    BuildError,
-    DecodeError,
-    ToolError = Infallible,
-> {
-    adapter: LlmRoleAdapter<
-        C,
-        R,
-        Build,
-        Decode,
-        Subject,
-        Vec<Finding>,
-        BuildError,
-        DecodeError,
-        ToolError,
-    >,
-}
-
 impl<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError>
     LlmCheck<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError, Infallible>
 {
@@ -274,21 +316,6 @@ where
     }
 }
 
-/// A generic `naaf_core::Materialiser` backed by an LLM executor.
-pub struct LlmMaterialiser<
-    C,
-    R,
-    Build,
-    Decode,
-    Input,
-    Output,
-    BuildError,
-    DecodeError,
-    ToolError = Infallible,
-> {
-    adapter: LlmRoleAdapter<C, R, Build, Decode, Input, Output, BuildError, DecodeError, ToolError>,
-}
-
 impl<C, R, Build, Decode, Input, Output, BuildError, DecodeError>
     LlmMaterialiser<C, R, Build, Decode, Input, Output, BuildError, DecodeError, Infallible>
 {
@@ -356,33 +383,6 @@ where
     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
         self.adapter.execute(runtime, input)
     }
-}
-
-/// A generic `naaf_core::RepairPlanner` backed by an LLM executor.
-pub struct LlmRepairPlanner<
-    C,
-    R,
-    Build,
-    Decode,
-    Input,
-    Artefact,
-    Finding,
-    BuildError,
-    DecodeError,
-    ToolError = Infallible,
-> {
-    adapter: RepairAdapter<
-        C,
-        R,
-        Build,
-        Decode,
-        Input,
-        Artefact,
-        Finding,
-        BuildError,
-        DecodeError,
-        ToolError,
-    >,
 }
 
 impl<C, R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>

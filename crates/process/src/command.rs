@@ -17,6 +17,14 @@ pub struct ProcessCommand {
     env: Vec<(OsString, OsString)>,
 }
 
+/// The collected process output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessOutput {
+    pub status: ExitStatus,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
 impl ProcessCommand {
     /// Creates a command that invokes a program directly.
     pub fn new(program: impl Into<OsString>) -> Self {
@@ -98,14 +106,6 @@ impl ProcessCommand {
             })
         }
     }
-}
-
-/// The collected process output.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessOutput {
-    pub status: ExitStatus,
-    pub stdout: Vec<u8>,
-    pub stderr: Vec<u8>,
 }
 
 impl From<Output> for ProcessOutput {

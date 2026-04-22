@@ -23,10 +23,6 @@ pub struct QdrantConfig {
     pub api_key: Option<String>,
 }
 
-fn default_collection() -> String {
-    "knowledge".to_string()
-}
-
 #[derive(Debug, Deserialize)]
 pub struct EmbedderConfig {
     #[serde(default = "default_embedder_provider")]
@@ -37,12 +33,38 @@ pub struct EmbedderConfig {
     pub base_url: Option<String>,
 }
 
-fn default_embedder_provider() -> String {
-    "openai".to_string()
+#[derive(Debug, Deserialize, Default)]
+pub struct LlmConfig {
+    #[serde(default = "default_llm_provider")]
+    pub provider: String,
+    #[serde(default = "default_llm_model")]
+    pub model: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
-fn default_embedder_model() -> String {
-    "text-embedding-3-small".to_string()
+#[derive(Debug, Deserialize)]
+pub struct IngestConfig {
+    #[serde(default = "default_true")]
+    pub extract_entities: bool,
+    #[serde(default = "default_true")]
+    pub extract_concepts: bool,
+    #[serde(default = "default_true")]
+    pub extract_comparisons: bool,
+    #[serde(default = "default_chunk_overlap")]
+    pub chunk_overlap: usize,
+    #[serde(default = "default_chunk_size")]
+    pub max_chunk_size: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QueryConfig {
+    #[serde(default = "default_top_k")]
+    pub top_k: usize,
+    #[serde(default = "default_min_score")]
+    pub min_score: f32,
+    #[serde(default)]
+    pub re_ingest_answers: bool,
 }
 
 impl Default for EmbedderConfig {
@@ -61,38 +83,6 @@ impl EmbedderConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct LlmConfig {
-    #[serde(default = "default_llm_provider")]
-    pub provider: String,
-    #[serde(default = "default_llm_model")]
-    pub model: String,
-    #[serde(default)]
-    pub base_url: Option<String>,
-}
-
-fn default_llm_provider() -> String {
-    "openai".to_string()
-}
-
-fn default_llm_model() -> String {
-    "gpt-4o-mini".to_string()
-}
-
-#[derive(Debug, Deserialize)]
-pub struct IngestConfig {
-    #[serde(default = "default_true")]
-    pub extract_entities: bool,
-    #[serde(default = "default_true")]
-    pub extract_concepts: bool,
-    #[serde(default = "default_true")]
-    pub extract_comparisons: bool,
-    #[serde(default = "default_chunk_overlap")]
-    pub chunk_overlap: usize,
-    #[serde(default = "default_chunk_size")]
-    pub max_chunk_size: usize,
-}
-
 impl Default for IngestConfig {
     fn default() -> Self {
         Self {
@@ -105,28 +95,6 @@ impl Default for IngestConfig {
     }
 }
 
-fn default_true() -> bool {
-    true
-}
-
-fn default_chunk_overlap() -> usize {
-    200
-}
-
-fn default_chunk_size() -> usize {
-    1000
-}
-
-#[derive(Debug, Deserialize)]
-pub struct QueryConfig {
-    #[serde(default = "default_top_k")]
-    pub top_k: usize,
-    #[serde(default = "default_min_score")]
-    pub min_score: f32,
-    #[serde(default)]
-    pub re_ingest_answers: bool,
-}
-
 impl Default for QueryConfig {
     fn default() -> Self {
         Self {
@@ -135,14 +103,6 @@ impl Default for QueryConfig {
             re_ingest_answers: false,
         }
     }
-}
-
-fn default_top_k() -> usize {
-    10
-}
-
-fn default_min_score() -> f32 {
-    0.7
 }
 
 impl Config {
@@ -170,4 +130,44 @@ impl Config {
             query: QueryConfig::default(),
         }
     }
+}
+
+fn default_chunk_overlap() -> usize {
+    200
+}
+
+fn default_chunk_size() -> usize {
+    1000
+}
+
+fn default_collection() -> String {
+    "knowledge".to_string()
+}
+
+fn default_embedder_model() -> String {
+    "text-embedding-3-small".to_string()
+}
+
+fn default_embedder_provider() -> String {
+    "openai".to_string()
+}
+
+fn default_llm_model() -> String {
+    "gpt-4o-mini".to_string()
+}
+
+fn default_llm_provider() -> String {
+    "openai".to_string()
+}
+
+fn default_min_score() -> f32 {
+    0.7
+}
+
+fn default_top_k() -> usize {
+    10
+}
+
+fn default_true() -> bool {
+    true
 }

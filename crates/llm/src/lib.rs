@@ -297,6 +297,10 @@
 //! assert!(traced.report().attempts()[0].accepted());
 //! ```
 
+#[cfg(feature = "openai")]
+pub use crate::openai::{OpenAiClient, OpenAiConfig, OpenAiError, OpenAiStreamObserver};
+#[cfg(feature = "web-search")]
+pub use crate::web_search::{WebSearchError, WebSearchParams, WebSearchTool};
 pub use crate::{
     agent::LlmAgent,
     client::LlmClient,
@@ -320,11 +324,6 @@ pub use crate::{
     task::{LlmCheck, LlmMaterialiser, LlmRepairPlanner, LlmTask},
     tool::{RegisterToolError, Tool, ToolCallError, ToolRegistry},
 };
-
-#[cfg(feature = "openai")]
-pub use crate::openai::{OpenAiClient, OpenAiConfig, OpenAiError, OpenAiStreamObserver};
-#[cfg(feature = "web-search")]
-pub use crate::web_search::{WebSearchError, WebSearchParams, WebSearchTool};
 
 mod agent;
 mod client;

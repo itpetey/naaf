@@ -5,11 +5,10 @@ use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, Task};
 
 use crate::{AdapterError, ProcessCommand, ProcessOutput};
 
-type AdapterMarker<Input, Output, BuildError, DecodeError> =
-    PhantomData<fn(Input) -> Result<Output, (BuildError, DecodeError)>>;
 type AdapterFuture<'a, Output, BuildError, DecodeError> =
     LocalBoxFuture<'a, Result<Output, AdapterError<BuildError, DecodeError>>>;
-type RepairAttempts<Input, Artefact, Finding> = Vec<Attempt<Input, Artefact, Finding>>;
+type AdapterMarker<Input, Output, BuildError, DecodeError> =
+    PhantomData<fn(Input) -> Result<Output, (BuildError, DecodeError)>>;
 type RepairAdapter<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError> =
     ProcessRoleAdapter<
         R,
@@ -20,12 +19,34 @@ type RepairAdapter<R, Build, Decode, Input, Artefact, Finding, BuildError, Decod
         BuildError,
         DecodeError,
     >;
+type RepairAttempts<Input, Artefact, Finding> = Vec<Attempt<Input, Artefact, Finding>>;
 
 struct ProcessRoleAdapter<R, Build, Decode, Input, Output, BuildError, DecodeError> {
     build_command: Build,
     decode_output: Decode,
     marker: AdapterMarker<Input, Output, BuildError, DecodeError>,
     runtime: PhantomData<fn(&R)>,
+}
+
+/// A generic `naaf_core::Task` backed by a local process.
+pub struct ProcessTask<R, Build, Decode, Input, Output, BuildError, DecodeError> {
+    adapter: ProcessRoleAdapter<R, Build, Decode, Input, Output, BuildError, DecodeError>,
+}
+
+/// A generic `naaf_core::Check` backed by a local process.
+pub struct ProcessCheck<R, Build, Decode, Subject, Finding, BuildError, DecodeError> {
+    adapter: ProcessRoleAdapter<R, Build, Decode, Subject, Vec<Finding>, BuildError, DecodeError>,
+}
+
+/// A generic `naaf_core::Materialiser` backed by a local process.
+pub struct ProcessMaterialiser<R, Build, Decode, Input, Output, BuildError, DecodeError> {
+    adapter: ProcessRoleAdapter<R, Build, Decode, Input, Output, BuildError, DecodeError>,
+}
+
+/// A generic `naaf_core::RepairPlanner` backed by a local process.
+pub struct ProcessRepairPlanner<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
+{
+    adapter: RepairAdapter<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>,
 }
 
 impl<R, Build, Decode, Input, Output, BuildError, DecodeError>
@@ -58,11 +79,6 @@ where
             (self.decode_output)(output).map_err(AdapterError::Decode)
         })
     }
-}
-
-/// A generic `naaf_core::Task` backed by a local process.
-pub struct ProcessTask<R, Build, Decode, Input, Output, BuildError, DecodeError> {
-    adapter: ProcessRoleAdapter<R, Build, Decode, Input, Output, BuildError, DecodeError>,
 }
 
 impl<R, Build, Decode, Input, Output, DecodeError>
@@ -110,11 +126,6 @@ where
     }
 }
 
-/// A generic `naaf_core::Check` backed by a local process.
-pub struct ProcessCheck<R, Build, Decode, Subject, Finding, BuildError, DecodeError> {
-    adapter: ProcessRoleAdapter<R, Build, Decode, Subject, Vec<Finding>, BuildError, DecodeError>,
-}
-
 impl<R, Build, Decode, Subject, Finding, DecodeError>
     ProcessCheck<R, Build, Decode, Subject, Finding, Infallible, DecodeError>
 {
@@ -160,11 +171,6 @@ where
     }
 }
 
-/// A generic `naaf_core::Materialiser` backed by a local process.
-pub struct ProcessMaterialiser<R, Build, Decode, Input, Output, BuildError, DecodeError> {
-    adapter: ProcessRoleAdapter<R, Build, Decode, Input, Output, BuildError, DecodeError>,
-}
-
 impl<R, Build, Decode, Input, Output, DecodeError>
     ProcessMaterialiser<R, Build, Decode, Input, Output, Infallible, DecodeError>
 {
@@ -208,12 +214,6 @@ where
     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
         self.adapter.execute(runtime, input)
     }
-}
-
-/// A generic `naaf_core::RepairPlanner` backed by a local process.
-pub struct ProcessRepairPlanner<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
-{
-    adapter: RepairAdapter<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>,
 }
 
 impl<R, Build, Decode, Input, Artefact, Finding, DecodeError>

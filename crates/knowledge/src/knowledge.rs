@@ -4,39 +4,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Semantic type assigned to a knowledge entry.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum EntityType {
-    /// A general concept or topic.
-    Concept,
-    /// A concrete entity such as a person, system, or component.
-    Entity,
-    /// A summary distilled from source material.
-    Summary,
-    /// A comparison between multiple entities or concepts.
-    Comparison,
-    /// An analytical conclusion or interpretation.
-    Analysis,
-    /// A question-and-answer style entry.
-    QuestionAnswer,
-    /// Raw source material stored directly.
-    Source,
-}
-
-impl fmt::Display for EntityType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EntityType::Concept => write!(f, "concept"),
-            EntityType::Entity => write!(f, "entity"),
-            EntityType::Summary => write!(f, "summary"),
-            EntityType::Comparison => write!(f, "comparison"),
-            EntityType::Analysis => write!(f, "analysis"),
-            EntityType::QuestionAnswer => write!(f, "qa"),
-            EntityType::Source => write!(f, "source"),
-        }
-    }
-}
-
 /// One knowledge entry stored or exchanged by the knowledge layer.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KnowledgeEntry {
@@ -60,6 +27,89 @@ pub struct KnowledgeEntry {
     pub created_at: DateTime<Utc>,
     /// Last update timestamp in UTC.
     pub updated_at: DateTime<Utc>,
+}
+
+/// One issue reported by the collection linter.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LintIssue {
+    /// Category of issue that was detected.
+    pub issue_type: LintIssueType,
+    /// Human-readable explanation of the issue.
+    pub description: String,
+    /// Identifiers of entries involved in the issue.
+    pub entry_ids: Vec<Uuid>,
+    /// Optional remediation suggestion.
+    pub suggestion: Option<String>,
+}
+
+/// Aggregate report returned by collection linting.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LintReport {
+    /// Issues found during linting.
+    pub issues: Vec<LintIssue>,
+    /// Number of entries inspected.
+    pub entries_scanned: usize,
+}
+
+/// Semantic type assigned to a knowledge entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum EntityType {
+    /// A general concept or topic.
+    Concept,
+    /// A concrete entity such as a person, system, or component.
+    Entity,
+    /// A summary distilled from source material.
+    Summary,
+    /// A comparison between multiple entities or concepts.
+    Comparison,
+    /// An analytical conclusion or interpretation.
+    Analysis,
+    /// A question-and-answer style entry.
+    QuestionAnswer,
+    /// Raw source material stored directly.
+    Source,
+}
+
+/// Summary of one ingest operation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IngestReport {
+    /// Source point identifiers created during ingestion.
+    pub source_ids: Vec<Uuid>,
+    /// Higher-level knowledge identifiers created during ingestion.
+    pub knowledge_ids: Vec<Uuid>,
+    /// Number of source chunks written.
+    pub chunks_count: usize,
+    /// Number of derived knowledge entries written.
+    pub entries_count: usize,
+}
+
+/// Category of lint issue detected in the collection.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LintIssueType {
+    /// Two or more entries disagree.
+    Contradiction,
+    /// An entry lacks references to the rest of the graph.
+    Orphan,
+    /// An entry appears out of date.
+    Stale,
+    /// An expected cross-reference is missing.
+    MissingCrossReference,
+    /// Supporting data is incomplete or low quality.
+    DataGap,
+}
+
+impl fmt::Display for EntityType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EntityType::Concept => write!(f, "concept"),
+            EntityType::Entity => write!(f, "entity"),
+            EntityType::Summary => write!(f, "summary"),
+            EntityType::Comparison => write!(f, "comparison"),
+            EntityType::Analysis => write!(f, "analysis"),
+            EntityType::QuestionAnswer => write!(f, "qa"),
+            EntityType::Source => write!(f, "source"),
+        }
+    }
 }
 
 impl KnowledgeEntry {
@@ -103,54 +153,4 @@ impl KnowledgeEntry {
         self.confidence = confidence;
         self
     }
-}
-
-/// Summary of one ingest operation.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct IngestReport {
-    /// Source point identifiers created during ingestion.
-    pub source_ids: Vec<Uuid>,
-    /// Higher-level knowledge identifiers created during ingestion.
-    pub knowledge_ids: Vec<Uuid>,
-    /// Number of source chunks written.
-    pub chunks_count: usize,
-    /// Number of derived knowledge entries written.
-    pub entries_count: usize,
-}
-
-/// One issue reported by the collection linter.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LintIssue {
-    /// Category of issue that was detected.
-    pub issue_type: LintIssueType,
-    /// Human-readable explanation of the issue.
-    pub description: String,
-    /// Identifiers of entries involved in the issue.
-    pub entry_ids: Vec<Uuid>,
-    /// Optional remediation suggestion.
-    pub suggestion: Option<String>,
-}
-
-/// Category of lint issue detected in the collection.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum LintIssueType {
-    /// Two or more entries disagree.
-    Contradiction,
-    /// An entry lacks references to the rest of the graph.
-    Orphan,
-    /// An entry appears out of date.
-    Stale,
-    /// An expected cross-reference is missing.
-    MissingCrossReference,
-    /// Supporting data is incomplete or low quality.
-    DataGap,
-}
-
-/// Aggregate report returned by collection linting.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LintReport {
-    /// Issues found during linting.
-    pub issues: Vec<LintIssue>,
-    /// Number of entries inspected.
-    pub entries_scanned: usize,
 }

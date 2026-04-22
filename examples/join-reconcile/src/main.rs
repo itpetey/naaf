@@ -8,6 +8,13 @@ use std::fmt::{Display, Formatter};
 
 use naaf_core::{Step, task_fn};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProjectReport {
+    plan: ProjectPlan,
+    api: ApiDesign,
+    ui: UiDesign,
+}
+
 #[derive(Debug)]
 struct PlannerRuntime;
 
@@ -30,23 +37,16 @@ struct UiDesign {
     components: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ProjectReport {
-    plan: ProjectPlan,
-    api: ApiDesign,
-    ui: UiDesign,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Error;
+
+impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("planner error")
     }
 }
-
-impl std::error::Error for Error {}
 
 #[tokio::main]
 async fn main() {

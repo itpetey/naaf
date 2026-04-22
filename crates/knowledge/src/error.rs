@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+/// Convenience result type used by this crate.
+pub type Result<T> = std::result::Result<T, KnowledgeError>;
+
 /// Errors returned by knowledge ingestion, query, and lint operations.
 #[derive(Error, Debug)]
 pub enum KnowledgeError {
@@ -31,6 +34,3 @@ pub enum KnowledgeError {
     #[error("Qdrant error: {0}")]
     Qdrant(#[from] naaf_qdrant::QdrantError),
 }
-
-/// Convenience result type used by this crate.
-pub type Result<T> = std::result::Result<T, KnowledgeError>;

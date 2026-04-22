@@ -3,32 +3,6 @@ use std::fmt::{Debug, Formatter};
 use futures::future::LocalBoxFuture;
 use serde::{Deserialize, Serialize};
 
-/// One failed step attempt captured for repair planning.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Attempt<I, A, F> {
-    /// The input that produced this attempt.
-    pub input: I,
-    /// The artefact produced by the task before repair.
-    pub artefact: A,
-    /// Findings gathered from checks for this attempt.
-    pub findings: Vec<F>,
-}
-
-impl<I, A, F> Debug for Attempt<I, A, F>
-where
-    I: Debug,
-    A: Debug,
-    F: Debug,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Attempt")
-            .field("input", &self.input)
-            .field("artefact", &self.artefact)
-            .field("findings", &self.findings)
-            .finish()
-    }
-}
-
 /// Produces the next task input from earlier failed attempts.
 pub trait RepairPlanner {
     /// The shared runtime capabilities used by this planner.
@@ -50,10 +24,68 @@ pub trait RepairPlanner {
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>>;
 }
 
+/// One failed step attempt captured for repair planning.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Attempt<I, A, F> {
+    /// The input that produced this attempt.
+    pub input: I,
+    /// The artefact produced by the task before repair.
+    pub artefact: A,
+    /// Findings gathered from checks for this attempt.
+    pub findings: Vec<F>,
+}
+
 /// Configures how many attempts a step may perform before it is rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetryPolicy {
     max_attempts: usize,
+}
+
+/// A lightweight view of one step attempt recorded in a report.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttemptReport<F> {
+    /// Findings produced by checks for this attempt.
+    pub findings: Vec<F>,
+    /// Whether this attempt was accepted and ended the step successfully.
+    pub accepted: bool,
+}
+
+/// A summary of all attempts performed by a step.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepReport<F> {
+    attempts: Vec<AttemptReport<F>>,
+}
+
+/// Successful step output paired with attempt metadata.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Traced<T, F> {
+    output: T,
+    report: StepReport<F>,
+}
+
+/// Placeholder finding type for steps that do not yet bind a finding type.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NeverFinding {}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self::new(1)
+    }
+}
+
+impl<I, A, F> Debug for Attempt<I, A, F>
+where
+    I: Debug,
+    A: Debug,
+    F: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Attempt")
+            .field("input", &self.input)
+            .field("artefact", &self.artefact)
+            .field("findings", &self.findings)
+            .finish()
+    }
 }
 
 impl RetryPolicy {
@@ -70,21 +102,6 @@ impl RetryPolicy {
     pub fn max_attempts(self) -> usize {
         self.max_attempts
     }
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self::new(1)
-    }
-}
-
-/// A lightweight view of one step attempt recorded in a report.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttemptReport<F> {
-    /// Findings produced by checks for this attempt.
-    pub findings: Vec<F>,
-    /// Whether this attempt was accepted and ended the step successfully.
-    pub accepted: bool,
 }
 
 impl<F> AttemptReport<F> {
@@ -104,12 +121,6 @@ where
             .field("accepted", &self.accepted)
             .finish()
     }
-}
-
-/// A summary of all attempts performed by a step.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StepReport<F> {
-    attempts: Vec<AttemptReport<F>>,
 }
 
 impl<F> StepReport<F> {
@@ -144,13 +155,6 @@ where
             .field("attempts", &self.attempts)
             .finish()
     }
-}
-
-/// Successful step output paired with attempt metadata.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Traced<T, F> {
-    output: T,
-    report: StepReport<F>,
 }
 
 impl<T, F> Traced<T, F> {
@@ -192,7 +196,3 @@ where
             .finish()
     }
 }
-
-/// Placeholder finding type for steps that do not yet bind a finding type.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NeverFinding {}

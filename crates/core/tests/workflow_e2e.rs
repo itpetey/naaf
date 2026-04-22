@@ -3,12 +3,79 @@ use std::sync::{Arc, Mutex};
 use futures::future::LocalBoxFuture;
 use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, RetryPolicy, Step, Task};
 
+struct ReconcileRelease;
+
+struct RepairPatch;
+
+struct GenerateApi;
+
+struct GenerateUi;
+
+struct PublishRelease;
+
+struct GeneratePatch;
+
+struct ApplyPatch;
+
+struct CargoTest;
+
 #[derive(Debug)]
 struct TestRuntime {
     required_revision: usize,
     repair_increment: usize,
     release_suffix: &'static str,
     events: Arc<Mutex<Vec<&'static str>>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TestError;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FeatureRequest {
+    name: &'static str,
+    revision: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ApiDraft {
+    files: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UiDraft {
+    files: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReleasePlan {
+    feature: String,
+    files: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReleaseSummary {
+    tag: String,
+    file_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BuildInput {
+    revision: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Patch {
+    revision: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Workspace {
+    revision: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Finding {
+    TestsFailed,
 }
 
 impl TestRuntime {
@@ -39,46 +106,13 @@ impl TestRuntime {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TestError;
+impl std::error::Error for TestError {}
 
 impl std::fmt::Display for TestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("test error")
     }
 }
-
-impl std::error::Error for TestError {}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct FeatureRequest {
-    name: &'static str,
-    revision: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ApiDraft {
-    files: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct UiDraft {
-    files: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ReleasePlan {
-    feature: String,
-    files: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ReleaseSummary {
-    tag: String,
-    file_count: usize,
-}
-
-struct GenerateApi;
 
 impl Task for GenerateApi {
     type Runtime = TestRuntime;
@@ -100,8 +134,6 @@ impl Task for GenerateApi {
     }
 }
 
-struct GenerateUi;
-
 impl Task for GenerateUi {
     type Runtime = TestRuntime;
     type Input = FeatureRequest;
@@ -121,8 +153,6 @@ impl Task for GenerateUi {
         })
     }
 }
-
-struct ReconcileRelease;
 
 impl Task for ReconcileRelease {
     type Runtime = TestRuntime;
@@ -149,8 +179,6 @@ impl Task for ReconcileRelease {
     }
 }
 
-struct PublishRelease;
-
 impl Task for PublishRelease {
     type Runtime = TestRuntime;
     type Input = ReleasePlan;
@@ -172,28 +200,6 @@ impl Task for PublishRelease {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct BuildInput {
-    revision: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Patch {
-    revision: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Workspace {
-    revision: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Finding {
-    TestsFailed,
-}
-
-struct GeneratePatch;
-
 impl Task for GeneratePatch {
     type Runtime = TestRuntime;
     type Input = BuildInput;
@@ -214,8 +220,6 @@ impl Task for GeneratePatch {
     }
 }
 
-struct ApplyPatch;
-
 impl Materialiser for ApplyPatch {
     type Runtime = TestRuntime;
     type Input = Patch;
@@ -235,8 +239,6 @@ impl Materialiser for ApplyPatch {
         })
     }
 }
-
-struct CargoTest;
 
 impl Check for CargoTest {
     type Runtime = TestRuntime;
@@ -260,8 +262,6 @@ impl Check for CargoTest {
     }
 }
 
-struct RepairPatch;
-
 impl RepairPlanner for RepairPatch {
     type Runtime = TestRuntime;
     type Input = BuildInput;
@@ -282,6 +282,39 @@ impl RepairPlanner for RepairPatch {
             })
         })
     }
+}
+
+#[tokio::test]
+async fn step_build_test_loop_retries_through_public_api() {
+    let runtime = TestRuntime::new(2, 1, "candidate");
+
+    let step = Step::builder(GeneratePatch)
+        .materialise(ApplyPatch)
+        .validate(CargoTest)
+        .repair_with(RepairPatch)
+        .retry_policy(RetryPolicy::new(3))
+        .build();
+
+    let traced = step
+        .run_traced(&runtime, BuildInput { revision: 0 })
+        .await
+        .expect("step should repair itself");
+
+    assert_eq!(traced.output(), &Patch { revision: 2 });
+    assert_eq!(traced.report().attempt_count(), 3);
+    assert_eq!(
+        traced
+            .report()
+            .attempts()
+            .iter()
+            .filter(|attempt| attempt.accepted())
+            .count(),
+        1
+    );
+    assert_eq!(runtime.occurrences("generate_patch"), 3);
+    assert_eq!(runtime.occurrences("apply_patch"), 3);
+    assert_eq!(runtime.occurrences("cargo_test"), 3);
+    assert_eq!(runtime.occurrences("repair_patch"), 2);
 }
 
 #[tokio::test]
@@ -336,37 +369,4 @@ async fn workflow_composition_transports_outputs_end_to_end() {
     assert_eq!(runtime.occurrences("generate_ui"), 1);
     assert_eq!(runtime.occurrences("reconcile_release"), 1);
     assert_eq!(runtime.occurrences("publish_release"), 1);
-}
-
-#[tokio::test]
-async fn step_build_test_loop_retries_through_public_api() {
-    let runtime = TestRuntime::new(2, 1, "candidate");
-
-    let step = Step::builder(GeneratePatch)
-        .materialise(ApplyPatch)
-        .validate(CargoTest)
-        .repair_with(RepairPatch)
-        .retry_policy(RetryPolicy::new(3))
-        .build();
-
-    let traced = step
-        .run_traced(&runtime, BuildInput { revision: 0 })
-        .await
-        .expect("step should repair itself");
-
-    assert_eq!(traced.output(), &Patch { revision: 2 });
-    assert_eq!(traced.report().attempt_count(), 3);
-    assert_eq!(
-        traced
-            .report()
-            .attempts()
-            .iter()
-            .filter(|attempt| attempt.accepted())
-            .count(),
-        1
-    );
-    assert_eq!(runtime.occurrences("generate_patch"), 3);
-    assert_eq!(runtime.occurrences("apply_patch"), 3);
-    assert_eq!(runtime.occurrences("cargo_test"), 3);
-    assert_eq!(runtime.occurrences("repair_patch"), 2);
 }

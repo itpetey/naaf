@@ -11,10 +11,6 @@ use crate::tool::Tool;
 
 const DEFAULT_MAX_RESULTS: usize = 5;
 
-fn default_max_results() -> usize {
-    DEFAULT_MAX_RESULTS
-}
-
 /// Parameters accepted by [`WebSearchTool`].
 #[derive(Clone, Debug, Deserialize)]
 pub struct WebSearchParams {
@@ -134,6 +130,10 @@ impl<R> Tool for WebSearchTool<R> {
             Ok(results)
         })
     }
+}
+
+fn default_max_results() -> usize {
+    DEFAULT_MAX_RESULTS
 }
 
 #[cfg(test)]

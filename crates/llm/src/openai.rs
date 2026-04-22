@@ -25,12 +25,141 @@ pub trait OpenAiStreamObserver<R>: Send + Sync {
     fn on_response_complete(&self, _runtime: &R, _message: &AssistantMessage) {}
 }
 
+#[derive(Deserialize)]
+struct ApiResponse {
+    choices: Vec<ApiChoice>,
+    usage: Option<ApiUsage>,
+}
+
+#[derive(Deserialize)]
+struct ApiStreamChunk {
+    choices: Vec<ApiStreamChoice>,
+    usage: Option<ApiUsage>,
+}
+
+#[derive(Default)]
+struct StreamState {
+    content: String,
+    reasoning: String,
+    tool_calls: Vec<StreamToolCall>,
+    usage: Option<Usage>,
+}
+
+#[derive(Deserialize)]
+struct ApiChoice {
+    message: ApiMessageResponse,
+}
+
+#[derive(Deserialize)]
+struct ApiMessageResponse {
+    content: Option<String>,
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
+    tool_calls: Option<Vec<ApiToolCallResponse>>,
+}
+
+#[derive(Deserialize)]
+struct ApiStreamChoice {
+    delta: ApiStreamDelta,
+}
+
+#[derive(Default, Deserialize)]
+struct ApiStreamDelta {
+    content: Option<String>,
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
+    tool_calls: Option<Vec<ApiToolCallDelta>>,
+}
+
+#[derive(Deserialize)]
+struct ApiToolCallDelta {
+    index: usize,
+    id: Option<String>,
+    function: Option<ApiFunctionDelta>,
+}
+
+#[derive(Deserialize)]
+struct ApiToolCallResponse {
+    id: String,
+    function: ApiFunctionResponse,
+}
+
+#[derive(Deserialize)]
+struct ApiErrorResponse {
+    error: ApiErrorDetail,
+}
+
 /// Configuration for the OpenAI chat completions client.
 #[derive(Clone, Debug)]
 pub struct OpenAiConfig {
     api_key: String,
     base_url: String,
     organisation: Option<String>,
+}
+
+/// Errors returned by the OpenAI client integration.
+#[derive(Debug, Error)]
+pub enum OpenAiError {
+    /// The underlying HTTP request failed.
+    #[error("HTTP request failed: {0}")]
+    Http(#[from] reqwest::Error),
+    /// The OpenAI API returned a structured error response.
+    #[error("OpenAI API error: {message}")]
+    Api {
+        /// Human-readable error message returned by the API.
+        message: String,
+        /// Provider-specific error type.
+        error_type: String,
+        /// Optional provider-specific error code.
+        code: Option<String>,
+    },
+    /// Environment or client configuration was invalid.
+    #[error("configuration error: {0}")]
+    Config(String),
+    /// The provider response could not be converted into crate types.
+    #[error("failed to convert response: {0}")]
+    Conversion(String),
+}
+
+/// [`LlmClient`] implementation backed by OpenAI chat completions.
+#[derive(Clone)]
+pub struct OpenAiClient<R> {
+    config: OpenAiConfig,
+    http: Client,
+    stream_observer: Option<Arc<dyn OpenAiStreamObserver<R>>>,
+    _marker: PhantomData<R>,
+}
+
+#[derive(Default)]
+struct StreamToolCall {
+    id: Option<String>,
+    name: String,
+    arguments: String,
+}
+
+#[derive(Deserialize)]
+struct ApiFunctionDelta {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiFunctionResponse {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Deserialize)]
+struct ApiUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+}
+
+#[derive(Deserialize)]
+struct ApiErrorDetail {
+    message: String,
+    r#type: String,
+    code: Option<String>,
 }
 
 impl OpenAiConfig {
@@ -83,39 +212,6 @@ impl OpenAiConfig {
     pub fn organisation(&self) -> Option<&str> {
         self.organisation.as_deref()
     }
-}
-
-/// Errors returned by the OpenAI client integration.
-#[derive(Debug, Error)]
-pub enum OpenAiError {
-    /// The underlying HTTP request failed.
-    #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
-    /// The OpenAI API returned a structured error response.
-    #[error("OpenAI API error: {message}")]
-    Api {
-        /// Human-readable error message returned by the API.
-        message: String,
-        /// Provider-specific error type.
-        error_type: String,
-        /// Optional provider-specific error code.
-        code: Option<String>,
-    },
-    /// Environment or client configuration was invalid.
-    #[error("configuration error: {0}")]
-    Config(String),
-    /// The provider response could not be converted into crate types.
-    #[error("failed to convert response: {0}")]
-    Conversion(String),
-}
-
-/// [`LlmClient`] implementation backed by OpenAI chat completions.
-#[derive(Clone)]
-pub struct OpenAiClient<R> {
-    config: OpenAiConfig,
-    http: Client,
-    stream_observer: Option<Arc<dyn OpenAiStreamObserver<R>>>,
-    _marker: PhantomData<R>,
 }
 
 impl<R> OpenAiClient<R> {
@@ -218,282 +314,6 @@ impl<R> LlmClient for OpenAiClient<R> {
             convert_response(api_response)
         })
     }
-}
-
-fn with_streaming_enabled(mut body: Value) -> Value {
-    if let Value::Object(map) = &mut body {
-        map.insert("stream".to_string(), Value::Bool(true));
-    }
-    body
-}
-
-fn build_request_body(request: &CompletionRequest) -> Result<Value, OpenAiError> {
-    let messages: Vec<Value> = request
-        .messages
-        .iter()
-        .map(convert_message_to_value)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut body = serde_json::json!({
-        "model": &request.model,
-        "messages": messages,
-    });
-
-    if !request.tools.is_empty() {
-        let tools: Vec<Value> = request
-            .tools
-            .iter()
-            .map(|t| {
-                serde_json::json!({
-                    "type": "function",
-                    "function": {
-                        "name": t.name,
-                        "description": t.description,
-                        "parameters": t.input_schema,
-                    }
-                })
-            })
-            .collect();
-        body["tools"] = Value::Array(tools);
-        body["tool_choice"] = convert_tool_choice_to_value(&request.tool_choice);
-    }
-
-    if let Value::Object(map) = &request.metadata
-        && let Value::Object(body_map) = &mut body
-    {
-        for (key, value) in map {
-            body_map.insert(key.clone(), value.clone());
-        }
-    }
-
-    Ok(body)
-}
-
-fn convert_message_to_value(msg: &Message) -> Result<Value, OpenAiError> {
-    Ok(match msg {
-        Message::System { content } => serde_json::json!({
-            "role": "system",
-            "content": content,
-        }),
-        Message::User { content } => serde_json::json!({
-            "role": "user",
-            "content": content,
-        }),
-        Message::Assistant(a) => {
-            let tool_calls: Vec<Value> = a
-                .tool_calls
-                .iter()
-                .map(|tc| {
-                    serde_json::json!({
-                        "id": tc.call_id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.tool_name,
-                            "arguments": tc.arguments.to_string(),
-                        }
-                    })
-                })
-                .collect();
-            let mut v = serde_json::json!({
-                "role": "assistant",
-                "content": a.content,
-            });
-            if !tool_calls.is_empty() {
-                v["tool_calls"] = Value::Array(tool_calls);
-            }
-            v
-        }
-        Message::Tool(result) => serde_json::json!({
-            "role": "tool",
-            "tool_call_id": result.call_id,
-            "content": result.content.to_string(),
-        }),
-    })
-}
-
-fn convert_tool_choice_to_value(choice: &ToolChoice) -> Value {
-    match choice {
-        ToolChoice::Auto => Value::String("auto".to_string()),
-        ToolChoice::None => Value::String("none".to_string()),
-        ToolChoice::Required(name) => serde_json::json!({
-            "type": "function",
-            "function": {"name": name}
-        }),
-    }
-}
-
-fn convert_response(response: ApiResponse) -> Result<CompletionResponse, OpenAiError> {
-    let choice = response
-        .choices
-        .into_iter()
-        .next()
-        .ok_or_else(|| OpenAiError::Conversion("no choices in response".to_string()))?;
-    let metadata = build_message_metadata(&choice.message);
-
-    let tool_calls = match choice.message.tool_calls {
-        Some(calls) => calls
-            .into_iter()
-            .map(|tc| {
-                let arguments = serde_json::from_str(&tc.function.arguments).map_err(|e| {
-                    OpenAiError::Conversion(format!(
-                        "invalid tool call arguments for '{}': {e}",
-                        tc.function.name
-                    ))
-                })?;
-                Ok(ToolCall {
-                    call_id: tc.id,
-                    tool_name: tc.function.name,
-                    arguments,
-                })
-            })
-            .collect::<Result<Vec<_>, OpenAiError>>()?,
-        None => Vec::new(),
-    };
-
-    let response_usage = response.usage.map(|u| Usage {
-        input_tokens: u.prompt_tokens,
-        output_tokens: u.completion_tokens,
-    });
-
-    let mut response = CompletionResponse::new(AssistantMessage {
-        content: choice.message.content,
-        tool_calls,
-    });
-    if let Some(usage) = response_usage {
-        response = response.with_usage(usage);
-    }
-    Ok(response.with_metadata(metadata))
-}
-
-fn build_message_metadata(message: &ApiMessageResponse) -> Value {
-    let mut metadata = Map::new();
-
-    if let Some(reasoning_content) = message.reasoning_content.as_ref()
-        && !reasoning_content.trim().is_empty()
-    {
-        metadata.insert(
-            "reasoning_content".to_string(),
-            Value::String(reasoning_content.clone()),
-        );
-    }
-
-    if let Some(reasoning) = message.reasoning.as_ref()
-        && !reasoning.trim().is_empty()
-    {
-        metadata.insert("reasoning".to_string(), Value::String(reasoning.clone()));
-    }
-
-    Value::Object(metadata)
-}
-
-fn emit_non_streaming_response<R>(
-    observer: &dyn OpenAiStreamObserver<R>,
-    runtime: &R,
-    response: &CompletionResponse,
-) {
-    if let Some(reasoning) = response
-        .metadata
-        .get("reasoning_content")
-        .or_else(|| response.metadata.get("reasoning"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        observer.on_reasoning_delta(runtime, reasoning);
-    }
-
-    observer.on_response_complete(runtime, &response.message);
-}
-
-async fn parse_stream_response<R>(
-    mut response: reqwest::Response,
-    observer: &dyn OpenAiStreamObserver<R>,
-    runtime: &R,
-) -> Result<CompletionResponse, OpenAiError> {
-    let mut state = StreamState::default();
-    let mut line_buffer = String::new();
-    let mut data_lines = Vec::new();
-
-    while let Some(chunk) = response.chunk().await? {
-        let chunk_text = std::str::from_utf8(&chunk)
-            .map_err(|error| OpenAiError::Conversion(format!("invalid stream utf-8: {error}")))?;
-
-        for ch in chunk_text.chars() {
-            if ch == '\n' {
-                process_stream_line(
-                    std::mem::take(&mut line_buffer),
-                    &mut data_lines,
-                    &mut state,
-                    observer,
-                    runtime,
-                )?;
-            } else {
-                line_buffer.push(ch);
-            }
-        }
-    }
-
-    if !line_buffer.is_empty() {
-        process_stream_line(line_buffer, &mut data_lines, &mut state, observer, runtime)?;
-    }
-
-    if !data_lines.is_empty() {
-        process_stream_event_data(&data_lines.join("\n"), &mut state, observer, runtime)?;
-    }
-
-    let response = state.into_response()?;
-    observer.on_response_complete(runtime, &response.message);
-    Ok(response)
-}
-
-fn process_stream_line<R>(
-    mut line: String,
-    data_lines: &mut Vec<String>,
-    state: &mut StreamState,
-    observer: &dyn OpenAiStreamObserver<R>,
-    runtime: &R,
-) -> Result<(), OpenAiError> {
-    if line.ends_with('\r') {
-        line.pop();
-    }
-
-    if line.is_empty() {
-        if !data_lines.is_empty() {
-            process_stream_event_data(&data_lines.join("\n"), state, observer, runtime)?;
-            data_lines.clear();
-        }
-        return Ok(());
-    }
-
-    if let Some(data) = line.strip_prefix("data:") {
-        data_lines.push(data.trim_start().to_string());
-    }
-
-    Ok(())
-}
-
-fn process_stream_event_data<R>(
-    data: &str,
-    state: &mut StreamState,
-    observer: &dyn OpenAiStreamObserver<R>,
-    runtime: &R,
-) -> Result<(), OpenAiError> {
-    let data = data.trim();
-    if data.is_empty() || data == "[DONE]" {
-        return Ok(());
-    }
-
-    let chunk: ApiStreamChunk = serde_json::from_str(data)
-        .map_err(|error| OpenAiError::Conversion(format!("invalid stream chunk: {error}")))?;
-    state.apply_chunk(chunk, observer, runtime)
-}
-
-#[derive(Default)]
-struct StreamState {
-    content: String,
-    reasoning: String,
-    tool_calls: Vec<StreamToolCall>,
-    usage: Option<Usage>,
 }
 
 impl StreamState {
@@ -608,92 +428,272 @@ impl StreamState {
     }
 }
 
-#[derive(Default)]
-struct StreamToolCall {
-    id: Option<String>,
-    name: String,
-    arguments: String,
+fn build_message_metadata(message: &ApiMessageResponse) -> Value {
+    let mut metadata = Map::new();
+
+    if let Some(reasoning_content) = message.reasoning_content.as_ref()
+        && !reasoning_content.trim().is_empty()
+    {
+        metadata.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning_content.clone()),
+        );
+    }
+
+    if let Some(reasoning) = message.reasoning.as_ref()
+        && !reasoning.trim().is_empty()
+    {
+        metadata.insert("reasoning".to_string(), Value::String(reasoning.clone()));
+    }
+
+    Value::Object(metadata)
 }
 
-#[derive(Deserialize)]
-struct ApiResponse {
-    choices: Vec<ApiChoice>,
-    usage: Option<ApiUsage>,
+fn build_request_body(request: &CompletionRequest) -> Result<Value, OpenAiError> {
+    let messages: Vec<Value> = request
+        .messages
+        .iter()
+        .map(convert_message_to_value)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut body = serde_json::json!({
+        "model": &request.model,
+        "messages": messages,
+    });
+
+    if !request.tools.is_empty() {
+        let tools: Vec<Value> = request
+            .tools
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.input_schema,
+                    }
+                })
+            })
+            .collect();
+        body["tools"] = Value::Array(tools);
+        body["tool_choice"] = convert_tool_choice_to_value(&request.tool_choice);
+    }
+
+    if let Value::Object(map) = &request.metadata
+        && let Value::Object(body_map) = &mut body
+    {
+        for (key, value) in map {
+            body_map.insert(key.clone(), value.clone());
+        }
+    }
+
+    Ok(body)
 }
 
-#[derive(Deserialize)]
-struct ApiChoice {
-    message: ApiMessageResponse,
+fn convert_message_to_value(msg: &Message) -> Result<Value, OpenAiError> {
+    Ok(match msg {
+        Message::System { content } => serde_json::json!({
+            "role": "system",
+            "content": content,
+        }),
+        Message::User { content } => serde_json::json!({
+            "role": "user",
+            "content": content,
+        }),
+        Message::Assistant(a) => {
+            let tool_calls: Vec<Value> = a
+                .tool_calls
+                .iter()
+                .map(|tc| {
+                    serde_json::json!({
+                        "id": tc.call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.tool_name,
+                            "arguments": tc.arguments.to_string(),
+                        }
+                    })
+                })
+                .collect();
+            let mut v = serde_json::json!({
+                "role": "assistant",
+                "content": a.content,
+            });
+            if !tool_calls.is_empty() {
+                v["tool_calls"] = Value::Array(tool_calls);
+            }
+            v
+        }
+        Message::Tool(result) => serde_json::json!({
+            "role": "tool",
+            "tool_call_id": result.call_id,
+            "content": result.content.to_string(),
+        }),
+    })
 }
 
-#[derive(Deserialize)]
-struct ApiMessageResponse {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-    reasoning: Option<String>,
-    tool_calls: Option<Vec<ApiToolCallResponse>>,
+fn convert_response(response: ApiResponse) -> Result<CompletionResponse, OpenAiError> {
+    let choice = response
+        .choices
+        .into_iter()
+        .next()
+        .ok_or_else(|| OpenAiError::Conversion("no choices in response".to_string()))?;
+    let metadata = build_message_metadata(&choice.message);
+
+    let tool_calls = match choice.message.tool_calls {
+        Some(calls) => calls
+            .into_iter()
+            .map(|tc| {
+                let arguments = serde_json::from_str(&tc.function.arguments).map_err(|e| {
+                    OpenAiError::Conversion(format!(
+                        "invalid tool call arguments for '{}': {e}",
+                        tc.function.name
+                    ))
+                })?;
+                Ok(ToolCall {
+                    call_id: tc.id,
+                    tool_name: tc.function.name,
+                    arguments,
+                })
+            })
+            .collect::<Result<Vec<_>, OpenAiError>>()?,
+        None => Vec::new(),
+    };
+
+    let response_usage = response.usage.map(|u| Usage {
+        input_tokens: u.prompt_tokens,
+        output_tokens: u.completion_tokens,
+    });
+
+    let mut response = CompletionResponse::new(AssistantMessage {
+        content: choice.message.content,
+        tool_calls,
+    });
+    if let Some(usage) = response_usage {
+        response = response.with_usage(usage);
+    }
+    Ok(response.with_metadata(metadata))
 }
 
-#[derive(Deserialize)]
-struct ApiStreamChunk {
-    choices: Vec<ApiStreamChoice>,
-    usage: Option<ApiUsage>,
+fn convert_tool_choice_to_value(choice: &ToolChoice) -> Value {
+    match choice {
+        ToolChoice::Auto => Value::String("auto".to_string()),
+        ToolChoice::None => Value::String("none".to_string()),
+        ToolChoice::Required(name) => serde_json::json!({
+            "type": "function",
+            "function": {"name": name}
+        }),
+    }
 }
 
-#[derive(Deserialize)]
-struct ApiStreamChoice {
-    delta: ApiStreamDelta,
+fn emit_non_streaming_response<R>(
+    observer: &dyn OpenAiStreamObserver<R>,
+    runtime: &R,
+    response: &CompletionResponse,
+) {
+    if let Some(reasoning) = response
+        .metadata
+        .get("reasoning_content")
+        .or_else(|| response.metadata.get("reasoning"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        observer.on_reasoning_delta(runtime, reasoning);
+    }
+
+    observer.on_response_complete(runtime, &response.message);
 }
 
-#[derive(Default, Deserialize)]
-struct ApiStreamDelta {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-    reasoning: Option<String>,
-    tool_calls: Option<Vec<ApiToolCallDelta>>,
+async fn parse_stream_response<R>(
+    mut response: reqwest::Response,
+    observer: &dyn OpenAiStreamObserver<R>,
+    runtime: &R,
+) -> Result<CompletionResponse, OpenAiError> {
+    let mut state = StreamState::default();
+    let mut line_buffer = String::new();
+    let mut data_lines = Vec::new();
+
+    while let Some(chunk) = response.chunk().await? {
+        let chunk_text = std::str::from_utf8(&chunk)
+            .map_err(|error| OpenAiError::Conversion(format!("invalid stream utf-8: {error}")))?;
+
+        for ch in chunk_text.chars() {
+            if ch == '\n' {
+                process_stream_line(
+                    std::mem::take(&mut line_buffer),
+                    &mut data_lines,
+                    &mut state,
+                    observer,
+                    runtime,
+                )?;
+            } else {
+                line_buffer.push(ch);
+            }
+        }
+    }
+
+    if !line_buffer.is_empty() {
+        process_stream_line(line_buffer, &mut data_lines, &mut state, observer, runtime)?;
+    }
+
+    if !data_lines.is_empty() {
+        process_stream_event_data(&data_lines.join("\n"), &mut state, observer, runtime)?;
+    }
+
+    let response = state.into_response()?;
+    observer.on_response_complete(runtime, &response.message);
+    Ok(response)
 }
 
-#[derive(Deserialize)]
-struct ApiToolCallDelta {
-    index: usize,
-    id: Option<String>,
-    function: Option<ApiFunctionDelta>,
+fn process_stream_event_data<R>(
+    data: &str,
+    state: &mut StreamState,
+    observer: &dyn OpenAiStreamObserver<R>,
+    runtime: &R,
+) -> Result<(), OpenAiError> {
+    let data = data.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return Ok(());
+    }
+
+    let chunk: ApiStreamChunk = serde_json::from_str(data)
+        .map_err(|error| OpenAiError::Conversion(format!("invalid stream chunk: {error}")))?;
+    state.apply_chunk(chunk, observer, runtime)
 }
 
-#[derive(Deserialize)]
-struct ApiFunctionDelta {
-    name: Option<String>,
-    arguments: Option<String>,
+fn process_stream_line<R>(
+    mut line: String,
+    data_lines: &mut Vec<String>,
+    state: &mut StreamState,
+    observer: &dyn OpenAiStreamObserver<R>,
+    runtime: &R,
+) -> Result<(), OpenAiError> {
+    if line.ends_with('\r') {
+        line.pop();
+    }
+
+    if line.is_empty() {
+        if !data_lines.is_empty() {
+            process_stream_event_data(&data_lines.join("\n"), state, observer, runtime)?;
+            data_lines.clear();
+        }
+        return Ok(());
+    }
+
+    if let Some(data) = line.strip_prefix("data:") {
+        data_lines.push(data.trim_start().to_string());
+    }
+
+    Ok(())
 }
 
-#[derive(Deserialize)]
-struct ApiToolCallResponse {
-    id: String,
-    function: ApiFunctionResponse,
-}
-
-#[derive(Deserialize)]
-struct ApiFunctionResponse {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Deserialize)]
-struct ApiUsage {
-    prompt_tokens: u64,
-    completion_tokens: u64,
-}
-
-#[derive(Deserialize)]
-struct ApiErrorResponse {
-    error: ApiErrorDetail,
-}
-
-#[derive(Deserialize)]
-struct ApiErrorDetail {
-    message: String,
-    r#type: String,
-    code: Option<String>,
+fn with_streaming_enabled(mut body: Value) -> Value {
+    if let Value::Object(map) = &mut body {
+        map.insert("stream".to_string(), Value::Bool(true));
+    }
+    body
 }
 
 #[cfg(test)]
