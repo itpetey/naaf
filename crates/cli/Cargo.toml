@@ -10,6 +10,7 @@ name = "naaf"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 clap = { workspace = true }
 naaf-knowledge = { path = "../knowledge" }
 naaf-qdrant = { path = "../qdrant", features = ["openai"] }

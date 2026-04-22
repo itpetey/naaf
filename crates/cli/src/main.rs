@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing::info;
 
@@ -48,7 +49,7 @@ enum KbCommands {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
     let config = config::Config::load().expect("failed to load config");
     let cli = Cli::parse();
@@ -57,20 +58,17 @@ async fn main() {
         Commands::Kb(cmd) => match cmd {
             KbCommands::Init => {
                 info!("Connecting to Qdrant at {}", config.qdrant.url);
-                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
-                    .expect("failed to connect");
-                if let Some(ref api_key) = config.qdrant.api_key {
-                    client = client.with_api_key(api_key).expect("failed to set API key");
-                }
-                client = client.with_collection(&config.qdrant.collection);
+
+                let client = naaf_qdrant::QdrantClient::from_url(
+                    &config.qdrant.url,
+                    config.qdrant.api_key.as_ref(),
+                )?
+                .with_collection(&config.qdrant.collection);
 
                 let embedder = make_embedder(&config);
                 let agent = naaf_qdrant::QdrantAgent::<()>::new(client, embedder);
 
-                agent
-                    .init_collection()
-                    .await
-                    .expect("failed to create collection");
+                agent.init_collection().await?;
 
                 println!("Collection '{}' is ready.", config.qdrant.collection);
             }
@@ -81,22 +79,21 @@ async fn main() {
                     std::process::exit(1);
                 }
 
-                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
-                    .expect("failed to connect");
-                if let Some(ref api_key) = config.qdrant.api_key {
-                    client = client.with_api_key(api_key).expect("failed to set API key");
-                }
-                client = client.with_collection(&config.qdrant.collection);
+                let client = naaf_qdrant::QdrantClient::from_url(
+                    &config.qdrant.url,
+                    config.qdrant.api_key.as_ref(),
+                )?
+                .with_collection(&config.qdrant.collection);
 
                 let embedder = make_embedder(&config);
                 let agent = naaf_qdrant::QdrantAgent::<()>::new(client, embedder);
 
                 if path.is_dir() {
                     info!("Walking directory: {}", path.display());
+
                     let report =
                         naaf_knowledge::ingest::ingest_directory(&agent, path, repo.as_deref())
-                            .await
-                            .expect("directory ingestion failed");
+                            .await?;
 
                     for (file_path, result) in &report.reports {
                         match result {
@@ -120,9 +117,8 @@ async fn main() {
                 } else {
                     info!("Ingesting: {}", path.display());
 
-                    let report = naaf_knowledge::ingest::ingest_file(&agent, path, repo.as_deref())
-                        .await
-                        .expect("ingestion failed");
+                    let report =
+                        naaf_knowledge::ingest::ingest_file(&agent, path, repo.as_deref()).await?;
 
                     println!("Ingested {} chunks", report.chunks_count);
                     println!("Source IDs: {:?}", report.source_ids);
@@ -131,12 +127,11 @@ async fn main() {
             KbCommands::Query { query, repo } => {
                 let query_text = query.join(" ");
 
-                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
-                    .expect("failed to connect");
-                if let Some(ref api_key) = config.qdrant.api_key {
-                    client = client.with_api_key(api_key).expect("failed to set API key");
-                }
-                client = client.with_collection(&config.qdrant.collection);
+                let client = naaf_qdrant::QdrantClient::from_url(
+                    &config.qdrant.url,
+                    config.qdrant.api_key.as_ref(),
+                )?
+                .with_collection(&config.qdrant.collection);
 
                 let embedder = make_embedder(&config);
                 let agent = naaf_qdrant::QdrantAgent::<()>::new(client, embedder);
@@ -148,8 +143,7 @@ async fn main() {
                     config.query.min_score,
                     repo.as_deref(),
                 )
-                .await
-                .expect("query failed");
+                .await?;
 
                 if results.is_empty() {
                     println!("No results found.");
@@ -166,12 +160,11 @@ async fn main() {
                 }
             }
             KbCommands::Lint => {
-                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
-                    .expect("failed to connect");
-                if let Some(ref api_key) = config.qdrant.api_key {
-                    client = client.with_api_key(api_key).expect("failed to set API key");
-                }
-                client = client.with_collection(&config.qdrant.collection);
+                let client = naaf_qdrant::QdrantClient::from_url(
+                    &config.qdrant.url,
+                    config.qdrant.api_key.as_ref(),
+                )?
+                .with_collection(&config.qdrant.collection);
 
                 let report = naaf_knowledge::lint::lint_collection(&client)
                     .await
@@ -191,12 +184,11 @@ async fn main() {
                 }
             }
             KbCommands::List { limit } => {
-                let mut client = naaf_qdrant::QdrantClient::from_url(&config.qdrant.url)
-                    .expect("failed to connect");
-                if let Some(ref api_key) = config.qdrant.api_key {
-                    client = client.with_api_key(api_key).expect("failed to set API key");
-                }
-                client = client.with_collection(&config.qdrant.collection);
+                let client = naaf_qdrant::QdrantClient::from_url(
+                    &config.qdrant.url,
+                    config.qdrant.api_key.as_ref(),
+                )?
+                .with_collection(&config.qdrant.collection);
 
                 let entries = client.scroll(limit, None).await.expect("scroll failed");
 
@@ -217,6 +209,8 @@ async fn main() {
             }
         },
     }
+
+    Ok(())
 }
 
 fn make_embedder(config: &config::Config) -> Box<dyn naaf_qdrant::Embedder> {

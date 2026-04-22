@@ -22,8 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let openai_api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
 
     println!("Connecting to Qdrant at {}...", qdrant_url);
-    let mut client = naaf_qdrant::QdrantClient::from_url(&qdrant_url)?;
-    client = client.with_collection(&collection);
+    let client = naaf_qdrant::QdrantClient::from_url(&qdrant_url, Option::<String>::None)?
+        .with_collection(&collection);
 
     let embedder = naaf_qdrant::OpenAiEmbedder::new(openai_api_key.clone());
 

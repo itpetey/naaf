@@ -17,7 +17,6 @@ use crate::payload::{EntityType, KnowledgePayload, SearchResult, SourceType};
 pub struct QdrantClient {
     inner: Qdrant,
     collection: String,
-    url: String,
 }
 
 /// Fully prepared point data ready to be written to Qdrant.
@@ -39,27 +38,17 @@ pub struct QdrantAgent<R> {
 
 impl QdrantClient {
     /// Creates a client from a base Qdrant URL.
-    pub fn from_url(url: &str) -> Result<Self, QdrantError> {
-        let inner = Qdrant::from_url(url)
+    pub fn from_url(url: &str, api_key: Option<impl Into<String>>) -> Result<Self, QdrantError> {
+        let mut cfg = Qdrant::from_url(url);
+        if let Some(key) = api_key {
+            cfg = cfg.api_key(key.into());
+        }
+        let inner = cfg
             .build()
             .map_err(|e| QdrantError::Client(e.to_string()))?;
         Ok(Self {
             inner,
             collection: "knowledge".to_string(),
-            url: url.to_string(),
-        })
-    }
-
-    /// Returns a copy of this client configured with an API key.
-    pub fn with_api_key(self, api_key: &str) -> Result<Self, QdrantError> {
-        let inner = Qdrant::from_url(&self.url)
-            .api_key(api_key)
-            .build()
-            .map_err(|e| QdrantError::Client(e.to_string()))?;
-        Ok(Self {
-            inner,
-            collection: self.collection,
-            url: self.url,
         })
     }
 

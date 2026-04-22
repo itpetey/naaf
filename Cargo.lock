@@ -1519,6 +1519,7 @@ dependencies = [
 name = "naaf-cli"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "naaf-knowledge",
  "naaf-qdrant",
