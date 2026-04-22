@@ -14,6 +14,8 @@ use crate::message::{
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
 pub trait OpenAiStreamObserver<R>: Send + Sync {
+    fn on_content_delta(&self, _runtime: &R, _delta: &str) {}
+
     fn on_reasoning_delta(&self, _runtime: &R, _delta: &str) {}
 
     fn on_response_complete(&self, _runtime: &R, _message: &AssistantMessage) {}
@@ -494,8 +496,9 @@ impl StreamState {
                 observer.on_reasoning_delta(runtime, &reasoning);
             }
 
-            if let Some(content) = choice.delta.content {
+            if let Some(content) = choice.delta.content.filter(|value| !value.is_empty()) {
                 self.content.push_str(&content);
+                observer.on_content_delta(runtime, &content);
             }
 
             if let Some(tool_calls) = choice.delta.tool_calls {
@@ -940,6 +943,10 @@ mod tests {
 
         let response = state.into_response().unwrap();
         assert_eq!(
+            observer.content.lock().unwrap().as_slice(),
+            ["Done".to_string()]
+        );
+        assert_eq!(
             observer.reasoning.lock().unwrap().as_slice(),
             ["First thought. ".to_string(), "Second thought.".to_string()]
         );
@@ -955,10 +962,15 @@ mod tests {
 
     #[derive(Default)]
     struct TestObserver {
+        content: Mutex<Vec<String>>,
         reasoning: Mutex<Vec<String>>,
     }
 
     impl OpenAiStreamObserver<()> for TestObserver {
+        fn on_content_delta(&self, _runtime: &(), delta: &str) {
+            self.content.lock().unwrap().push(delta.to_string());
+        }
+
         fn on_reasoning_delta(&self, _runtime: &(), delta: &str) {
             self.reasoning.lock().unwrap().push(delta.to_string());
         }
