@@ -6,7 +6,6 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-naaf-core = { path = "../core" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["process"] }
