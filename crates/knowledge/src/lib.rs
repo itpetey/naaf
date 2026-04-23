@@ -2,7 +2,7 @@
 #![warn(missing_docs)]
 //!
 //! `naaf-knowledge` implements the Karpathy-style LLM Wiki pattern using Qdrant
-//! as the persistent knowledge store. Three core operations:
+//! as the persistent knowledge store. Four core operations:
 //!
 //! - **Ingest**: Chunk source content, embed it, upsert into Qdrant, and
 //!   optionally run LLM extraction to produce concept/entity/summary entries.
@@ -10,6 +10,8 @@
 //!   an LLM, and optionally re-ingest the answer as a new knowledge entry.
 //! - **Lint**: Scan the knowledge base for contradictions, orphans, stale
 //!   entries, and missing cross-references.
+//! - **Knowledge Groups**: Describe Qdrant collections with domain-level
+//!   metadata and persist that metadata independently from the vector store.
 //!
 //! All operations compose through `naaf_core`'s `Task`, `Check`, `Materialiser`,
 //! and `Step` types.
