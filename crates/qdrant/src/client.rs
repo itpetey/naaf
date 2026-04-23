@@ -10,7 +10,6 @@ use uuid::Uuid;
 use crate::chunker::SourceInfo;
 use crate::embedder::Embedder;
 use crate::error::QdrantError;
-use crate::group::{KnowledgeGroup, KnowledgeGroupStore};
 use crate::payload::{EntityType, KnowledgePayload, SearchResult, SourceType};
 
 /// Thin wrapper around the generated Qdrant client with crate-specific helpers.
@@ -90,29 +89,6 @@ impl QdrantClient {
                 .await
                 .map_err(|e| QdrantError::Client(e.to_string()))?;
         }
-
-        Ok(())
-    }
-
-    /// Ensures the configured collection exists, then persists matching knowledge-group metadata.
-    pub async fn create_group_if_not_exists(
-        &self,
-        group: &KnowledgeGroup,
-        dimension: usize,
-        store: &dyn KnowledgeGroupStore,
-    ) -> Result<(), QdrantError> {
-        if group.collection != self.collection {
-            return Err(QdrantError::InvalidPayload(format!(
-                "knowledge group collection '{}' does not match client collection '{}'",
-                group.collection, self.collection
-            )));
-        }
-
-        self.create_collection_if_not_exists(dimension).await?;
-        store
-            .upsert_group(group)
-            .await
-            .map_err(map_knowledge_group_store_error)?;
 
         Ok(())
     }
@@ -365,10 +341,4 @@ fn scored_point_to_search(point: ScoredPoint, min_score: f32) -> Option<SearchRe
         score: point.score,
         payload,
     })
-}
-
-fn map_knowledge_group_store_error(
-    error: Box<dyn std::error::Error + Send + Sync + 'static>,
-) -> QdrantError {
-    QdrantError::KnowledgeGroupStore(error.to_string())
 }

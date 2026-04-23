@@ -1,3 +1,5 @@
+//! Knowledge-group metadata types and persistence traits.
+
 use std::{future::Future, pin::Pin};
 
 use chrono::{DateTime, Utc};
@@ -12,10 +14,10 @@ pub type KnowledgeGroupStoreResult<T> =
 pub type KnowledgeGroupStoreFuture<T> =
     Pin<Box<dyn Future<Output = KnowledgeGroupStoreResult<T>> + Send>>;
 
-/// Rich metadata describing one Qdrant-backed knowledge group.
+/// Rich metadata describing one knowledge collection.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KnowledgeGroup {
-    /// Canonical Qdrant collection identifier.
+    /// Canonical collection identifier.
     pub collection: String,
     /// Human-friendly display name.
     pub name: String,

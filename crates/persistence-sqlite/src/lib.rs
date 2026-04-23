@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use naaf_core::{NodeId, StepCheckpoint, WorkflowCheckpoint, WorkflowRunId};
-use naaf_qdrant::{KnowledgeGroup, KnowledgeGroupStore, KnowledgeGroupStoreFuture};
+use naaf_knowledge::{KnowledgeGroup, KnowledgeGroupStore, KnowledgeGroupStoreFuture};
 use parking_lot::Mutex;
 use rusqlite::{Connection, params};
 use thiserror::Error;

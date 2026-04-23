@@ -36,7 +36,7 @@ use std::{
 };
 
 use naaf_core::{NodeId, StepCheckpoint, WorkflowCheckpoint, WorkflowRunId};
-use naaf_qdrant::{KnowledgeGroup, KnowledgeGroupStore, KnowledgeGroupStoreFuture};
+use naaf_knowledge::{KnowledgeGroup, KnowledgeGroupStore, KnowledgeGroupStoreFuture};
 use serde::Serialize;
 use thiserror::Error;
 

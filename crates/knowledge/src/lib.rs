@@ -15,6 +15,10 @@
 //! and `Step` types.
 
 pub use error::{KnowledgeError, Result};
+pub use group::{
+    KnowledgeGroup, KnowledgeGroupStore, KnowledgeGroupStoreFuture, KnowledgeGroupStoreResult,
+    format_knowledge_groups_for_prompt,
+};
 pub use ingest::DirectoryIngestReport;
 pub use knowledge::{
     EntityType, IngestReport, KnowledgeEntry, LintIssue, LintIssueType, LintReport,
@@ -24,6 +28,8 @@ pub use tool::KnowledgeTool;
 
 /// Error and result types for knowledge workflows.
 pub mod error;
+/// Knowledge-group metadata types and persistence traits.
+pub mod group;
 /// Ingestion helpers for files, directories, and in-memory content.
 pub mod ingest;
 /// Core knowledge-domain types such as entries and lint reports.

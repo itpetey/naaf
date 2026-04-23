@@ -2,8 +2,8 @@ use naaf_core::{
     AttemptReport, Checkpointer, NodeId, RetryPolicy, StepCheckpoint, WorkflowCheckpoint,
     WorkflowRunId,
 };
+use naaf_knowledge::{KnowledgeGroup, KnowledgeGroupStore};
 use naaf_persistence_sqlite::{SqliteCheckpointer, SqliteKnowledgeGroupStore};
-use naaf_qdrant::{KnowledgeGroup, KnowledgeGroupStore};
 
 #[tokio::test]
 async fn sqlite_checkpointer_deletes_workflow() {

@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 naaf-core = { path = "../core" }
-naaf-qdrant = { path = "../qdrant", default-features = false }
+naaf-knowledge = { path = "../knowledge", default-features = false }
 parking_lot = { workspace = true }
 rusqlite = { version = "0.39", features = ["bundled"] }
 serde_json = { workspace = true, features = ["std"] }
