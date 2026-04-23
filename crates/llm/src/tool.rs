@@ -27,7 +27,6 @@ pub trait Tool {
 }
 
 /// A registry of tools exposed to the model.
-#[derive(Clone)]
 pub struct ToolRegistry<R, E = Infallible> {
     tools: BTreeMap<String, RegisteredTool<R, E>>,
 }
@@ -70,6 +69,14 @@ pub enum ToolCallError<E> {
 impl<R, E> Default for ToolRegistry<R, E> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<R, E> Clone for ToolRegistry<R, E> {
+    fn clone(&self) -> Self {
+        Self {
+            tools: self.tools.clone(),
+        }
     }
 }
 

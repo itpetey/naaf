@@ -1,169 +1,88 @@
 # Knowledge Base
 
-The `naaf-knowledge` crate provides knowledge orchestration with Qdrant vector database.
+`naaf-knowledge` integrates Qdrant-backed retrieval with `naaf-llm` without making `naaf-llm` itself knowledge-aware.
 
-## Setup
+The recommended pattern is:
 
-```toml
-[dependencies]
-naaf-knowledge = "0.1.0"
-naaf-qdrant = "0.1.0"
-```
+1. Persist and select `KnowledgeGroup`s in application code.
+2. Build a `KnowledgeLlmSession` from those groups.
+3. Reuse the generated system prompt and tool registry across requests.
 
-## Architecture
-
-```
-User Input → KnowledgeIngest → Qdrant
-              ↓
-Query Request → KnowledgeQuery → Qdrant → LLM Context
-              ↓
-Lint Request → KnowledgeLint → Qdrant → LLM Feedback
-```
-
-## QdrantClient
+## Recommended Pattern
 
 ```rust
-use naaf_qdrant::QdrantClient;
+use naaf_knowledge::{KnowledgeGroup, KnowledgeLlmSessionBuilder};
+use naaf_llm::{Executor, ExecutorConfig, OpenAiClient, OpenAiConfig};
 
-let client = QdrantClient::new(
+let qdrant = naaf_qdrant::QdrantClient::from_url(
     "http://localhost:6333",
-    Some("api-key"),
-);
+    Option::<String>::None,
+)?
+.with_collection("docs");
+let embedder = naaf_qdrant::OpenAiEmbedder::new(std::env::var("OPENAI_API_KEY")?);
+
+let knowledge = KnowledgeLlmSessionBuilder::new(Box::new(embedder))
+    .with_system_prompt("You are a helpful assistant for the workspace.")
+    .with_group(
+        KnowledgeGroup::new("docs", "Documentation", "Product and API documentation"),
+        qdrant,
+    )
+    .with_search_defaults(5, 0.7)
+    .with_lint_tool(true)
+    .build()?;
+
+let llm_client = OpenAiClient::new(OpenAiConfig::new(std::env::var("OPENAI_API_KEY")?));
+let executor = Executor::with_tools(llm_client, knowledge.tools().clone())
+    .with_config(ExecutorConfig::new(5));
+
+let request = knowledge.request_with_user_message("gpt-4o", "How do steps retry?");
+let outcome = executor.execute(&(), request).await?;
+println!("{}", outcome.final_message().content.as_deref().unwrap_or(""));
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## Knowledge Operations
+## Why This Shape
 
-### Ingest
+- `naaf-llm` stays generic and only owns execution and tool calling.
+- `naaf-knowledge` owns knowledge groups, prompt augmentation, and knowledge-specific tools.
+- The application chooses which groups are exposed for each request.
+
+## Main Types
+
+- `KnowledgeGroup`: metadata describing one exposed collection.
+- `KnowledgeLlmSessionBuilder`: high-level helper that creates the prompt and tools together.
+- `KnowledgeLlmSession`: reusable session object for request building.
+- `KnowledgeSearchTool`: lower-level retrieval tool for custom wiring.
+- `KnowledgeLintTool`: lower-level lint tool for custom wiring.
+
+## Prompt Augmentation
+
+If you need more control than `KnowledgeLlmSessionBuilder` provides, `naaf-knowledge` also exposes prompt primitives:
 
 ```rust
-use naaf_knowledge::{IngestRequest, IngestResponse};
+use naaf_knowledge::{
+    KnowledgePromptConfig, augment_system_prompt, format_knowledge_prompt_block,
+};
 
-let request = IngestRequest::new()
-    .with_documents(docs)
-    .with_chunking_config(ChunkingConfig::default()
-        .chunk_size(1024)
-        .overlap(128))
-    .with_embeddings(embeddings_config);
-
-let response = knowledge.ingest(&runtime, request).await?;
-```
-
-### Query
-
-```rust
-use naaf_knowledge::{QueryRequest, QueryResponse};
-
-let request = QueryRequest::new()
-    .with_query("how do I build a step?")
-    .with_limit(5)
-    .with_threshold(0.7);
-
-let response = knowledge.query(&runtime, request).await?;
-
-for result in response.results() {
-    println!("Score: {:.2}, Content: {}", result.score(), result.content());
-}
-```
-
-### Lint
-
-```rust
-use naaf_knowledge::{LintRequest, LintResponse};
-
-let request = LintRequest::new()
-    .with_code(code)
-    .with_context(context_docs);
-
-let response = knowledge.lint(&runtime, request).await?;
-```
-
-## Chunking Strategies
-
-### Fixed Size
-
-```rust
-use naaf_qdrant::ChunkingConfig;
-
-ChunkingConfig::default()
-    .chunk_size(1024)
-    .overlap(128)
-```
-
-### Semantic
-
-Split by paragraphs, sections, or code blocks:
-
-```rust
-ChunkingConfig::semantic()
-    .separators(&["\n\n", "\n", " "])
-    .min_chunk_size(100)
-    .max_chunk_size(2048)
-```
-
-## Embeddings
-
-```rust
-use naaf_qdrant::{EmbeddingAdapter, EmbeddingRequest};
-
-let adapter = naaf_qdrant::OpenAIEmbeddings::new(client.clone(), "text-embedding-ada-002");
-
-let request = EmbeddingRequest::new()
-    .with_texts(texts);
-
-let embeddings = adapter.embed(&runtime, request).await?;
-```
-
-## Collections
-
-```rust
-use naaf_qdrant::{client, CreateCollection};
-
-client.create_collection("my-collection").await?;
-
-let collection = client.collection("my-collection");
-```
-
-## CLI
-
-The `naaf-cli` crate provides a CLI for knowledge base operations:
-
-```bash
-# Ingest documents
-naaf kb ingest --path /path/to/docs
-
-# Query the knowledge base
-naaf kb query "how do I build a workflow?"
-
-# Start the API server
-naaf kb serve --port 8080
-```
-
-## Example: Full Workflow
-
-```rust
-use naaf_knowledge::{KnowledgeOrchestrator, IngestRequest, QueryRequest};
-use naaf_core::Step;
-
-let orchestrator = KnowledgeOrchestrator::new(
-    qdrant_client,
-    llm_client,
+let prompt_config = KnowledgePromptConfig::default();
+let system_prompt = augment_system_prompt(
+    "You are a helpful assistant.",
+    &groups,
+    &prompt_config,
 );
 
-// Ingest documentation
-tokio::spawn(async move {
-    orchestrator.ingest(&runtime, IngestRequest::new()
-        .with_documents(load_docs("docs/").await?)
-    ).await.unwrap();
-});
-
-// Query with context
-let result = orchestrator.query(&runtime, QueryRequest::new()
-    .with_query(user_query)
-    .with_limit(3)
-).await?;
+let block = format_knowledge_prompt_block(&groups, &prompt_config);
 ```
+
+## When To Drop Down A Level
+
+Use `KnowledgeSearchTool` and `KnowledgeLintTool` directly when:
+
+1. You already have your own prompt-building pipeline.
+2. You want custom `CompletionRequest` assembly.
+3. You want to expose only search or only lint.
 
 ## See Also
 
-- [Qdrant Integration](llm.md) — Vector database
-- [Examples](examples.md) — Knowledge base examples
+- [LLM Integration](llm.md)
+- [Examples](../examples.md)

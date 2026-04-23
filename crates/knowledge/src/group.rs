@@ -6,6 +6,30 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// Prompt-shaping options for knowledge-group context.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KnowledgePromptConfig {
+    /// Tool name advertised to the model for retrieval.
+    pub tool_name: String,
+    /// Whether the prompt should explicitly encourage retrieval tool usage.
+    pub encourage_tool_use: bool,
+    /// Whether the prompt should require answers to stay grounded in retrieved evidence.
+    pub require_grounded_answers: bool,
+    /// Whether canonical collection identifiers should be included in the prompt.
+    pub mention_collection_ids: bool,
+}
+
+impl Default for KnowledgePromptConfig {
+    fn default() -> Self {
+        Self {
+            tool_name: "knowledge_search".to_string(),
+            encourage_tool_use: true,
+            require_grounded_answers: true,
+            mention_collection_ids: true,
+        }
+    }
+}
+
 /// Result type returned by knowledge-group stores.
 pub type KnowledgeGroupStoreResult<T> =
     Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
@@ -110,17 +134,73 @@ impl KnowledgeGroup {
 
 /// Formats knowledge groups into deterministic prompt context for LLMs.
 pub fn format_knowledge_groups_for_prompt(groups: &[KnowledgeGroup]) -> String {
+    render_knowledge_groups_for_prompt(groups, true)
+}
+
+/// Formats a complete prompt block describing the available knowledge groups.
+pub fn format_knowledge_prompt_block(
+    groups: &[KnowledgeGroup],
+    config: &KnowledgePromptConfig,
+) -> String {
+    let rendered_groups = render_knowledge_groups_for_prompt(groups, config.mention_collection_ids);
+    let mut lines = vec!["Knowledge groups are available for retrieval.".to_string()];
+
+    if config.encourage_tool_use {
+        lines.push(format!(
+            "Use the `{}` tool when project knowledge is needed.",
+            config.tool_name
+        ));
+    }
+
+    if config.require_grounded_answers {
+        lines.push(
+            "Ground answers in retrieved knowledge. If evidence is missing or inconclusive, say so."
+                .to_string(),
+        );
+    }
+
+    if !rendered_groups.is_empty() {
+        lines.push(String::new());
+        lines.push(rendered_groups);
+    }
+
+    lines.join("\n")
+}
+
+/// Appends knowledge-group context to a base system prompt.
+pub fn augment_system_prompt(
+    base_system_prompt: &str,
+    groups: &[KnowledgeGroup],
+    config: &KnowledgePromptConfig,
+) -> String {
+    let knowledge_block = format_knowledge_prompt_block(groups, config);
+
+    match (base_system_prompt.trim(), knowledge_block.trim()) {
+        ("", "") => String::new(),
+        ("", knowledge) => knowledge.to_string(),
+        (base, "") => base.to_string(),
+        (base, knowledge) => format!("{base}\n\n{knowledge}"),
+    }
+}
+
+fn render_knowledge_groups_for_prompt(
+    groups: &[KnowledgeGroup],
+    include_collection_ids: bool,
+) -> String {
     let mut sorted_groups = groups.to_vec();
     sorted_groups.sort_by(|left, right| left.collection.cmp(&right.collection));
 
     sorted_groups
         .into_iter()
         .map(|group| {
-            let mut lines = vec![
-                format!("Collection: {}", group.collection),
-                format!("Name: {}", group.name),
-                format!("Description: {}", group.description),
-            ];
+            let mut lines = Vec::new();
+
+            if include_collection_ids {
+                lines.push(format!("Collection: {}", group.collection));
+            }
+
+            lines.push(format!("Name: {}", group.name));
+            lines.push(format!("Description: {}", group.description));
 
             if !group.tags.is_empty() {
                 lines.push(format!("Tags: {}", group.tags.join(", ")));
@@ -159,7 +239,10 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use serde_json::json;
 
-    use super::{KnowledgeGroup, format_knowledge_groups_for_prompt};
+    use super::{
+        KnowledgeGroup, KnowledgePromptConfig, augment_system_prompt,
+        format_knowledge_groups_for_prompt, format_knowledge_prompt_block,
+    };
 
     #[test]
     fn knowledge_group_round_trips_through_json() {
@@ -228,5 +311,47 @@ mod tests {
         assert!(rendered.contains("Query hints: Start with API docs"));
         assert!(rendered.contains("Extra metadata: priority=1"));
         assert!(rendered.contains("Collection: zeta"));
+    }
+
+    #[test]
+    fn knowledge_prompt_block_mentions_tool_and_grounding() {
+        let group = KnowledgeGroup::new("docs", "Documentation", "Product documentation")
+            .with_query_hints(["Start with API docs"]);
+
+        let rendered = format_knowledge_prompt_block(&[group], &KnowledgePromptConfig::default());
+
+        assert!(rendered.contains("Use the `knowledge_search` tool"));
+        assert!(rendered.contains("Ground answers in retrieved knowledge"));
+        assert!(rendered.contains("Collection: docs"));
+    }
+
+    #[test]
+    fn knowledge_prompt_block_can_hide_collection_ids() {
+        let group = KnowledgeGroup::new("docs", "Documentation", "Product documentation");
+        let config = KnowledgePromptConfig {
+            mention_collection_ids: false,
+            ..KnowledgePromptConfig::default()
+        };
+
+        let rendered = format_knowledge_prompt_block(&[group], &config);
+
+        assert!(rendered.contains("Name: Documentation"));
+        assert!(!rendered.contains("Collection: docs"));
+    }
+
+    #[test]
+    fn augment_system_prompt_appends_knowledge_block() {
+        let group = KnowledgeGroup::new("docs", "Documentation", "Product documentation");
+
+        let rendered = augment_system_prompt(
+            "You are a helpful assistant.",
+            &[group],
+            &KnowledgePromptConfig::default(),
+        );
+
+        assert!(
+            rendered.starts_with("You are a helpful assistant.\n\nKnowledge groups are available")
+        );
+        assert!(rendered.contains("Collection: docs"));
     }
 }

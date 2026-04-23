@@ -1,14 +1,12 @@
-//! Demonstrates using `KnowledgeTool` from `naaf-knowledge` in an LLM workflow.
+//! Demonstrates using `KnowledgeLlmSessionBuilder` from `naaf-knowledge` in an LLM workflow.
 //!
 //! This example shows how to:
 //! 1. Connect to Qdrant and set up an embedder
-//! 2. Register `KnowledgeTool` in a tool registry
-//! 3. Use the tool with an LLM agent to answer questions about indexed knowledge
+//! 2. Build a reusable knowledge-aware LLM session
+//! 3. Use that session to create requests against indexed knowledge
 
-use naaf_knowledge::KnowledgeTool;
-use naaf_llm::{
-    CompletionRequest, Executor, ExecutorConfig, Message, OpenAiClient, OpenAiConfig, ToolRegistry,
-};
+use naaf_knowledge::{KnowledgeGroup, KnowledgeLlmSessionBuilder};
+use naaf_llm::{Executor, ExecutorConfig, OpenAiClient, OpenAiConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,36 +25,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let embedder = naaf_qdrant::OpenAiEmbedder::new(openai_api_key.clone());
 
-    println!("Creating KnowledgeTool...");
-    let knowledge_tool = KnowledgeTool::new(
-        client.clone(),
-        Box::new(embedder),
-        5,   // top_k
-        0.7, // min_score
-    );
-
-    let mut registry = ToolRegistry::new();
-    registry
-        .register(knowledge_tool)
-        .expect("failed to register knowledge tool");
+    println!("Creating knowledge LLM session...");
+    let knowledge_group = KnowledgeGroup::new(
+        collection.clone(),
+        "Workspace knowledge",
+        "Indexed project knowledge for retrieval-augmented answers",
+    )
+    .with_query_hints(["Search the knowledge base before answering project-specific questions"]);
+    let knowledge = KnowledgeLlmSessionBuilder::new(Box::new(embedder))
+        .with_system_prompt("You are a helpful assistant with access to a knowledge base.")
+        .with_group(knowledge_group, client.clone())
+        .with_search_defaults(5, 0.7)
+        .build()
+        .expect("failed to build knowledge session");
 
     let llm_config = OpenAiConfig::new(openai_api_key);
     let llm_client = OpenAiClient::new(llm_config);
 
-    let executor = Executor::with_tools(llm_client, registry).with_config(ExecutorConfig::new(5));
+    let executor = Executor::with_tools(llm_client, knowledge.tools().clone())
+        .with_config(ExecutorConfig::new(5));
 
     println!("\n--- Query 1: What do you know about naaf-core? ---\n");
 
     let query1 = "What do you know about naaf-core?";
-    let messages = vec![
-        Message::system(
-            "You are a helpful assistant with access to a knowledge base. \
-            Use the knowledge_search tool to find relevant information before answering.",
-        ),
-        Message::user(query1),
-    ];
-
-    let request = CompletionRequest::new("gpt-4o".to_string(), messages);
+    let request = knowledge.request_with_user_message("gpt-4o", query1);
 
     let outcome = executor
         .execute(&(), request)
@@ -70,9 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Query 2: Find info about Step and Retry ---\n");
 
     let query2 = "Find information about Step and Retry in the codebase";
-    let messages = vec![Message::user(query2)];
-
-    let request = CompletionRequest::new("gpt-4o".to_string(), messages);
+    let request = knowledge.request_with_user_message("gpt-4o", query2);
 
     let outcome = executor
         .execute(&(), request)
