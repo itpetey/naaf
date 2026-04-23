@@ -36,6 +36,25 @@ pub struct AssistantMessage {
     pub tool_calls: Vec<ToolCall>,
 }
 
+/// A provider-neutral conversation message.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Message {
+    /// A system instruction.
+    System {
+        /// Raw instruction content sent as the system prompt.
+        content: String,
+    },
+    /// A user message.
+    User {
+        /// Raw user-authored content.
+        content: String,
+    },
+    /// A prior assistant response.
+    Assistant(AssistantMessage),
+    /// A tool result produced by the executor.
+    Tool(ToolResultMessage),
+}
+
 /// A tool exposed to the model.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSpec {
@@ -67,25 +86,6 @@ pub struct ToolResultMessage {
     pub tool_name: String,
     /// Arbitrary JSON result content.
     pub content: Value,
-}
-
-/// A provider-neutral conversation message.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Message {
-    /// A system instruction.
-    System {
-        /// Raw instruction content sent as the system prompt.
-        content: String,
-    },
-    /// A user message.
-    User {
-        /// Raw user-authored content.
-        content: String,
-    },
-    /// A prior assistant response.
-    Assistant(AssistantMessage),
-    /// A tool result produced by the executor.
-    Tool(ToolResultMessage),
 }
 
 /// Tool selection behaviour requested from the provider.

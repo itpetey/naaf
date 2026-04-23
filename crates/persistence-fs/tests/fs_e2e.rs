@@ -103,30 +103,6 @@ async fn fs_checkpointer_saves_and_loads_workflow() {
 }
 
 #[tokio::test]
-async fn fs_knowledge_group_store_round_trips_groups() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let store = FsKnowledgeGroupStore::new(dir.path());
-    let group = KnowledgeGroup::new("docs", "Documentation", "Product and API docs")
-        .with_tags(["api", "rust"])
-        .with_query_hints(["Prefer official documentation"]);
-
-    store
-        .upsert_group(&group)
-        .await
-        .expect("upsert should succeed");
-
-    let loaded = store
-        .load_group("docs")
-        .await
-        .expect("load should succeed")
-        .expect("group should exist");
-
-    assert_eq!(loaded.collection, "docs");
-    assert_eq!(loaded.tags, vec!["api", "rust"]);
-    assert_eq!(loaded.query_hints, vec!["Prefer official documentation"]);
-}
-
-#[tokio::test]
 async fn fs_knowledge_group_store_lists_and_deletes_groups() {
     let dir = tempfile::tempdir().expect("temp dir");
     let store = FsKnowledgeGroupStore::new(dir.path());
@@ -187,4 +163,28 @@ async fn fs_knowledge_group_store_preserves_created_at_on_upsert() {
     assert_eq!(updated.created_at, original.created_at);
     assert!(updated.updated_at >= original.updated_at);
     assert_eq!(updated.description, "Updated");
+}
+
+#[tokio::test]
+async fn fs_knowledge_group_store_round_trips_groups() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let store = FsKnowledgeGroupStore::new(dir.path());
+    let group = KnowledgeGroup::new("docs", "Documentation", "Product and API docs")
+        .with_tags(["api", "rust"])
+        .with_query_hints(["Prefer official documentation"]);
+
+    store
+        .upsert_group(&group)
+        .await
+        .expect("upsert should succeed");
+
+    let loaded = store
+        .load_group("docs")
+        .await
+        .expect("load should succeed")
+        .expect("group should exist");
+
+    assert_eq!(loaded.collection, "docs");
+    assert_eq!(loaded.tags, vec!["api", "rust"]);
+    assert_eq!(loaded.query_hints, vec!["Prefer official documentation"]);
 }

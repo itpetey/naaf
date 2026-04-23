@@ -132,29 +132,6 @@ async fn sqlite_checkpointer_upserts_workflow() {
 }
 
 #[tokio::test]
-async fn sqlite_knowledge_group_store_round_trips_groups() {
-    let store = SqliteKnowledgeGroupStore::open_in_memory().expect("should open");
-    let group = KnowledgeGroup::new("docs", "Documentation", "Product and API docs")
-        .with_tags(["api", "rust"])
-        .with_query_hints(["Prefer official documentation"]);
-
-    store
-        .upsert_group(&group)
-        .await
-        .expect("upsert should succeed");
-
-    let loaded = store
-        .load_group("docs")
-        .await
-        .expect("load should succeed")
-        .expect("group should exist");
-
-    assert_eq!(loaded.collection, "docs");
-    assert_eq!(loaded.tags, vec!["api", "rust"]);
-    assert_eq!(loaded.query_hints, vec!["Prefer official documentation"]);
-}
-
-#[tokio::test]
 async fn sqlite_knowledge_group_store_lists_and_deletes_groups() {
     let store = SqliteKnowledgeGroupStore::open_in_memory().expect("should open");
 
@@ -213,4 +190,27 @@ async fn sqlite_knowledge_group_store_preserves_created_at_on_upsert() {
     assert_eq!(updated.created_at, original.created_at);
     assert!(updated.updated_at >= original.updated_at);
     assert_eq!(updated.description, "Updated");
+}
+
+#[tokio::test]
+async fn sqlite_knowledge_group_store_round_trips_groups() {
+    let store = SqliteKnowledgeGroupStore::open_in_memory().expect("should open");
+    let group = KnowledgeGroup::new("docs", "Documentation", "Product and API docs")
+        .with_tags(["api", "rust"])
+        .with_query_hints(["Prefer official documentation"]);
+
+    store
+        .upsert_group(&group)
+        .await
+        .expect("upsert should succeed");
+
+    let loaded = store
+        .load_group("docs")
+        .await
+        .expect("load should succeed")
+        .expect("group should exist");
+
+    assert_eq!(loaded.collection, "docs");
+    assert_eq!(loaded.tags, vec!["api", "rust"]);
+    assert_eq!(loaded.query_hints, vec!["Prefer official documentation"]);
 }

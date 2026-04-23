@@ -21,18 +21,6 @@ pub struct KnowledgeLlmConfig {
     pub repo: Option<String>,
 }
 
-impl Default for KnowledgeLlmConfig {
-    fn default() -> Self {
-        Self {
-            prompt: KnowledgePromptConfig::default(),
-            include_lint_tool: false,
-            search_top_k: 5,
-            search_min_score: 0.7,
-            repo: None,
-        }
-    }
-}
-
 /// One knowledge-group target together with the client used to query it.
 #[derive(Clone)]
 pub struct KnowledgeLlmTarget {
@@ -40,13 +28,6 @@ pub struct KnowledgeLlmTarget {
     pub group: KnowledgeGroup,
     /// Qdrant client scoped to the target collection.
     pub client: QdrantClient,
-}
-
-impl KnowledgeLlmTarget {
-    /// Creates one knowledge target from a group and its client.
-    pub fn new(group: KnowledgeGroup, client: QdrantClient) -> Self {
-        Self { group, client }
-    }
 }
 
 /// Reusable LLM session state derived from selected knowledge groups.
@@ -63,6 +44,25 @@ pub struct KnowledgeLlmSessionBuilder<R> {
     embedder: Box<dyn Embedder>,
     config: KnowledgeLlmConfig,
     _marker: std::marker::PhantomData<R>,
+}
+
+impl Default for KnowledgeLlmConfig {
+    fn default() -> Self {
+        Self {
+            prompt: KnowledgePromptConfig::default(),
+            include_lint_tool: false,
+            search_top_k: 5,
+            search_min_score: 0.7,
+            repo: None,
+        }
+    }
+}
+
+impl KnowledgeLlmTarget {
+    /// Creates one knowledge target from a group and its client.
+    pub fn new(group: KnowledgeGroup, client: QdrantClient) -> Self {
+        Self { group, client }
+    }
 }
 
 impl<R> KnowledgeLlmSession<R> {

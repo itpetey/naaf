@@ -6,6 +6,28 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// Boxed future type used by knowledge-group stores.
+pub type KnowledgeGroupStoreFuture<T> =
+    Pin<Box<dyn Future<Output = KnowledgeGroupStoreResult<T>> + Send>>;
+/// Result type returned by knowledge-group stores.
+pub type KnowledgeGroupStoreResult<T> =
+    Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+
+/// Pluggable store for persisting knowledge-group metadata.
+pub trait KnowledgeGroupStore: Send + Sync + 'static {
+    /// Creates or updates a stored knowledge group.
+    fn upsert_group(&self, group: &KnowledgeGroup) -> KnowledgeGroupStoreFuture<()>;
+
+    /// Loads one knowledge group by collection name.
+    fn load_group(&self, collection: &str) -> KnowledgeGroupStoreFuture<Option<KnowledgeGroup>>;
+
+    /// Lists all stored knowledge groups.
+    fn list_groups(&self) -> KnowledgeGroupStoreFuture<Vec<KnowledgeGroup>>;
+
+    /// Deletes one knowledge group by collection name.
+    fn delete_group(&self, collection: &str) -> KnowledgeGroupStoreFuture<()>;
+}
+
 /// Prompt-shaping options for knowledge-group context.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KnowledgePromptConfig {
@@ -18,25 +40,6 @@ pub struct KnowledgePromptConfig {
     /// Whether canonical collection identifiers should be included in the prompt.
     pub mention_collection_ids: bool,
 }
-
-impl Default for KnowledgePromptConfig {
-    fn default() -> Self {
-        Self {
-            tool_name: "knowledge_search".to_string(),
-            encourage_tool_use: true,
-            require_grounded_answers: true,
-            mention_collection_ids: true,
-        }
-    }
-}
-
-/// Result type returned by knowledge-group stores.
-pub type KnowledgeGroupStoreResult<T> =
-    Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
-
-/// Boxed future type used by knowledge-group stores.
-pub type KnowledgeGroupStoreFuture<T> =
-    Pin<Box<dyn Future<Output = KnowledgeGroupStoreResult<T>> + Send>>;
 
 /// Rich metadata describing one knowledge collection.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,19 +62,15 @@ pub struct KnowledgeGroup {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Pluggable store for persisting knowledge-group metadata.
-pub trait KnowledgeGroupStore: Send + Sync + 'static {
-    /// Creates or updates a stored knowledge group.
-    fn upsert_group(&self, group: &KnowledgeGroup) -> KnowledgeGroupStoreFuture<()>;
-
-    /// Loads one knowledge group by collection name.
-    fn load_group(&self, collection: &str) -> KnowledgeGroupStoreFuture<Option<KnowledgeGroup>>;
-
-    /// Lists all stored knowledge groups.
-    fn list_groups(&self) -> KnowledgeGroupStoreFuture<Vec<KnowledgeGroup>>;
-
-    /// Deletes one knowledge group by collection name.
-    fn delete_group(&self, collection: &str) -> KnowledgeGroupStoreFuture<()>;
+impl Default for KnowledgePromptConfig {
+    fn default() -> Self {
+        Self {
+            tool_name: "knowledge_search".to_string(),
+            encourage_tool_use: true,
+            require_grounded_answers: true,
+            mention_collection_ids: true,
+        }
+    }
 }
 
 impl KnowledgeGroup {
@@ -132,6 +131,22 @@ impl KnowledgeGroup {
     }
 }
 
+/// Appends knowledge-group context to a base system prompt.
+pub fn augment_system_prompt(
+    base_system_prompt: &str,
+    groups: &[KnowledgeGroup],
+    config: &KnowledgePromptConfig,
+) -> String {
+    let knowledge_block = format_knowledge_prompt_block(groups, config);
+
+    match (base_system_prompt.trim(), knowledge_block.trim()) {
+        ("", "") => String::new(),
+        ("", knowledge) => knowledge.to_string(),
+        (base, "") => base.to_string(),
+        (base, knowledge) => format!("{base}\n\n{knowledge}"),
+    }
+}
+
 /// Formats knowledge groups into deterministic prompt context for LLMs.
 pub fn format_knowledge_groups_for_prompt(groups: &[KnowledgeGroup]) -> String {
     render_knowledge_groups_for_prompt(groups, true)
@@ -165,22 +180,6 @@ pub fn format_knowledge_prompt_block(
     }
 
     lines.join("\n")
-}
-
-/// Appends knowledge-group context to a base system prompt.
-pub fn augment_system_prompt(
-    base_system_prompt: &str,
-    groups: &[KnowledgeGroup],
-    config: &KnowledgePromptConfig,
-) -> String {
-    let knowledge_block = format_knowledge_prompt_block(groups, config);
-
-    match (base_system_prompt.trim(), knowledge_block.trim()) {
-        ("", "") => String::new(),
-        ("", knowledge) => knowledge.to_string(),
-        (base, "") => base.to_string(),
-        (base, knowledge) => format!("{base}\n\n{knowledge}"),
-    }
 }
 
 fn render_knowledge_groups_for_prompt(

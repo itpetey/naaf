@@ -14,7 +14,7 @@
 //!
 //! The checkpointer uses two tables:
 //! - `workflow_checkpoints` — stores workflow-level checkpoints by run ID
-//! - `step_checkpoints` — stores per-step checkpoints by run ID and node
+//! - `step_checkpoints` — stores per-step checkpoints by run ID and no
 
 use std::sync::Arc;
 
@@ -39,6 +39,14 @@ pub struct SqliteCheckpointer {
 /// SQLite-backed persistence for knowledge-group metadata.
 pub struct SqliteKnowledgeGroupStore {
     conn: Arc<Mutex<Connection>>,
+}
+
+#[derive(Debug, Error)]
+pub enum SqliteKnowledgeGroupStoreError {
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("serialisation error: {0}")]
+    Serialisation(#[from] serde_json::Error),
 }
 
 impl SqliteCheckpointer {
@@ -69,14 +77,6 @@ impl SqliteCheckpointer {
         let conn = Connection::open_in_memory()?;
         Self::new(conn)
     }
-}
-
-#[derive(Debug, Error)]
-pub enum SqliteKnowledgeGroupStoreError {
-    #[error("SQLite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
-    #[error("serialisation error: {0}")]
-    Serialisation(#[from] serde_json::Error),
 }
 
 impl SqliteKnowledgeGroupStore {

@@ -360,14 +360,6 @@ impl KnowledgeGroupStore for FsKnowledgeGroupStore {
     }
 }
 
-fn encode_collection_filename(collection: &str) -> String {
-    let mut encoded = String::with_capacity(collection.len() * 2);
-    for byte in collection.bytes() {
-        encoded.push_str(&format!("{byte:02x}"));
-    }
-    encoded
-}
-
 /// Generates a unique run identifier suitable for use as a directory name.
 pub fn generate_run_id() -> std::io::Result<String> {
     let now = SystemTime::now()
@@ -382,4 +374,12 @@ pub fn generate_run_id() -> std::io::Result<String> {
         now.subsec_nanos(),
         process::id()
     ))
+}
+
+fn encode_collection_filename(collection: &str) -> String {
+    let mut encoded = String::with_capacity(collection.len() * 2);
+    for byte in collection.bytes() {
+        encoded.push_str(&format!("{byte:02x}"));
+    }
+    encoded
 }
