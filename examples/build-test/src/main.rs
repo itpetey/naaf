@@ -91,25 +91,27 @@ async fn main() {
         })
     });
 
-    let cargo_test = check_fn(|runtime: &BuildRuntime, subject: Workspace| {
-        let findings = if subject.revision >= runtime.required_revision {
-            Vec::new()
-        } else {
-            let failed = runtime.required_revision - subject.revision;
-            vec![TestFinding::TestsFailed {
-                passed: subject.revision,
-                failed,
-            }]
-        };
-        Box::pin(async move { Ok::<_, Error>(findings) })
-    });
+    let cargo_test = check_fn(
+        |runtime: &BuildRuntime, _input: FeatureRequest, subject: Workspace| {
+            let findings = if subject.revision >= runtime.required_revision {
+                Vec::new()
+            } else {
+                let failed = runtime.required_revision - subject.revision;
+                vec![TestFinding::TestsFailed {
+                    passed: subject.revision,
+                    failed,
+                }]
+            };
+            Box::pin(async move { Ok::<_, Error>(findings) })
+        },
+    );
 
     let repair_patch = repair_last_fn(
         |runtime: &BuildRuntime, last: Attempt<FeatureRequest, Patch, TestFinding>| {
             Box::pin(async move {
                 Ok::<_, Error>(FeatureRequest {
                     name: last.input.name,
-                    revision: last.artefact.revision + runtime.repair_increment,
+                    revision: last.output.revision + runtime.repair_increment,
                 })
             })
         },

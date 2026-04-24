@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use futures::future::LocalBoxFuture;
 
-/// Produces a typed artefact from a typed input using the shared runtime.
+/// Produces a typed output from a typed input using the shared runtime.
 pub trait Task {
     /// The shared runtime capabilities used by this task.
     type Runtime;

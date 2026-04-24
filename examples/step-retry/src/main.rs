@@ -70,22 +70,24 @@ async fn main() {
         })
     });
 
-    let review_plan = check_fn(|runtime: &PlannerRuntime, subject: ProjectPlan| {
-        let mut findings = Vec::new();
-        if subject.phases.len() < runtime.min_phases {
-            findings.push(Finding::InsufficientPhases {
-                min: runtime.min_phases,
-                actual: subject.phases.len(),
-            });
-        }
-        if subject.estimated_weeks < runtime.min_weeks {
-            findings.push(Finding::EstimationTooLow {
-                min: runtime.min_weeks,
-                actual: subject.estimated_weeks,
-            });
-        }
-        Box::pin(async move { Ok::<_, Error>(findings) })
-    });
+    let review_plan = check_fn(
+        |runtime: &PlannerRuntime, _input: PlanningInput, subject: ProjectPlan| {
+            let mut findings = Vec::new();
+            if subject.phases.len() < runtime.min_phases {
+                findings.push(Finding::InsufficientPhases {
+                    min: runtime.min_phases,
+                    actual: subject.phases.len(),
+                });
+            }
+            if subject.estimated_weeks < runtime.min_weeks {
+                findings.push(Finding::EstimationTooLow {
+                    min: runtime.min_weeks,
+                    actual: subject.estimated_weeks,
+                });
+            }
+            Box::pin(async move { Ok::<_, Error>(findings) })
+        },
+    );
 
     let revise_plan = repair_last_fn(
         |runtime: &PlannerRuntime, last: Attempt<PlanningInput, ProjectPlan, Finding>| {
@@ -109,7 +111,7 @@ async fn main() {
                 Ok::<_, Error>(PlanningInput {
                     name: last.input.name,
                     goals,
-                    estimated_weeks: last.artefact.estimated_weeks + runtime.repair_increment,
+                    estimated_weeks: last.output.estimated_weeks + runtime.repair_increment,
                 })
             })
         },

@@ -141,14 +141,16 @@ impl<R> QdrantSimilarityCheck<R> {
 
 impl<R: 'static> naaf_core::Check for QdrantSimilarityCheck<R> {
     type Runtime = R;
-    type Subject = String;
+    type Input = String;
+    type Output = String;
     type Finding = SearchResult;
     type Error = QdrantError;
 
     fn check<'a>(
         &'a self,
         _runtime: &'a Self::Runtime,
-        query: Self::Subject,
+        _input: Self::Input,
+        query: Self::Output,
     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
         Box::pin(async move {
             let vectors = self.embedder.embed(vec![query]).await?;

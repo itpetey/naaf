@@ -11,9 +11,9 @@ pub struct TaskFn<R, I, O, E, F> {
     _marker: PhantomData<fn() -> (R, I, O, E)>,
 }
 
-pub struct CheckFn<R, S, F, E, Fun> {
+pub struct CheckFn<R, I, O, F, E, Fun> {
     f: Fun,
-    _marker: PhantomData<fn() -> (R, S, F, E)>,
+    _marker: PhantomData<fn() -> (R, I, O, F, E)>,
 }
 
 pub struct MaterialiserFn<R, I, O, E, F> {
@@ -62,7 +62,7 @@ where
     }
 }
 
-impl<R, S, F, E, Fun> CheckFn<R, S, F, E, Fun> {
+impl<R, I, O, F, E, Fun> CheckFn<R, I, O, F, E, Fun> {
     pub fn new(f: Fun) -> Self {
         Self {
             f,
@@ -71,25 +71,28 @@ impl<R, S, F, E, Fun> CheckFn<R, S, F, E, Fun> {
     }
 }
 
-impl<R, S, F, E, Fun> Check for CheckFn<R, S, F, E, Fun>
+impl<R, I, O, F, E, Fun> Check for CheckFn<R, I, O, F, E, Fun>
 where
     R: 'static,
-    S: 'static,
+    I: 'static,
+    O: 'static,
     F: 'static,
     E: 'static,
-    Fun: Fn(&R, S) -> LocalBoxFuture<'_, Result<Vec<F>, E>>,
+    Fun: Fn(&R, I, O) -> LocalBoxFuture<'_, Result<Vec<F>, E>>,
 {
     type Runtime = R;
-    type Subject = S;
+    type Input = I;
+    type Output = O;
     type Finding = F;
     type Error = E;
 
     fn check<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        subject: Self::Subject,
+        input: Self::Input,
+        output: Self::Output,
     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
-        (self.f)(runtime, subject)
+        (self.f)(runtime, input, output)
     }
 }
 
@@ -144,14 +147,14 @@ where
 {
     type Runtime = R;
     type Input = I;
-    type Artefact = A;
+    type Output = A;
     type Finding = F;
     type Error = E;
 
     fn repair<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+        attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
         (self.f)(runtime, attempts)
     }
@@ -177,23 +180,23 @@ where
 {
     type Runtime = R;
     type Input = I;
-    type Artefact = A;
+    type Output = A;
     type Finding = F;
     type Error = E;
 
     fn repair<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+        attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
         let last = attempts.into_iter().last().expect("attempt present");
         (self.f)(runtime, last)
     }
 }
 
-pub fn check_fn<R, S, F, E, Fun>(f: Fun) -> CheckFn<R, S, F, E, Fun>
+pub fn check_fn<R, I, O, F, E, Fun>(f: Fun) -> CheckFn<R, I, O, F, E, Fun>
 where
-    Fun: Fn(&R, S) -> LocalBoxFuture<'_, Result<Vec<F>, E>>,
+    Fun: Fn(&R, I, O) -> LocalBoxFuture<'_, Result<Vec<F>, E>>,
 {
     CheckFn::new(f)
 }
@@ -261,8 +264,8 @@ mod tests {
 
     #[tokio::test]
     async fn check_fn_implements_check() {
-        let check = super::check_fn(|_rt: &Runtime, subject: Output| {
-            let findings = if subject.value < 10 {
+        let check = super::check_fn(|_rt: &Runtime, _input: Input, output: Output| {
+            let findings = if output.value < 10 {
                 vec!["too small"]
             } else {
                 Vec::new()
@@ -270,12 +273,14 @@ mod tests {
             Box::pin(async move { Ok::<_, Infallible>(findings) })
         });
 
-        let findings: Result<Vec<&'static str>, Infallible> =
-            check.check(&Runtime, Output { value: 5 }).await;
+        let findings: Result<Vec<&'static str>, Infallible> = check
+            .check(&Runtime, Input { value: 0 }, Output { value: 5 })
+            .await;
         assert_eq!(findings.expect("check should succeed"), vec!["too small"]);
 
-        let findings: Result<Vec<&'static str>, Infallible> =
-            check.check(&Runtime, Output { value: 15 }).await;
+        let findings: Result<Vec<&'static str>, Infallible> = check
+            .check(&Runtime, Input { value: 0 }, Output { value: 15 })
+            .await;
         assert!(findings.expect("check should succeed").is_empty());
     }
 
@@ -298,7 +303,7 @@ mod tests {
             |_rt: &Runtime, last: Attempt<Input, Output, &'static str>| {
                 Box::pin(async move {
                     Ok::<_, Infallible>(Input {
-                        value: last.artefact.value + 1,
+                        value: last.output.value + 1,
                     })
                 })
             },
@@ -306,7 +311,7 @@ mod tests {
 
         let attempts = vec![Attempt {
             input: Input { value: 3 },
-            artefact: Output { value: 6 },
+            output: Output { value: 6 },
             findings: vec!["too small"],
         }];
 
@@ -336,8 +341,8 @@ mod tests {
             Box::pin(async move { Ok::<_, Infallible>(Output { value: input.value }) })
         });
 
-        let check = check_fn(|_rt: &Runtime, subject: Output| {
-            let findings: Vec<&'static str> = if subject.value < 3 {
+        let check = check_fn(|_rt: &Runtime, _input: Input, output: Output| {
+            let findings: Vec<&'static str> = if output.value < 3 {
                 vec!["too low"]
             } else {
                 Vec::new()

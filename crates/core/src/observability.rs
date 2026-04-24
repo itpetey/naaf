@@ -10,10 +10,11 @@ use crate::{
 
 /// Extension trait for wrapping checks with structured `tracing` events.
 pub trait CheckExt: Check + Sized {
-    /// Wraps the check and emits lifecycle events, inputs, and findings.
+    /// Wraps the check and emits lifecycle events, inputs, outputs, and findings.
     fn observed(self) -> ObservedCheck<Self>
     where
-        Self::Subject: Debug,
+        Self::Input: Debug,
+        Self::Output: Debug,
         Self::Finding: Debug,
         Self::Error: Debug,
     {
@@ -23,7 +24,8 @@ pub trait CheckExt: Check + Sized {
     /// Wraps the check and uses a custom component name in emitted events.
     fn observed_as(self, name: impl Into<Cow<'static, str>>) -> ObservedCheck<Self>
     where
-        Self::Subject: Debug,
+        Self::Input: Debug,
+        Self::Output: Debug,
         Self::Finding: Debug,
         Self::Error: Debug,
     {
@@ -60,7 +62,7 @@ pub trait RepairPlannerExt: RepairPlanner + Sized {
     fn observed(self) -> ObservedRepairPlanner<Self>
     where
         Self::Input: Debug,
-        Self::Artefact: Debug,
+        Self::Output: Debug,
         Self::Finding: Debug,
         Self::Error: Debug,
     {
@@ -71,7 +73,7 @@ pub trait RepairPlannerExt: RepairPlanner + Sized {
     fn observed_as(self, name: impl Into<Cow<'static, str>>) -> ObservedRepairPlanner<Self>
     where
         Self::Input: Debug,
-        Self::Artefact: Debug,
+        Self::Output: Debug,
         Self::Finding: Debug,
         Self::Error: Debug,
     {
@@ -209,19 +211,22 @@ impl<C> ObservedCheck<C> {
 impl<C> Check for ObservedCheck<C>
 where
     C: Check,
-    C::Subject: Debug,
+    C::Input: Debug,
+    C::Output: Debug,
     C::Finding: Debug,
     C::Error: Debug,
 {
     type Runtime = C::Runtime;
-    type Subject = C::Subject;
+    type Input = C::Input;
+    type Output = C::Output;
     type Finding = C::Finding;
     type Error = C::Error;
 
     fn check<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        subject: Self::Subject,
+        input: Self::Input,
+        output: Self::Output,
     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
         let check = self.name.clone();
         let inner = &self.inner;
@@ -229,16 +234,17 @@ where
             name::CHECK,
             component = component::CHECK,
             check = %check,
-            subject_type = %type_name::<C::Subject>(),
+            input_type = %type_name::<C::Input>(),
+            output_type = %type_name::<C::Output>(),
             finding_type = %type_name::<C::Finding>()
         );
 
         Box::pin(
             async move {
-                trace!(action = action::INPUT, subject = ?subject, "check subject");
+                trace!(action = action::INPUT, input = ?input, output = ?output, "check input and output");
                 debug!(action = action::RUN_START, "check started");
 
-                match inner.check(runtime, subject).await {
+                match inner.check(runtime, input, output).await {
                     Ok(findings) => {
                         let finding_count = findings.len();
                         trace!(action = action::OUTPUT, findings = ?findings, "check findings");
@@ -332,20 +338,20 @@ impl<P> RepairPlanner for ObservedRepairPlanner<P>
 where
     P: RepairPlanner,
     P::Input: Debug,
-    P::Artefact: Debug,
+    P::Output: Debug,
     P::Finding: Debug,
     P::Error: Debug,
 {
     type Runtime = P::Runtime;
     type Input = P::Input;
-    type Artefact = P::Artefact;
+    type Output = P::Output;
     type Finding = P::Finding;
     type Error = P::Error;
 
     fn repair<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+        attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
         let planner = self.name.clone();
         let inner = &self.inner;
@@ -354,7 +360,7 @@ where
             component = component::REPAIR,
             planner = %planner,
             input_type = %type_name::<P::Input>(),
-            artefact_type = %type_name::<P::Artefact>(),
+            output_type = %type_name::<P::Output>(),
             finding_type = %type_name::<P::Finding>()
         );
 
@@ -480,17 +486,19 @@ mod tests {
 
     impl crate::Check for CargoTest {
         type Runtime = TestRuntime;
-        type Subject = Workspace;
+        type Input = Input;
+        type Output = Workspace;
         type Finding = Finding;
         type Error = TestError;
 
         fn check<'a>(
             &'a self,
             runtime: &'a Self::Runtime,
-            subject: Self::Subject,
+            _input: Self::Input,
+            output: Self::Output,
         ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
             Box::pin(async move {
-                if subject.revision >= runtime.required_revision {
+                if output.revision >= runtime.required_revision {
                     Ok(Vec::new())
                 } else {
                     Ok(vec![Finding::TestsFailed])
@@ -504,20 +512,20 @@ mod tests {
     impl crate::RepairPlanner for Repair {
         type Runtime = TestRuntime;
         type Input = Input;
-        type Artefact = Patch;
+        type Output = Patch;
         type Finding = Finding;
         type Error = TestError;
 
         fn repair<'a>(
             &'a self,
             _runtime: &'a Self::Runtime,
-            attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+            attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
         ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
             Box::pin(async move {
                 let previous = attempts.last().expect("attempt present");
                 Ok(Input {
                     prompt: previous.input.prompt,
-                    revision: previous.artefact.revision + 1,
+                    revision: previous.output.revision + 1,
                 })
             })
         }

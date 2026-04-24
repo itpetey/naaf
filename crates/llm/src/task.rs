@@ -16,13 +16,25 @@ type AdapterMarker<Input, Output, BuildError, DecodeError> =
     PhantomData<fn(Input) -> Result<Output, (BuildError, DecodeError)>>;
 type AdapterResult<C, Output, BuildError, ToolError, DecodeError> =
     Result<Output, AdaptorError<BuildError, <C as LlmClient>::Error, ToolError, DecodeError>>;
+type CheckAdapter<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, ToolError> =
+    LlmRoleAdapter<
+        C,
+        R,
+        Build,
+        Decode,
+        (Input, Output),
+        Vec<Finding>,
+        BuildError,
+        DecodeError,
+        ToolError,
+    >;
 type RepairAdapter<
     C,
     R,
     Build,
     Decode,
     Input,
-    Artefact,
+    Output,
     Finding,
     BuildError,
     DecodeError,
@@ -32,13 +44,13 @@ type RepairAdapter<
     R,
     Build,
     Decode,
-    RepairAttempts<Input, Artefact, Finding>,
+    RepairAttempts<Input, Output, Finding>,
     Input,
     BuildError,
     DecodeError,
     ToolError,
 >;
-type RepairAttempts<Input, Artefact, Finding> = Vec<Attempt<Input, Artefact, Finding>>;
+type RepairAttempts<Input, Output, Finding> = Vec<Attempt<Input, Output, Finding>>;
 
 struct LlmRoleAdapter<C, R, Build, Decode, Input, Output, BuildError, DecodeError, ToolError> {
     executor: Arc<Executor<C, R, ToolError>>,
@@ -68,19 +80,21 @@ pub struct LlmCheck<
     R,
     Build,
     Decode,
-    Subject,
+    Input,
+    Output,
     Finding,
     BuildError,
     DecodeError,
     ToolError = Infallible,
 > {
-    adapter: LlmRoleAdapter<
+    adapter: CheckAdapter<
         C,
         R,
         Build,
         Decode,
-        Subject,
-        Vec<Finding>,
+        Input,
+        Output,
+        Finding,
         BuildError,
         DecodeError,
         ToolError,
@@ -109,7 +123,7 @@ pub struct LlmRepairPlanner<
     Build,
     Decode,
     Input,
-    Artefact,
+    Output,
     Finding,
     BuildError,
     DecodeError,
@@ -121,7 +135,7 @@ pub struct LlmRepairPlanner<
         Build,
         Decode,
         Input,
-        Artefact,
+        Output,
         Finding,
         BuildError,
         DecodeError,
@@ -247,8 +261,8 @@ where
     }
 }
 
-impl<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError>
-    LlmCheck<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError, Infallible>
+impl<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
+    LlmCheck<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, Infallible>
 {
     /// Creates an LLM check without tools.
     pub fn new(
@@ -260,8 +274,8 @@ impl<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError>
     }
 }
 
-impl<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError, ToolError>
-    LlmCheck<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError, ToolError>
+impl<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, ToolError>
+    LlmCheck<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, ToolError>
 {
     /// Creates an LLM check with a preconfigured executor.
     pub fn with_executor(
@@ -288,31 +302,34 @@ impl<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError, ToolError>
     }
 }
 
-impl<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError, ToolError> Check
-    for LlmCheck<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError, ToolError>
+impl<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, ToolError> Check
+    for LlmCheck<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, ToolError>
 where
     C: LlmClient<Runtime = R> + 'static,
     C::Error: 'static,
     R: 'static,
-    Subject: 'static,
+    Input: 'static,
+    Output: 'static,
     Finding: 'static,
     BuildError: 'static,
     DecodeError: 'static,
     ToolError: 'static,
-    Build: Fn(&R, Subject) -> Result<CompletionRequest, BuildError> + 'static,
+    Build: Fn(&R, (Input, Output)) -> Result<CompletionRequest, BuildError> + 'static,
     Decode: Fn(ExecutionOutcome) -> Result<Vec<Finding>, DecodeError> + 'static,
 {
     type Runtime = R;
-    type Subject = Subject;
+    type Input = Input;
+    type Output = Output;
     type Finding = Finding;
     type Error = AdaptorError<BuildError, C::Error, ToolError, DecodeError>;
 
     fn check<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        subject: Self::Subject,
+        input: Self::Input,
+        output: Self::Output,
     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
-        self.adapter.execute(runtime, subject)
+        self.adapter.execute(runtime, (input, output))
     }
 }
 
@@ -385,14 +402,14 @@ where
     }
 }
 
-impl<C, R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
+impl<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
     LlmRepairPlanner<
         C,
         R,
         Build,
         Decode,
         Input,
-        Artefact,
+        Output,
         Finding,
         BuildError,
         DecodeError,
@@ -409,14 +426,14 @@ impl<C, R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
     }
 }
 
-impl<C, R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError, ToolError>
+impl<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, ToolError>
     LlmRepairPlanner<
         C,
         R,
         Build,
         Decode,
         Input,
-        Artefact,
+        Output,
         Finding,
         BuildError,
         DecodeError,
@@ -448,15 +465,14 @@ impl<C, R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError, Too
     }
 }
 
-impl<C, R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError, ToolError>
-    RepairPlanner
+impl<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, ToolError> RepairPlanner
     for LlmRepairPlanner<
         C,
         R,
         Build,
         Decode,
         Input,
-        Artefact,
+        Output,
         Finding,
         BuildError,
         DecodeError,
@@ -467,25 +483,25 @@ where
     C::Error: 'static,
     R: 'static,
     Input: 'static,
-    Artefact: 'static,
+    Output: 'static,
     Finding: 'static,
     BuildError: 'static,
     DecodeError: 'static,
     ToolError: 'static,
-    Build: Fn(&R, Vec<Attempt<Input, Artefact, Finding>>) -> Result<CompletionRequest, BuildError>
+    Build: Fn(&R, Vec<Attempt<Input, Output, Finding>>) -> Result<CompletionRequest, BuildError>
         + 'static,
     Decode: Fn(ExecutionOutcome) -> Result<Input, DecodeError> + 'static,
 {
     type Runtime = R;
     type Input = Input;
-    type Artefact = Artefact;
+    type Output = Output;
     type Finding = Finding;
     type Error = AdaptorError<BuildError, C::Error, ToolError, DecodeError>;
 
     fn repair<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+        attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
         self.adapter.execute(runtime, attempts)
     }
@@ -697,10 +713,10 @@ mod tests {
             },
         );
         let check = agent.check(
-            |_runtime: &TestRuntime, subject: String| {
+            |_runtime: &TestRuntime, (_input, output): (String, String)| {
                 Ok::<_, Infallible>(CompletionRequest::new(
                     "test-model",
-                    vec![Message::user(subject)],
+                    vec![Message::user(output)],
                 ))
             },
             |outcome: ExecutionOutcome| {
@@ -715,7 +731,7 @@ mod tests {
             .await
             .expect("task should succeed");
         let findings = check
-            .check(&TestRuntime, output.clone())
+            .check(&TestRuntime, "draft a plan".to_string(), output.clone())
             .await
             .expect("check should succeed");
 
@@ -785,7 +801,7 @@ mod tests {
                 &TestRuntime,
                 vec![Attempt {
                     input: 1,
-                    artefact: 2,
+                    output: 2,
                     findings: vec!["tests failed".to_string()],
                 }],
             )
@@ -802,10 +818,10 @@ mod tests {
         ))]);
         let check = LlmCheck::new(
             Executor::new(client),
-            |_runtime: &TestRuntime, subject: String| {
+            |_runtime: &TestRuntime, (_input, output): (String, String)| {
                 Ok::<_, Infallible>(CompletionRequest::new(
                     "test-model",
-                    vec![Message::user(subject)],
+                    vec![Message::user(output)],
                 ))
             },
             |outcome: ExecutionOutcome| {
@@ -816,7 +832,11 @@ mod tests {
         );
 
         let findings = check
-            .check(&TestRuntime, "review this patch".to_string())
+            .check(
+                &TestRuntime,
+                "draft patch".to_string(),
+                "review this patch".to_string(),
+            )
             .await
             .expect("check should succeed");
 

@@ -30,7 +30,7 @@ async fn main() {
         required_substring: "hello from naaf",
     };
 
-    let mentions_substring = check_fn(|runtime: &CheckRuntime, subject: String| {
+    let mentions_substring = check_fn(|runtime: &CheckRuntime, _input: String, subject: String| {
         let findings: Vec<&'static str> = if subject.contains(runtime.required_substring) {
             Vec::new()
         } else {

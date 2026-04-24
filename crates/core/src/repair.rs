@@ -9,8 +9,8 @@ pub trait RepairPlanner {
     type Runtime;
     /// The next task input to produce.
     type Input;
-    /// The step artefact produced by the task.
-    type Artefact;
+    /// The step output produced by the task.
+    type Output;
     /// Findings gathered from checks.
     type Finding;
     /// Errors thrown by the planner infrastructure that cannot be recovered.
@@ -20,17 +20,17 @@ pub trait RepairPlanner {
     fn repair<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+        attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>>;
 }
 
 /// One failed step attempt captured for repair planning.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Attempt<I, A, F> {
+pub struct Attempt<I, O, F> {
     /// The input that produced this attempt.
     pub input: I,
-    /// The artefact produced by the task before repair.
-    pub artefact: A,
+    /// The output produced by the task before repair.
+    pub output: O,
     /// Findings gathered from checks for this attempt.
     pub findings: Vec<F>,
 }
@@ -73,16 +73,16 @@ impl Default for RetryPolicy {
     }
 }
 
-impl<I, A, F> Debug for Attempt<I, A, F>
+impl<I, O, F> Debug for Attempt<I, O, F>
 where
     I: Debug,
-    A: Debug,
+    O: Debug,
     F: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Attempt")
             .field("input", &self.input)
-            .field("artefact", &self.artefact)
+            .field("output", &self.output)
             .field("findings", &self.findings)
             .finish()
     }

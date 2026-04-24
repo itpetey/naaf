@@ -101,7 +101,7 @@ pub enum NodeCheckpointReport {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AttemptCheckpoint {
     pub input: Value,
-    pub artefact: Value,
+    pub output: Value,
     pub findings: Vec<Value>,
 }
 
@@ -224,7 +224,7 @@ mod tests {
             current_input: serde_json::json!(2),
             repair_attempts: vec![AttemptCheckpoint {
                 input: serde_json::json!(0),
-                artefact: serde_json::json!(1),
+                output: serde_json::json!(1),
                 findings: vec![serde_json::json!("too low")],
             }],
             report_attempts: vec![AttemptReport {

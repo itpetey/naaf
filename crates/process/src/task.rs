@@ -9,17 +9,17 @@ type AdapterFuture<'a, Output, BuildError, DecodeError> =
     LocalBoxFuture<'a, Result<Output, AdaptorError<BuildError, DecodeError>>>;
 type AdapterMarker<Input, Output, BuildError, DecodeError> =
     PhantomData<fn(Input) -> Result<Output, (BuildError, DecodeError)>>;
-type RepairAdapter<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError> =
+type RepairAdapter<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError> =
     ProcessRoleAdapter<
         R,
         Build,
         Decode,
-        RepairAttempts<Input, Artefact, Finding>,
+        RepairAttempts<Input, Output, Finding>,
         Input,
         BuildError,
         DecodeError,
     >;
-type RepairAttempts<Input, Artefact, Finding> = Vec<Attempt<Input, Artefact, Finding>>;
+type RepairAttempts<Input, Output, Finding> = Vec<Attempt<Input, Output, Finding>>;
 
 struct ProcessRoleAdapter<R, Build, Decode, Input, Output, BuildError, DecodeError> {
     build_command: Build,
@@ -34,8 +34,16 @@ pub struct ProcessTask<R, Build, Decode, Input, Output, BuildError, DecodeError>
 }
 
 /// A generic `naaf_core::Check` backed by a local process.
-pub struct ProcessCheck<R, Build, Decode, Subject, Finding, BuildError, DecodeError> {
-    adapter: ProcessRoleAdapter<R, Build, Decode, Subject, Vec<Finding>, BuildError, DecodeError>,
+pub struct ProcessCheck<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError> {
+    adapter: ProcessRoleAdapter<
+        R,
+        Build,
+        Decode,
+        (Input, Output),
+        Vec<Finding>,
+        BuildError,
+        DecodeError,
+    >,
 }
 
 /// A generic `naaf_core::Materialiser` backed by a local process.
@@ -44,9 +52,8 @@ pub struct ProcessMaterialiser<R, Build, Decode, Input, Output, BuildError, Deco
 }
 
 /// A generic `naaf_core::RepairPlanner` backed by a local process.
-pub struct ProcessRepairPlanner<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
-{
-    adapter: RepairAdapter<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>,
+pub struct ProcessRepairPlanner<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError> {
+    adapter: RepairAdapter<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>,
 }
 
 impl<R, Build, Decode, Input, Output, BuildError, DecodeError>
@@ -126,8 +133,8 @@ where
     }
 }
 
-impl<R, Build, Decode, Subject, Finding, DecodeError>
-    ProcessCheck<R, Build, Decode, Subject, Finding, Infallible, DecodeError>
+impl<R, Build, Decode, Input, Output, Finding, DecodeError>
+    ProcessCheck<R, Build, Decode, Input, Output, Finding, Infallible, DecodeError>
 {
     /// Creates a process check that cannot fail while building the command.
     pub fn new(build_command: Build, decode_findings: Decode) -> Self {
@@ -135,8 +142,8 @@ impl<R, Build, Decode, Subject, Finding, DecodeError>
     }
 }
 
-impl<R, Build, Decode, Subject, Finding, BuildError, DecodeError>
-    ProcessCheck<R, Build, Decode, Subject, Finding, BuildError, DecodeError>
+impl<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
+    ProcessCheck<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
 {
     /// Creates a process check with an explicit build error type.
     pub fn with_builder(build_command: Build, decode_findings: Decode) -> Self {
@@ -146,28 +153,31 @@ impl<R, Build, Decode, Subject, Finding, BuildError, DecodeError>
     }
 }
 
-impl<R, Build, Decode, Subject, Finding, BuildError, DecodeError> Check
-    for ProcessCheck<R, Build, Decode, Subject, Finding, BuildError, DecodeError>
+impl<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError> Check
+    for ProcessCheck<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
 where
     R: 'static,
-    Subject: 'static,
+    Input: 'static,
+    Output: 'static,
     Finding: 'static,
     BuildError: 'static,
     DecodeError: 'static,
-    Build: Fn(&R, Subject) -> Result<ProcessCommand, BuildError> + 'static,
+    Build: Fn(&R, (Input, Output)) -> Result<ProcessCommand, BuildError> + 'static,
     Decode: Fn(ProcessOutput) -> Result<Vec<Finding>, DecodeError> + 'static,
 {
     type Runtime = R;
-    type Subject = Subject;
+    type Input = Input;
+    type Output = Output;
     type Finding = Finding;
     type Error = AdaptorError<BuildError, DecodeError>;
 
     fn check<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        subject: Self::Subject,
+        input: Self::Input,
+        output: Self::Output,
     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
-        self.adapter.execute(runtime, subject)
+        self.adapter.execute(runtime, (input, output))
     }
 }
 
@@ -216,8 +226,8 @@ where
     }
 }
 
-impl<R, Build, Decode, Input, Artefact, Finding, DecodeError>
-    ProcessRepairPlanner<R, Build, Decode, Input, Artefact, Finding, Infallible, DecodeError>
+impl<R, Build, Decode, Input, Output, Finding, DecodeError>
+    ProcessRepairPlanner<R, Build, Decode, Input, Output, Finding, Infallible, DecodeError>
 {
     /// Creates a process repair planner that cannot fail while building the command.
     pub fn new(build_command: Build, decode_input: Decode) -> Self {
@@ -225,8 +235,8 @@ impl<R, Build, Decode, Input, Artefact, Finding, DecodeError>
     }
 }
 
-impl<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
-    ProcessRepairPlanner<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
+impl<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
+    ProcessRepairPlanner<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
 {
     /// Creates a process repair planner with an explicit build error type.
     pub fn with_builder(build_command: Build, decode_input: Decode) -> Self {
@@ -236,29 +246,29 @@ impl<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
     }
 }
 
-impl<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError> RepairPlanner
-    for ProcessRepairPlanner<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
+impl<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError> RepairPlanner
+    for ProcessRepairPlanner<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
 where
     R: 'static,
     Input: 'static,
-    Artefact: 'static,
+    Output: 'static,
     Finding: 'static,
     BuildError: 'static,
     DecodeError: 'static,
-    Build: Fn(&R, RepairAttempts<Input, Artefact, Finding>) -> Result<ProcessCommand, BuildError>
+    Build: Fn(&R, RepairAttempts<Input, Output, Finding>) -> Result<ProcessCommand, BuildError>
         + 'static,
     Decode: Fn(ProcessOutput) -> Result<Input, DecodeError> + 'static,
 {
     type Runtime = R;
     type Input = Input;
-    type Artefact = Artefact;
+    type Output = Output;
     type Finding = Finding;
     type Error = AdaptorError<BuildError, DecodeError>;
 
     fn repair<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+        attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
         self.adapter.execute(runtime, attempts)
     }
@@ -356,14 +366,14 @@ mod tests {
             |output: ProcessOutput| String::from_utf8(output.stdout),
         );
         let check = agent.check(
-            |_runtime: &TestRuntime, subject: String| {
+            |_runtime: &TestRuntime, (_input, output): (String, String)| {
                 Ok::<_, Infallible>(
                     ProcessCommand::new("sh")
                         .args([
                             "-lc",
                             "if [ \"$SUBJECT\" = \"plan ready\" ]; then exit 0; fi; printf 'missing plan'",
                         ])
-                        .env("SUBJECT", subject),
+                        .env("SUBJECT", output),
                 )
             },
             |output: ProcessOutput| {
@@ -381,7 +391,11 @@ mod tests {
             .await
             .expect("task should succeed");
         let findings = check
-            .check(&TestRuntime, output.clone())
+            .check(
+                &TestRuntime,
+                "printf 'plan ready'".to_string(),
+                output.clone(),
+            )
             .await
             .expect("check should succeed");
 
@@ -423,7 +437,7 @@ mod tests {
                 let previous = attempts.last().expect("attempt present");
                 Ok::<_, Infallible>(ProcessCommand::shell(format!(
                     "printf '{}'",
-                    previous.artefact + 1
+                    previous.output + 1
                 )))
             },
             |output: ProcessOutput| {
@@ -437,7 +451,7 @@ mod tests {
                 &TestRuntime,
                 vec![Attempt {
                     input: 1,
-                    artefact: 2,
+                    output: 2,
                     findings: vec!["tests failed"],
                 }],
             )
@@ -450,14 +464,14 @@ mod tests {
     #[tokio::test]
     async fn process_check_supports_direct_construction() {
         let check = ProcessCheck::new(
-            |_runtime: &TestRuntime, subject: String| {
+            |_runtime: &TestRuntime, (_input, output): (String, String)| {
                 Ok::<_, Infallible>(
                     ProcessCommand::new("sh")
                         .args([
                             "-lc",
                             "if [ \"$SUBJECT\" = \"ok\" ]; then exit 0; fi; printf 'missing tests'",
                         ])
-                        .env("SUBJECT", subject),
+                        .env("SUBJECT", output),
                 )
             },
             |output: ProcessOutput| {
@@ -471,7 +485,11 @@ mod tests {
         );
 
         let findings = check
-            .check(&TestRuntime, "review this patch".to_string())
+            .check(
+                &TestRuntime,
+                "draft patch".to_string(),
+                "review this patch".to_string(),
+            )
             .await
             .expect("check should succeed");
 

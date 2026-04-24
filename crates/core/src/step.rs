@@ -32,8 +32,8 @@ type BuilderFor<T> = OpenStepBuilder<
     <T as Task>::Error,
 >;
 type BuilderMarker<R, I, A, S, F, E, State> = PhantomData<fn() -> (R, I, A, S, F, E, State)>;
-type PipelineRunner<R, A, S, F, E> =
-    dyn for<'a> Fn(&'a R, A) -> LocalBoxFuture<'a, Result<(S, Vec<F>), E>> + 'static;
+type PipelineRunner<R, I, A, S, F, E> =
+    dyn for<'a> Fn(&'a R, I, A) -> LocalBoxFuture<'a, Result<(S, Vec<F>), E>> + 'static;
 type Runner<R, I, O, F, E> = dyn for<'a> Fn(&'a R, StepInput<I>) -> LocalBoxFuture<'a, Result<Traced<O, F>, StepError<F, E>>>
     + 'static;
 
@@ -47,10 +47,9 @@ pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
     task_name: &'static str,
     task_label: Option<Cow<'static, str>>,
     task: Arc<dyn Task<Runtime = R, Input = I, Output = A, Error = E>>,
-    pipeline: ValidationPipeline<R, A, S, F, E>,
-    repair: Option<
-        Arc<dyn RepairPlanner<Runtime = R, Input = I, Artefact = A, Finding = F, Error = E>>,
-    >,
+    pipeline: ValidationPipeline<R, I, A, S, F, E>,
+    repair:
+        Option<Arc<dyn RepairPlanner<Runtime = R, Input = I, Output = A, Finding = F, Error = E>>>,
     retry_policy: RetryPolicy,
     step_checkpointer: Option<Arc<dyn StepCheckpointer>>,
     marker: BuilderMarker<R, I, A, S, F, E, State>,
@@ -92,8 +91,8 @@ pub enum StepError<F, E> {
     Rejected(StepReport<F>),
 }
 
-struct ValidationPipeline<R, A, S, F, E> {
-    run: Arc<PipelineRunner<R, A, S, F, E>>,
+struct ValidationPipeline<R, I, A, S, F, E> {
+    run: Arc<PipelineRunner<R, I, A, S, F, E>>,
 }
 
 impl Step<(), (), (), (), ()> {
@@ -401,8 +400,9 @@ where
     /// Adds the first check and binds the builder's finding type to that check.
     pub fn validate<C>(self, check: C) -> BoundStepBuilder<R, I, A, S, C::Finding, E>
     where
+        I: Clone + 'static,
         S: Clone + 'static,
-        C: Check<Runtime = R, Subject = S, Error = E> + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
         C::Finding: 'static,
     {
         StepBuilder {
@@ -492,7 +492,7 @@ where
                         task = task_name,
                         label = task_label.as_ref(),
                         input_type = %type_name::<I>(),
-                        artefact_type = %type_name::<A>(),
+                        output_type = %type_name::<A>(),
                         finding_type = %type_name::<F>(),
                         max_attempts = retry_policy.max_attempts()
                     )
@@ -502,7 +502,7 @@ where
                         component = component::STEP,
                         task = task_name,
                         input_type = %type_name::<I>(),
-                        artefact_type = %type_name::<A>(),
+                        output_type = %type_name::<A>(),
                         finding_type = %type_name::<F>(),
                         max_attempts = retry_policy.max_attempts()
                     )
@@ -533,7 +533,7 @@ where
                                 attempt, "step attempt started"
                             );
 
-                            let artefact =
+                            let output =
                                 task.run(runtime, input.clone()).await.map_err(|error| {
                                     error!(
                                         action = action::RUN_ERROR,
@@ -549,11 +549,11 @@ where
 
                             trace!(
                                 action = action::ATTEMPT_OUTPUT,
-                                attempt, "task produced artefact"
+                                attempt, "task produced output"
                             );
 
                             let (_, findings): (_, Vec<F>) = pipeline
-                                .run(runtime, artefact.clone())
+                                .run(runtime, input.clone(), output.clone())
                                 .await
                                 .map_err(|error| {
                                     error!(
@@ -586,12 +586,12 @@ where
                                     attempts = report_attempts.len(),
                                     "step completed"
                                 );
-                                return Ok(Traced::new(artefact, StepReport::new(report_attempts)));
+                                return Ok(Traced::new(output, StepReport::new(report_attempts)));
                             }
 
                             repair_attempts.push(Attempt {
                                 input: input.clone(),
-                                artefact: artefact.clone(),
+                                output: output.clone(),
                                 findings,
                             });
 
@@ -653,7 +653,7 @@ where
     }
 
     /// Finishes the builder and produces a step that supports checkpointing and
-    /// resume. The input, artefact, and finding types must be serialisable and
+    /// resume. The input, output, and finding types must be serialisable and
     /// deserialisable so their values can be persisted between sessions.
     pub fn build_persistent(self) -> Step<R, I, A, F, E>
     where
@@ -682,7 +682,7 @@ where
                         task = task_name,
                         label = task_label.as_ref(),
                         input_type = %type_name::<I>(),
-                        artefact_type = %type_name::<A>(),
+                        output_type = %type_name::<A>(),
                         finding_type = %type_name::<F>(),
                         max_attempts = retry_policy.max_attempts()
                     )
@@ -692,7 +692,7 @@ where
                         component = component::STEP,
                         task = task_name,
                         input_type = %type_name::<I>(),
-                        artefact_type = %type_name::<A>(),
+                        output_type = %type_name::<A>(),
                         finding_type = %type_name::<F>(),
                         max_attempts = retry_policy.max_attempts()
                     )
@@ -717,7 +717,7 @@ where
                                         .map(|ac| {
                                             let input: I = serde_json::from_value(ac.input)
                                                 .unwrap_or_else(|_| todo!());
-                                            let artefact: A = serde_json::from_value(ac.artefact)
+                                            let output: A = serde_json::from_value(ac.output)
                                                 .unwrap_or_else(|_| todo!());
                                             let findings: Vec<F> = ac
                                                 .findings
@@ -729,7 +729,7 @@ where
                                                 .collect();
                                             Attempt {
                                                 input,
-                                                artefact,
+                                                output,
                                                 findings,
                                             }
                                         })
@@ -768,7 +768,7 @@ where
                                 attempt, "step attempt started"
                             );
 
-                            let artefact =
+                            let output =
                                 task.run(runtime, input.clone()).await.map_err(|error| {
                                     error!(
                                         action = action::RUN_ERROR,
@@ -784,11 +784,11 @@ where
 
                             trace!(
                                 action = action::ATTEMPT_OUTPUT,
-                                attempt, "task produced artefact"
+                                attempt, "task produced output"
                             );
 
                             let (_, findings): (_, Vec<F>) = pipeline
-                                .run(runtime, artefact.clone())
+                                .run(runtime, input.clone(), output.clone())
                                 .await
                                 .map_err(|error| {
                                     error!(
@@ -832,12 +832,12 @@ where
                                     attempts = report_attempts.len(),
                                     "step completed"
                                 );
-                                return Ok(Traced::new(artefact, StepReport::new(report_attempts)));
+                                return Ok(Traced::new(output, StepReport::new(report_attempts)));
                             }
 
                             repair_attempts.push(Attempt {
                                 input: input.clone(),
-                                artefact: artefact.clone(),
+                                output: output.clone(),
                                 findings,
                             });
 
@@ -911,8 +911,9 @@ where
     /// Adds a check whose findings already match the builder's finding type.
     pub fn validate<C>(self, check: C) -> Self
     where
+        I: Clone + 'static,
         S: Clone + 'static,
-        C: Check<Runtime = R, Subject = S, Finding = F, Error = E> + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Finding = F, Error = E> + 'static,
     {
         Self {
             task_name: self.task_name,
@@ -929,8 +930,9 @@ where
     /// Adds a check whose findings can be converted into the builder's finding type.
     pub fn validate_into<C>(self, check: C) -> Self
     where
+        I: Clone + 'static,
         S: Clone + 'static,
-        C: Check<Runtime = R, Subject = S, Error = E> + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
         C::Finding: Into<F> + 'static,
     {
         Self {
@@ -948,7 +950,7 @@ where
     /// Installs the planner used to generate retry inputs after failed attempts.
     pub fn repair_with<P>(self, planner: P) -> Self
     where
-        P: RepairPlanner<Runtime = R, Input = I, Artefact = A, Finding = F, Error = E> + 'static,
+        P: RepairPlanner<Runtime = R, Input = I, Output = A, Finding = F, Error = E> + 'static,
     {
         Self {
             task_name: self.task_name,
@@ -996,7 +998,7 @@ where
 {
 }
 
-impl<R, A, S, F, E> Clone for ValidationPipeline<R, A, S, F, E> {
+impl<R, I, A, S, F, E> Clone for ValidationPipeline<R, I, A, S, F, E> {
     fn clone(&self) -> Self {
         Self {
             run: self.run.clone(),
@@ -1004,23 +1006,25 @@ impl<R, A, S, F, E> Clone for ValidationPipeline<R, A, S, F, E> {
     }
 }
 
-impl<R, A, F, E> ValidationPipeline<R, A, A, F, E>
+impl<R, I, A, F, E> ValidationPipeline<R, I, A, A, F, E>
 where
     R: 'static,
+    I: 'static,
     A: 'static,
     F: 'static,
     E: 'static,
 {
     fn identity() -> Self {
         Self {
-            run: Arc::new(|_, artefact| Box::pin(async move { Ok((artefact, Vec::new())) })),
+            run: Arc::new(|_, _, output| Box::pin(async move { Ok((output, Vec::new())) })),
         }
     }
 }
 
-impl<R, A, S, F, E> ValidationPipeline<R, A, S, F, E>
+impl<R, I, A, S, F, E> ValidationPipeline<R, I, A, S, F, E>
 where
     R: 'static,
+    I: 'static,
     A: 'static,
     S: 'static,
     F: 'static,
@@ -1029,44 +1033,46 @@ where
     fn run<'a>(
         &'a self,
         runtime: &'a R,
-        artefact: A,
+        input: I,
+        output: A,
     ) -> LocalBoxFuture<'a, Result<(S, Vec<F>), E>> {
-        (self.run)(runtime, artefact)
+        (self.run)(runtime, input, output)
     }
 
-    fn bind_findings<NextFinding>(self) -> ValidationPipeline<R, A, S, NextFinding, E>
+    fn bind_findings<NextFinding>(self) -> ValidationPipeline<R, I, A, S, NextFinding, E>
     where
         NextFinding: 'static,
     {
         let run = self.run.clone();
 
         ValidationPipeline {
-            run: Arc::new(move |runtime, artefact| {
+            run: Arc::new(move |runtime, input, output| {
                 let run = run.clone();
                 Box::pin(async move {
-                    let (subject, _) = run(runtime, artefact).await?;
+                    let (subject, _) = run(runtime, input, output).await?;
                     Ok((subject, Vec::new()))
                 })
             }),
         }
     }
 
-    fn validate_first<C>(self, check: C) -> ValidationPipeline<R, A, S, C::Finding, E>
+    fn validate_first<C>(self, check: C) -> ValidationPipeline<R, I, A, S, C::Finding, E>
     where
+        I: Clone + 'static,
         S: Clone + 'static,
-        C: Check<Runtime = R, Subject = S, Error = E> + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
         C::Finding: 'static,
     {
         let run = self.run.clone();
         let check = Arc::new(check);
 
         ValidationPipeline {
-            run: Arc::new(move |runtime, artefact| {
+            run: Arc::new(move |runtime, input, output| {
                 let run = run.clone();
                 let check = check.clone();
                 Box::pin(async move {
-                    let (subject, _) = run(runtime, artefact).await?;
-                    let findings = check.check(runtime, subject.clone()).await?;
+                    let (subject, _) = run(runtime, input.clone(), output).await?;
+                    let findings = check.check(runtime, input, subject.clone()).await?;
                     Ok((subject, findings))
                 })
             }),
@@ -1075,19 +1081,20 @@ where
 
     fn validate<C>(self, check: C) -> Self
     where
+        I: Clone + 'static,
         S: Clone + 'static,
-        C: Check<Runtime = R, Subject = S, Finding = F, Error = E> + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Finding = F, Error = E> + 'static,
     {
         let run = self.run.clone();
         let check = Arc::new(check);
 
         Self {
-            run: Arc::new(move |runtime, artefact| {
+            run: Arc::new(move |runtime, input, output| {
                 let run = run.clone();
                 let check = check.clone();
                 Box::pin(async move {
-                    let (subject, mut findings) = run(runtime, artefact).await?;
-                    findings.extend(check.check(runtime, subject.clone()).await?);
+                    let (subject, mut findings) = run(runtime, input.clone(), output).await?;
+                    findings.extend(check.check(runtime, input, subject.clone()).await?);
                     Ok((subject, findings))
                 })
             }),
@@ -1096,22 +1103,23 @@ where
 
     fn validate_into<C>(self, check: C) -> Self
     where
+        I: Clone + 'static,
         S: Clone + 'static,
-        C: Check<Runtime = R, Subject = S, Error = E> + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
         C::Finding: Into<F> + 'static,
     {
         let run = self.run.clone();
         let check = Arc::new(check);
 
         Self {
-            run: Arc::new(move |runtime, artefact| {
+            run: Arc::new(move |runtime, input, output| {
                 let run = run.clone();
                 let check = check.clone();
                 Box::pin(async move {
-                    let (subject, mut findings) = run(runtime, artefact).await?;
+                    let (subject, mut findings) = run(runtime, input.clone(), output).await?;
                     findings.extend(
                         check
-                            .check(runtime, subject.clone())
+                            .check(runtime, input, subject.clone())
                             .await?
                             .into_iter()
                             .map(Into::into),
@@ -1125,7 +1133,7 @@ where
     fn materialise<M, NextSubject>(
         self,
         materialiser: M,
-    ) -> ValidationPipeline<R, A, NextSubject, F, E>
+    ) -> ValidationPipeline<R, I, A, NextSubject, F, E>
     where
         M: Materialiser<Runtime = R, Input = S, Output = NextSubject, Error = E> + 'static,
         NextSubject: 'static,
@@ -1134,11 +1142,11 @@ where
         let materialiser = Arc::new(materialiser);
 
         ValidationPipeline {
-            run: Arc::new(move |runtime, artefact| {
+            run: Arc::new(move |runtime, input, output| {
                 let run = run.clone();
                 let materialiser = materialiser.clone();
                 Box::pin(async move {
-                    let (subject, findings) = run(runtime, artefact).await?;
+                    let (subject, findings) = run(runtime, input, output).await?;
                     let next_subject = materialiser.materialise(runtime, subject).await?;
                     Ok((next_subject, findings))
                 })
@@ -1176,7 +1184,7 @@ where
         .iter()
         .map(|a| AttemptCheckpoint {
             input: serde_json::to_value(&a.input).unwrap_or(Value::Null),
-            artefact: serde_json::to_value(&a.artefact).unwrap_or(Value::Null),
+            output: serde_json::to_value(&a.output).unwrap_or(Value::Null),
             findings: a
                 .findings
                 .iter()
@@ -1303,17 +1311,19 @@ mod tests {
 
     impl Check for PatchShapeCheck {
         type Runtime = TestRuntime;
-        type Subject = Patch;
+        type Input = CodeInput;
+        type Output = Patch;
         type Finding = Finding;
         type Error = TestError;
 
         fn check<'a>(
             &'a self,
             runtime: &'a Self::Runtime,
-            subject: Self::Subject,
+            _input: Self::Input,
+            output: Self::Output,
         ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
             Box::pin(async move {
-                if runtime.require_even_revision && subject.revision % 2 != 0 {
+                if runtime.require_even_revision && output.revision % 2 != 0 {
                     Ok(vec![Finding::OddRevision])
                 } else {
                     Ok(Vec::new())
@@ -1326,18 +1336,19 @@ mod tests {
 
     impl Check for TestCheck {
         type Runtime = TestRuntime;
-        type Subject = TestWorktree;
+        type Input = CodeInput;
+        type Output = TestWorktree;
         type Finding = Finding;
         type Error = TestError;
 
         fn check<'a>(
             &'a self,
             _runtime: &'a Self::Runtime,
-            subject: Self::Subject,
+            _input: Self::Input,
+            output: Self::Output,
         ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
             Box::pin(async move {
-                if subject.patch.passes_tests && subject.patch.revision >= subject.required_revision
-                {
+                if output.patch.passes_tests && output.patch.revision >= output.required_revision {
                     Ok(Vec::new())
                 } else {
                     Ok(vec![Finding::TestFailure("cargo test")])
@@ -1351,20 +1362,20 @@ mod tests {
     impl RepairPlanner for Repair {
         type Runtime = TestRuntime;
         type Input = CodeInput;
-        type Artefact = Patch;
+        type Output = Patch;
         type Finding = Finding;
         type Error = TestError;
 
         fn repair<'a>(
             &'a self,
             runtime: &'a Self::Runtime,
-            attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+            attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
         ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
             Box::pin(async move {
                 let previous = attempts.last().expect("attempt present");
                 Ok(CodeInput {
                     prompt: previous.input.prompt,
-                    revision: previous.artefact.revision + runtime.repair_increment,
+                    revision: previous.output.revision + runtime.repair_increment,
                     failing_test: Some("cargo test"),
                 })
             })

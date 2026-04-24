@@ -90,17 +90,19 @@
 //!
 //! impl Check for CargoTest {
 //!     type Runtime = Runtime;
-//!     type Subject = Worktree;
+//!     type Input = Prompt;
+//!     type Output = Worktree;
 //!     type Finding = Finding;
 //!     type Error = Error;
 //!
 //!     fn check<'a>(
 //!         &'a self,
 //!         runtime: &'a Self::Runtime,
-//!         subject: Self::Subject,
+//!         _input: Self::Input,
+//!         output: Self::Output,
 //!     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
 //!         Box::pin(async move {
-//!             if subject.revision >= runtime.required_revision {
+//!             if output.revision >= runtime.required_revision {
 //!                 Ok(Vec::new())
 //!             } else {
 //!                 Ok(vec![Finding::TestsFailed])
@@ -114,19 +116,19 @@
 //! impl RepairPlanner for Repair {
 //!     type Runtime = Runtime;
 //!     type Input = Prompt;
-//!     type Artefact = Patch;
+//!     type Output = Patch;
 //!     type Finding = Finding;
 //!     type Error = Error;
 //!
 //!     fn repair<'a>(
 //!         &'a self,
 //!         _runtime: &'a Self::Runtime,
-//!         attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+//!         attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
 //!     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
 //!         Box::pin(async move {
 //!             let previous = attempts.last().expect("attempt present");
 //!             Ok(Prompt {
-//!                 revision: previous.artefact.revision + 1,
+//!                 revision: previous.output.revision + 1,
 //!             })
 //!         })
 //!     }

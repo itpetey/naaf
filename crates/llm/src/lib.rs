@@ -112,17 +112,19 @@
 //!
 //! impl Check for MentionsTotal {
 //!     type Runtime = Runtime;
-//!     type Subject = String;
+//!     type Input = String;
+//!     type Output = String;
 //!     type Finding = &'static str;
 //!     type Error = TaskError<Infallible, Error, Error, Infallible>;
 //!
 //!     fn check<'a>(
 //!         &'a self,
 //!         _runtime: &'a Self::Runtime,
-//!         subject: Self::Subject,
+//!         _input: Self::Input,
+//!         output: Self::Output,
 //!     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
 //!         Box::pin(async move {
-//!             if subject.contains('5') {
+//!             if output.contains('5') {
 //!                 Ok(Vec::new())
 //!             } else {
 //!                 Ok(vec!["answer did not mention the calculated total"])
@@ -244,17 +246,19 @@
 //!
 //! impl Check for HasExpectedTotal {
 //!     type Runtime = Runtime;
-//!     type Subject = Answer;
+//!     type Input = String;
+//!     type Output = Answer;
 //!     type Finding = &'static str;
 //!     type Error = TaskError<Infallible, Error, Infallible, serde_json::Error>;
 //!
 //!     fn check<'a>(
 //!         &'a self,
 //!         _runtime: &'a Self::Runtime,
-//!         subject: Self::Subject,
+//!         _input: Self::Input,
+//!         output: Self::Output,
 //!     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
 //!         Box::pin(async move {
-//!             if subject.total == 5 {
+//!             if output.total == 5 {
 //!                 Ok(Vec::new())
 //!             } else {
 //!                 Ok(vec!["decoded answer did not match the expected total"])

@@ -242,18 +242,20 @@ impl Materialiser for ApplyPatch {
 
 impl Check for CargoTest {
     type Runtime = TestRuntime;
-    type Subject = Workspace;
+    type Input = BuildInput;
+    type Output = Workspace;
     type Finding = Finding;
     type Error = TestError;
 
     fn check<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        subject: Self::Subject,
+        _input: Self::Input,
+        output: Self::Output,
     ) -> LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
         Box::pin(async move {
             runtime.record("cargo_test");
-            if subject.revision >= runtime.required_revision {
+            if output.revision >= runtime.required_revision {
                 Ok(Vec::new())
             } else {
                 Ok(vec![Finding::TestsFailed])
@@ -265,20 +267,20 @@ impl Check for CargoTest {
 impl RepairPlanner for RepairPatch {
     type Runtime = TestRuntime;
     type Input = BuildInput;
-    type Artefact = Patch;
+    type Output = Patch;
     type Finding = Finding;
     type Error = TestError;
 
     fn repair<'a>(
         &'a self,
         runtime: &'a Self::Runtime,
-        attempts: Vec<Attempt<Self::Input, Self::Artefact, Self::Finding>>,
+        attempts: Vec<Attempt<Self::Input, Self::Output, Self::Finding>>,
     ) -> LocalBoxFuture<'a, Result<Self::Input, Self::Error>> {
         Box::pin(async move {
             runtime.record("repair_patch");
             let previous = attempts.last().expect("attempt present");
             Ok(BuildInput {
-                revision: previous.artefact.revision + runtime.repair_increment,
+                revision: previous.output.revision + runtime.repair_increment,
             })
         })
     }

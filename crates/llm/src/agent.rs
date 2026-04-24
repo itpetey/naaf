@@ -46,11 +46,11 @@ impl<C, R: 'static, E> LlmAgent<C, R, E> {
     }
 
     /// Projects this agent into a `naaf_core::Check`.
-    pub fn check<Build, Decode, Subject, Finding, BuildError, DecodeError>(
+    pub fn check<Build, Decode, Input, Output, Finding, BuildError, DecodeError>(
         &self,
         build_request: Build,
         decode_findings: Decode,
-    ) -> LlmCheck<C, R, Build, Decode, Subject, Finding, BuildError, DecodeError, E> {
+    ) -> LlmCheck<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, E> {
         LlmCheck::from_shared_executor(self.executor.clone(), build_request, decode_findings)
     }
 
@@ -64,11 +64,11 @@ impl<C, R: 'static, E> LlmAgent<C, R, E> {
     }
 
     /// Projects this agent into a `naaf_core::RepairPlanner`.
-    pub fn repair_planner<Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>(
+    pub fn repair_planner<Build, Decode, Input, Output, Finding, BuildError, DecodeError>(
         &self,
         build_request: Build,
         decode_input: Decode,
-    ) -> LlmRepairPlanner<C, R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError, E>
+    ) -> LlmRepairPlanner<C, R, Build, Decode, Input, Output, Finding, BuildError, DecodeError, E>
     {
         LlmRepairPlanner::from_shared_executor(self.executor.clone(), build_request, decode_input)
     }

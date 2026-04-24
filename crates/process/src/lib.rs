@@ -23,17 +23,19 @@
 //!
 //! impl Check for MentionsHello {
 //!     type Runtime = Runtime;
-//!     type Subject = String;
+//!     type Input = String;
+//!     type Output = String;
 //!     type Finding = &'static str;
 //!     type Error = CheckError<Infallible, std::string::FromUtf8Error>;
 //!
 //!     fn check<'a>(
 //!         &'a self,
 //!         _runtime: &'a Self::Runtime,
-//!         subject: Self::Subject,
+//!         _input: Self::Input,
+//!         output: Self::Output,
 //!     ) -> futures::future::LocalBoxFuture<'a, Result<Vec<Self::Finding>, Self::Error>> {
 //!         Box::pin(async move {
-//!             if subject.contains("hello") {
+//!             if output.contains("hello") {
 //!                 Ok(Vec::new())
 //!             } else {
 //!                 Ok(vec!["stdout did not contain the expected text"])

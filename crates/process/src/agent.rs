@@ -20,11 +20,11 @@ impl ProcessAgent {
     }
 
     /// Projects this agent into a `naaf_core::Check`.
-    pub fn check<R, Build, Decode, Subject, Finding, BuildError, DecodeError>(
+    pub fn check<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>(
         &self,
         build_command: Build,
         decode_findings: Decode,
-    ) -> ProcessCheck<R, Build, Decode, Subject, Finding, BuildError, DecodeError> {
+    ) -> ProcessCheck<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError> {
         ProcessCheck::with_builder(build_command, decode_findings)
     }
 
@@ -38,11 +38,11 @@ impl ProcessAgent {
     }
 
     /// Projects this agent into a `naaf_core::RepairPlanner`.
-    pub fn repair_planner<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>(
+    pub fn repair_planner<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>(
         &self,
         build_command: Build,
         decode_input: Decode,
-    ) -> ProcessRepairPlanner<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError>
+    ) -> ProcessRepairPlanner<R, Build, Decode, Input, Output, Finding, BuildError, DecodeError>
     {
         ProcessRepairPlanner::with_builder(build_command, decode_input)
     }
