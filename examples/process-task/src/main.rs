@@ -8,7 +8,7 @@
 use std::{convert::Infallible, string::FromUtf8Error};
 
 use naaf_core::{Attempt, RetryPolicy, Step, check_fn, repair_fn};
-use naaf_process::{AdapterError, ProcessAgent, ProcessCommand};
+use naaf_process::{AdaptorError, ProcessAgent, ProcessCommand};
 
 #[derive(Debug)]
 struct CheckRuntime {
@@ -36,13 +36,13 @@ async fn main() {
         } else {
             vec!["output did not contain the required substring"]
         };
-        Box::pin(async move { Ok::<_, AdapterError<Infallible, FromUtf8Error>>(findings) })
+        Box::pin(async move { Ok::<_, AdaptorError<Infallible, FromUtf8Error>>(findings) })
     });
 
     let revise_command = repair_fn(
         |runtime: &CheckRuntime, _attempts: Vec<Attempt<String, String, &'static str>>| {
             Box::pin(async move {
-                Ok::<_, AdapterError<Infallible, FromUtf8Error>>(format!(
+                Ok::<_, AdaptorError<Infallible, FromUtf8Error>>(format!(
                     "printf '{}'",
                     runtime.required_substring
                 ))

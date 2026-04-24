@@ -4,16 +4,16 @@ use crate::tool::ToolCallError;
 
 /// Errors raised by the generic `naaf_core::Check` adapter.
 pub type CheckError<BuildError, ClientError, ToolError, DecodeError> =
-    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
+    AdaptorError<BuildError, ClientError, ToolError, DecodeError>;
 /// Errors raised by the generic `naaf_core::Materialiser` adapter.
 pub type MaterialiserError<BuildError, ClientError, ToolError, DecodeError> =
-    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
+    AdaptorError<BuildError, ClientError, ToolError, DecodeError>;
 /// Errors raised by the generic `naaf_core::RepairPlanner` adapter.
 pub type RepairPlannerError<BuildError, ClientError, ToolError, DecodeError> =
-    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
+    AdaptorError<BuildError, ClientError, ToolError, DecodeError>;
 /// Errors raised by the generic `naaf_core::Task` adapter.
 pub type TaskError<BuildError, ClientError, ToolError, DecodeError> =
-    AdapterError<BuildError, ClientError, ToolError, DecodeError>;
+    AdaptorError<BuildError, ClientError, ToolError, DecodeError>;
 
 /// Errors raised while executing an LLM conversation.
 #[derive(Debug, Error)]
@@ -34,7 +34,7 @@ pub enum ExecutorError<ClientError, ToolError> {
 
 /// Errors raised by the generic `naaf_core` role adapters.
 #[derive(Debug, Error)]
-pub enum AdapterError<BuildError, ClientError, ToolError, DecodeError> {
+pub enum AdaptorError<BuildError, ClientError, ToolError, DecodeError> {
     /// Building the initial completion request failed.
     #[error("failed to build completion request: {0}")]
     Build(#[source] BuildError),

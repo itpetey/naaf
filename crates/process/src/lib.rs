@@ -66,7 +66,7 @@ pub use crate::{
     agent::ProcessAgent,
     command::{ProcessCommand, ProcessOutput},
     error::{
-        AdapterError, CheckError, MaterialiserError, ProcessError, RepairPlannerError, TaskError,
+        AdaptorError, CheckError, MaterialiserError, ProcessError, RepairPlannerError, TaskError,
     },
     task::{ProcessCheck, ProcessMaterialiser, ProcessRepairPlanner, ProcessTask},
 };

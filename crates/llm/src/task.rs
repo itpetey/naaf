@@ -5,7 +5,7 @@ use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, Task};
 
 use crate::{
     client::LlmClient,
-    error::AdapterError,
+    error::AdaptorError,
     executor::{ExecutionOutcome, Executor},
     message::CompletionRequest,
 };
@@ -15,7 +15,7 @@ type AdapterFuture<'a, C, Output, BuildError, ToolError, DecodeError> =
 type AdapterMarker<Input, Output, BuildError, DecodeError> =
     PhantomData<fn(Input) -> Result<Output, (BuildError, DecodeError)>>;
 type AdapterResult<C, Output, BuildError, ToolError, DecodeError> =
-    Result<Output, AdapterError<BuildError, <C as LlmClient>::Error, ToolError, DecodeError>>;
+    Result<Output, AdaptorError<BuildError, <C as LlmClient>::Error, ToolError, DecodeError>>;
 type RepairAdapter<
     C,
     R,
@@ -167,13 +167,13 @@ where
         input: Input,
     ) -> AdapterFuture<'a, C, Output, BuildError, ToolError, DecodeError> {
         Box::pin(async move {
-            let request = (self.build_request)(runtime, input).map_err(AdapterError::Build)?;
+            let request = (self.build_request)(runtime, input).map_err(AdaptorError::Build)?;
             let outcome = self
                 .executor
                 .execute(runtime, request)
                 .await
-                .map_err(AdapterError::Execute)?;
-            (self.decode_output)(outcome).map_err(AdapterError::Decode)
+                .map_err(AdaptorError::Execute)?;
+            (self.decode_output)(outcome).map_err(AdaptorError::Decode)
         })
     }
 }
@@ -236,7 +236,7 @@ where
     type Runtime = R;
     type Input = Input;
     type Output = Output;
-    type Error = AdapterError<BuildError, C::Error, ToolError, DecodeError>;
+    type Error = AdaptorError<BuildError, C::Error, ToolError, DecodeError>;
 
     fn run<'a>(
         &'a self,
@@ -305,7 +305,7 @@ where
     type Runtime = R;
     type Subject = Subject;
     type Finding = Finding;
-    type Error = AdapterError<BuildError, C::Error, ToolError, DecodeError>;
+    type Error = AdaptorError<BuildError, C::Error, ToolError, DecodeError>;
 
     fn check<'a>(
         &'a self,
@@ -374,7 +374,7 @@ where
     type Runtime = R;
     type Input = Input;
     type Output = Output;
-    type Error = AdapterError<BuildError, C::Error, ToolError, DecodeError>;
+    type Error = AdaptorError<BuildError, C::Error, ToolError, DecodeError>;
 
     fn materialise<'a>(
         &'a self,
@@ -480,7 +480,7 @@ where
     type Input = Input;
     type Artefact = Artefact;
     type Finding = Finding;
-    type Error = AdapterError<BuildError, C::Error, ToolError, DecodeError>;
+    type Error = AdaptorError<BuildError, C::Error, ToolError, DecodeError>;
 
     fn repair<'a>(
         &'a self,

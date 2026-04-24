@@ -3,13 +3,13 @@ use std::process::ExitStatus;
 use thiserror::Error;
 
 /// Errors raised by the generic `naaf_core::Check` adapter.
-pub type CheckError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
+pub type CheckError<BuildError, DecodeError> = AdaptorError<BuildError, DecodeError>;
 /// Errors raised by the generic `naaf_core::Materialiser` adapter.
-pub type MaterialiserError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
+pub type MaterialiserError<BuildError, DecodeError> = AdaptorError<BuildError, DecodeError>;
 /// Errors raised by the generic `naaf_core::RepairPlanner` adapter.
-pub type RepairPlannerError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
+pub type RepairPlannerError<BuildError, DecodeError> = AdaptorError<BuildError, DecodeError>;
 /// Errors raised by the generic `naaf_core::Task` adapter.
-pub type TaskError<BuildError, DecodeError> = AdapterError<BuildError, DecodeError>;
+pub type TaskError<BuildError, DecodeError> = AdaptorError<BuildError, DecodeError>;
 
 /// Errors raised while executing a process.
 #[derive(Debug, Error)]
@@ -28,7 +28,7 @@ pub enum ProcessError {
 
 /// Errors raised by the generic `naaf_core` role adapters.
 #[derive(Debug, Error)]
-pub enum AdapterError<BuildError, DecodeError> {
+pub enum AdaptorError<BuildError, DecodeError> {
     /// Building the process invocation failed.
     #[error("failed to build process command: {0}")]
     Build(#[source] BuildError),

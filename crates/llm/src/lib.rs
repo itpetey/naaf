@@ -305,7 +305,7 @@ pub use crate::{
     agent::LlmAgent,
     client::LlmClient,
     error::{
-        AdapterError, CheckError, ExecutorError, MaterialiserError, RepairPlannerError, TaskError,
+        AdaptorError, CheckError, ExecutorError, MaterialiserError, RepairPlannerError, TaskError,
     },
     executor::{ExecutionOutcome, Executor, ExecutorConfig},
     human::{

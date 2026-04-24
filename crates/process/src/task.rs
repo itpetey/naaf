@@ -3,10 +3,10 @@ use std::{convert::Infallible, marker::PhantomData};
 use futures::future::LocalBoxFuture;
 use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, Task};
 
-use crate::{AdapterError, ProcessCommand, ProcessOutput};
+use crate::{AdaptorError, ProcessCommand, ProcessOutput};
 
 type AdapterFuture<'a, Output, BuildError, DecodeError> =
-    LocalBoxFuture<'a, Result<Output, AdapterError<BuildError, DecodeError>>>;
+    LocalBoxFuture<'a, Result<Output, AdaptorError<BuildError, DecodeError>>>;
 type AdapterMarker<Input, Output, BuildError, DecodeError> =
     PhantomData<fn(Input) -> Result<Output, (BuildError, DecodeError)>>;
 type RepairAdapter<R, Build, Decode, Input, Artefact, Finding, BuildError, DecodeError> =
@@ -74,9 +74,9 @@ where
         input: Input,
     ) -> AdapterFuture<'a, Output, BuildError, DecodeError> {
         Box::pin(async move {
-            let command = (self.build_command)(runtime, input).map_err(AdapterError::Build)?;
-            let output = command.execute().await.map_err(AdapterError::Execute)?;
-            (self.decode_output)(output).map_err(AdapterError::Decode)
+            let command = (self.build_command)(runtime, input).map_err(AdaptorError::Build)?;
+            let output = command.execute().await.map_err(AdaptorError::Execute)?;
+            (self.decode_output)(output).map_err(AdaptorError::Decode)
         })
     }
 }
@@ -115,7 +115,7 @@ where
     type Runtime = R;
     type Input = Input;
     type Output = Output;
-    type Error = AdapterError<BuildError, DecodeError>;
+    type Error = AdaptorError<BuildError, DecodeError>;
 
     fn run<'a>(
         &'a self,
@@ -160,7 +160,7 @@ where
     type Runtime = R;
     type Subject = Subject;
     type Finding = Finding;
-    type Error = AdapterError<BuildError, DecodeError>;
+    type Error = AdaptorError<BuildError, DecodeError>;
 
     fn check<'a>(
         &'a self,
@@ -205,7 +205,7 @@ where
     type Runtime = R;
     type Input = Input;
     type Output = Output;
-    type Error = AdapterError<BuildError, DecodeError>;
+    type Error = AdaptorError<BuildError, DecodeError>;
 
     fn materialise<'a>(
         &'a self,
@@ -253,7 +253,7 @@ where
     type Input = Input;
     type Artefact = Artefact;
     type Finding = Finding;
-    type Error = AdapterError<BuildError, DecodeError>;
+    type Error = AdaptorError<BuildError, DecodeError>;
 
     fn repair<'a>(
         &'a self,
@@ -271,7 +271,7 @@ mod tests {
     use naaf_core::{Attempt, Check, Materialiser, RepairPlanner, Task};
 
     use super::{ProcessCheck, ProcessMaterialiser, ProcessRepairPlanner, ProcessTask};
-    use crate::{AdapterError, ProcessAgent, ProcessCommand, ProcessError, ProcessOutput};
+    use crate::{AdaptorError, ProcessAgent, ProcessCommand, ProcessError, ProcessOutput};
 
     #[derive(Debug, Default)]
     struct TestRuntime;
@@ -313,7 +313,7 @@ mod tests {
             .expect_err("process should fail");
 
         match error {
-            AdapterError::Execute(ProcessError::Exit { status, stderr, .. }) => {
+            AdaptorError::Execute(ProcessError::Exit { status, stderr, .. }) => {
                 assert!(!status.success());
                 assert_eq!(
                     str::from_utf8(&stderr).expect("stderr should be utf-8"),

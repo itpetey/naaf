@@ -90,7 +90,7 @@ impl<C, R: 'static, E> LlmAgent<C, R, E> {
         Runtime = R,
         Input = Input,
         Output = Output,
-        Error = crate::error::AdapterError<BuildError, C::Error, E, serde_json::Error>,
+        Error = crate::error::AdaptorError<BuildError, C::Error, E, serde_json::Error>,
     > + use<C, R, E, Input, Output, BuildError, BuildUser>
     where
         C: crate::client::LlmClient<Runtime = R> + 'static,
