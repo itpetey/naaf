@@ -2,6 +2,7 @@ use std::{convert::Infallible, sync::Arc};
 
 use naaf_core::{Task, TaskExt};
 use serde::de::DeserializeOwned;
+use serde_json::json;
 
 use crate::{
     ExecutionOutcome,
@@ -20,6 +21,114 @@ impl<C, R: 'static> LlmAgent<C, R, Infallible> {
     /// Creates an LLM agent without tools.
     pub fn new(client: C) -> Self {
         Self::with_executor(Executor::new(client))
+    }
+}
+
+fn json_task_response_format() -> serde_json::Value {
+    json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "json_task_output",
+            "strict": false,
+            "schema": {
+                "type": "object",
+                "additionalProperties": true
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        convert::Infallible,
+        sync::{Arc, Mutex},
+    };
+
+    use futures::future::LocalBoxFuture;
+    use naaf_core::Task;
+    use serde_json::{Value, json};
+
+    use crate::{
+        client::LlmClient,
+        message::{AssistantMessage, CompletionResponse},
+    };
+
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct CapturingClient {
+        requests: Arc<Mutex<Vec<CompletionRequest>>>,
+    }
+
+    impl CapturingClient {
+        fn requests(&self) -> Vec<CompletionRequest> {
+            self.requests.lock().expect("request lock poisoned").clone()
+        }
+    }
+
+    impl LlmClient for CapturingClient {
+        type Error = Infallible;
+        type Runtime = ();
+
+        fn complete<'a>(
+            &'a self,
+            _runtime: &'a Self::Runtime,
+            request: CompletionRequest,
+        ) -> LocalBoxFuture<'a, Result<CompletionResponse, Self::Error>> {
+            self.requests
+                .lock()
+                .expect("request lock poisoned")
+                .push(request);
+
+            Box::pin(async {
+                Ok(CompletionResponse::new(AssistantMessage::from_text(
+                    "{\"ok\":true}",
+                )))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn json_task_requests_json_schema_response_format() {
+        let client = CapturingClient::default();
+        let agent = LlmAgent::new(client.clone());
+        let task = agent.json_task(
+            "model".to_string(),
+            "system".to_string(),
+            |input: &str| Ok::<_, Infallible>(input.to_string()),
+            |outcome| {
+                serde_json::from_str::<Value>(
+                    outcome
+                        .final_message()
+                        .content
+                        .as_deref()
+                        .expect("assistant content should exist"),
+                )
+            },
+            "json-test".to_string(),
+        );
+
+        let output = task
+            .run(&(), "user")
+            .await
+            .expect("JSON task should complete");
+
+        assert_eq!(output, json!({ "ok": true }));
+        assert_eq!(
+            client.requests()[0].metadata["response_format"],
+            json!({
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "json_task_output",
+                    "strict": false,
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                }
+            })
+        );
     }
 }
 
@@ -104,13 +213,18 @@ impl<C, R: 'static, E> LlmAgent<C, R, E> {
         self.task(
             move |_runtime: &R, input: Input| {
                 let user_content = build_user_prompt(input)?;
-                Ok::<_, BuildError>(CompletionRequest::new(
-                    model.clone(),
-                    vec![
-                        Message::system(system_prompt.clone()),
-                        Message::user(user_content),
-                    ],
-                ))
+                Ok::<_, BuildError>(
+                    CompletionRequest::new(
+                        model.clone(),
+                        vec![
+                            Message::system(system_prompt.clone()),
+                            Message::user(user_content),
+                        ],
+                    )
+                    .with_metadata(json!({
+                        "response_format": json_task_response_format()
+                    })),
+                )
             },
             decode,
         )

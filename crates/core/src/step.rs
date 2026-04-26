@@ -290,6 +290,134 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
         }
     }
 
+    /// Maps an upstream input into the input expected by this step.
+    ///
+    /// This is useful when composing a step that needs only a projected or
+    /// reshaped view of a larger workflow context.
+    pub fn map_input<PreviousInput, Map>(self, map: Map) -> Step<R, PreviousInput, O, F, E>
+    where
+        R: 'static,
+        PreviousInput: 'static,
+        I: 'static,
+        O: 'static,
+        F: 'static,
+        E: 'static,
+        Map: Fn(PreviousInput) -> I + 'static,
+    {
+        let runner = self.runner.clone();
+        let map = Arc::new(map);
+
+        Step {
+            runner: Arc::new(move |runtime, input| {
+                let runner = runner.clone();
+                let map = map.clone();
+                Box::pin(async move {
+                    let input = match input {
+                        StepInput::Fresh { input } | StepInput::Resume { input, .. } => input,
+                    };
+                    runner(runtime, StepInput::Fresh { input: map(input) }).await
+                })
+            }),
+        }
+    }
+
+    /// Alias for [`Step::map_input`] using the functional-programming term.
+    pub fn contramap<PreviousInput, Map>(self, map: Map) -> Step<R, PreviousInput, O, F, E>
+    where
+        R: 'static,
+        PreviousInput: 'static,
+        I: 'static,
+        O: 'static,
+        F: 'static,
+        E: 'static,
+        Map: Fn(PreviousInput) -> I + 'static,
+    {
+        self.map_input(map)
+    }
+
+    /// Maps a successful output together with the input that produced it.
+    pub fn map_with_input<Next, Map>(self, map: Map) -> Step<R, I, Next, F, E>
+    where
+        R: 'static,
+        I: Clone + 'static,
+        O: 'static,
+        Next: 'static,
+        F: 'static,
+        E: 'static,
+        Map: Fn(I, O) -> Next + 'static,
+    {
+        let runner = self.runner.clone();
+        let map = Arc::new(map);
+
+        Step {
+            runner: Arc::new(move |runtime, input| {
+                let runner = runner.clone();
+                let map = map.clone();
+                Box::pin(async move {
+                    let original_input = match &input {
+                        StepInput::Fresh { input } | StepInput::Resume { input, .. } => {
+                            input.clone()
+                        }
+                    };
+                    let traced = runner(runtime, input).await?;
+                    let (output, report) = traced.into_parts();
+                    Ok(Traced::new(map(original_input, output), report))
+                })
+            }),
+        }
+    }
+
+    /// Returns each successful output paired with the input that produced it.
+    pub fn with_input(self) -> Step<R, I, (I, O), F, E>
+    where
+        R: 'static,
+        I: Clone + 'static,
+        O: 'static,
+        F: 'static,
+        E: 'static,
+    {
+        self.map_with_input(|input, output| (input, output))
+    }
+
+    /// Maps findings in successful traces and rejection reports.
+    pub fn map_findings<NextFinding, Map>(self, map: Map) -> Step<R, I, O, NextFinding, E>
+    where
+        R: 'static,
+        I: 'static,
+        O: 'static,
+        F: 'static,
+        NextFinding: 'static,
+        E: 'static,
+        Map: Fn(F) -> NextFinding + 'static,
+    {
+        let runner = self.runner.clone();
+        let map = Arc::new(map);
+
+        Step {
+            runner: Arc::new(move |runtime, input| {
+                let runner = runner.clone();
+                let map = map.clone();
+                Box::pin(async move {
+                    match runner(runtime, input).await {
+                        Ok(traced) => {
+                            let (output, report) = traced.into_parts();
+                            Ok(Traced::new(
+                                output,
+                                report.map_findings(|finding| map(finding)),
+                            ))
+                        }
+                        Err(StepError::Rejected(report)) => Err(StepError::Rejected(
+                            report.map_findings(|finding| map(finding)),
+                        )),
+                        Err(StepError::System { stage, error }) => {
+                            Err(StepError::System { stage, error })
+                        }
+                    }
+                })
+            }),
+        }
+    }
+
     /// Runs two steps in parallel against the same cloned input.
     pub fn join<Other>(self, other: Step<R, I, Other, F, E>) -> Step<R, I, (O, Other), F, E>
     where
@@ -494,7 +622,7 @@ where
                         input_type = %type_name::<I>(),
                         output_type = %type_name::<A>(),
                         finding_type = %type_name::<F>(),
-                        max_attempts = retry_policy.max_attempts()
+                        max_attempts = ?retry_policy.max_attempts()
                     )
                 } else {
                     info_span!(
@@ -504,7 +632,7 @@ where
                         input_type = %type_name::<I>(),
                         output_type = %type_name::<A>(),
                         finding_type = %type_name::<F>(),
-                        max_attempts = retry_policy.max_attempts()
+                        max_attempts = ?retry_policy.max_attempts()
                     )
                 };
 
@@ -595,7 +723,7 @@ where
                                 findings,
                             });
 
-                            if repair_attempts.len() >= retry_policy.max_attempts() {
+                            if retry_policy.is_exhausted(repair_attempts.len()) {
                                 warn!(
                                     action = action::RUN_REJECTED,
                                     attempts = report_attempts.len(),
@@ -684,7 +812,7 @@ where
                         input_type = %type_name::<I>(),
                         output_type = %type_name::<A>(),
                         finding_type = %type_name::<F>(),
-                        max_attempts = retry_policy.max_attempts()
+                        max_attempts = ?retry_policy.max_attempts()
                     )
                 } else {
                     info_span!(
@@ -694,7 +822,7 @@ where
                         input_type = %type_name::<I>(),
                         output_type = %type_name::<A>(),
                         finding_type = %type_name::<F>(),
-                        max_attempts = retry_policy.max_attempts()
+                        max_attempts = ?retry_policy.max_attempts()
                     )
                 };
 
@@ -841,7 +969,7 @@ where
                                 findings,
                             });
 
-                            if repair_attempts.len() >= retry_policy.max_attempts() {
+                            if retry_policy.is_exhausted(repair_attempts.len()) {
                                 warn!(
                                     action = action::RUN_REJECTED,
                                     attempts = report_attempts.len(),
@@ -1247,6 +1375,17 @@ mod tests {
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
+    enum WorkflowFinding {
+        Step(Finding),
+    }
+
+    impl From<Finding> for WorkflowFinding {
+        fn from(finding: Finding) -> Self {
+            Self::Step(finding)
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
     struct TestWorktree {
         patch: Patch,
         required_revision: usize,
@@ -1506,6 +1645,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn step_with_unlimited_retries_keeps_repairing_until_checks_pass() {
+        let step = Step::builder(Generator)
+            .materialise(CargoTest)
+            .validate(TestCheck)
+            .repair_with(Repair)
+            .retry_policy(RetryPolicy::unlimited())
+            .build();
+
+        let mut test_runtime = runtime();
+        test_runtime.required_revision = 5;
+        test_runtime.require_even_revision = false;
+
+        let traced = step
+            .run_traced(
+                &test_runtime,
+                CodeInput {
+                    prompt: "add feature",
+                    revision: 0,
+                    failing_test: None,
+                },
+            )
+            .await
+            .expect("unlimited retry policy should keep repairing");
+
+        assert_eq!(traced.output().revision, 5);
+        assert_eq!(traced.report().attempt_count(), 6);
+        assert!(traced.report().attempts()[5].accepted());
+    }
+
+    #[tokio::test]
     async fn step_returns_report_when_retries_exhausted() {
         let step = Step::builder(Generator)
             .materialise(CargoTest)
@@ -1546,7 +1715,21 @@ mod tests {
         let sequenced = add_one.clone().then(double.clone());
         let joined = add_one.clone().join(double.clone());
         let reconciled = joined.clone().reconcile_task(SumPair);
-        let zipped = add_one.zip(double);
+        let zipped = add_one.clone().zip(double.clone());
+        let mapped_input = add_one.clone().map_input(|input: String| {
+            input
+                .parse::<usize>()
+                .expect("test input should parse as usize")
+        });
+        let with_input = add_one.clone().with_input();
+        let mapped_with_input =
+            add_one.map_with_input(|input, output| format!("{input}->{output}"));
+        let mapped_findings = Step::builder(Generator)
+            .materialise(CargoTest)
+            .validate(TestCheck)
+            .retry_policy(RetryPolicy::new(1))
+            .build()
+            .map_findings(WorkflowFinding::from);
         let test_runtime = runtime();
 
         assert_eq!(
@@ -1571,5 +1754,47 @@ mod tests {
             zipped.run(&test_runtime, (3, 4)).await.expect("zip result"),
             (4, 8)
         );
+        assert_eq!(
+            mapped_input
+                .run(&test_runtime, "3".to_string())
+                .await
+                .expect("mapped input result"),
+            4
+        );
+        assert_eq!(
+            with_input
+                .run(&test_runtime, 3)
+                .await
+                .expect("with input result"),
+            (3, 4)
+        );
+        assert_eq!(
+            mapped_with_input
+                .run(&test_runtime, 3)
+                .await
+                .expect("mapped with input result"),
+            "3->4"
+        );
+
+        let error = mapped_findings
+            .run(
+                &test_runtime,
+                CodeInput {
+                    prompt: "add feature",
+                    revision: 0,
+                    failing_test: None,
+                },
+            )
+            .await
+            .expect_err("step should reject");
+        match error {
+            super::StepError::Rejected(report) => {
+                assert_eq!(
+                    report.attempts()[0].findings,
+                    vec![WorkflowFinding::Step(Finding::TestFailure("cargo test"))]
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

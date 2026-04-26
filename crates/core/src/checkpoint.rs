@@ -238,7 +238,23 @@ mod tests {
         let decoded: StepCheckpoint = serde_json::from_str(&json).expect("should deserialise");
         assert_eq!(decoded.current_input, serde_json::json!(2));
         assert_eq!(decoded.repair_attempts.len(), 1);
-        assert_eq!(decoded.retry_policy.max_attempts(), 3);
+        assert_eq!(decoded.retry_policy.max_attempts(), Some(3));
+    }
+
+    #[test]
+    fn step_checkpoint_round_trips_unlimited_retry_policy() {
+        let checkpoint = StepCheckpoint {
+            initial_input: serde_json::json!(0),
+            current_input: serde_json::json!(2),
+            repair_attempts: Vec::new(),
+            report_attempts: Vec::new(),
+            retry_policy: RetryPolicy::unlimited(),
+        };
+
+        let json = serde_json::to_string(&checkpoint).expect("should serialise");
+        let decoded: StepCheckpoint = serde_json::from_str(&json).expect("should deserialise");
+
+        assert!(decoded.retry_policy.is_unlimited());
     }
 
     #[test]

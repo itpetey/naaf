@@ -38,7 +38,7 @@ pub struct Attempt<I, O, F> {
 /// Configures how many attempts a step may perform before it is rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetryPolicy {
-    max_attempts: usize,
+    max_attempts: Option<usize>,
 }
 
 /// A lightweight view of one step attempt recorded in a report.
@@ -95,12 +95,53 @@ impl RetryPolicy {
             max_attempts > 0,
             "retry policy must allow at least one attempt"
         );
-        Self { max_attempts }
+        Self {
+            max_attempts: Some(max_attempts),
+        }
     }
 
-    /// Returns the maximum number of attempts permitted for a step.
-    pub fn max_attempts(self) -> usize {
+    /// Creates a retry policy with no attempt limit.
+    pub fn unlimited() -> Self {
+        Self { max_attempts: None }
+    }
+
+    /// Returns the maximum number of attempts permitted for a step, if finite.
+    pub fn max_attempts(self) -> Option<usize> {
         self.max_attempts
+    }
+
+    /// Returns whether the policy has no attempt limit.
+    pub fn is_unlimited(self) -> bool {
+        self.max_attempts.is_none()
+    }
+
+    /// Returns whether the given attempt count has exhausted this policy.
+    pub fn is_exhausted(self, attempt_count: usize) -> bool {
+        self.max_attempts
+            .is_some_and(|max_attempts| attempt_count >= max_attempts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RetryPolicy;
+
+    #[test]
+    fn finite_retry_policy_exhausts_at_max_attempts() {
+        let policy = RetryPolicy::new(3);
+
+        assert_eq!(policy.max_attempts(), Some(3));
+        assert!(!policy.is_exhausted(2));
+        assert!(policy.is_exhausted(3));
+    }
+
+    #[test]
+    fn unlimited_retry_policy_never_exhausts() {
+        let policy = RetryPolicy::unlimited();
+
+        assert_eq!(policy.max_attempts(), None);
+        assert!(policy.is_unlimited());
+        assert!(!policy.is_exhausted(usize::MAX));
     }
 }
 
@@ -137,6 +178,23 @@ impl<F> StepReport<F> {
     /// Returns the number of attempts recorded in this report.
     pub fn attempt_count(&self) -> usize {
         self.attempts.len()
+    }
+
+    /// Maps every recorded finding while preserving attempt acceptance metadata.
+    pub fn map_findings<NextFinding>(
+        self,
+        map: impl Fn(F) -> NextFinding,
+    ) -> StepReport<NextFinding> {
+        StepReport {
+            attempts: self
+                .attempts
+                .into_iter()
+                .map(|attempt| AttemptReport {
+                    findings: attempt.findings.into_iter().map(&map).collect(),
+                    accepted: attempt.accepted,
+                })
+                .collect(),
+        }
     }
 
     /// Appends another report to this one.
