@@ -31,6 +31,7 @@ pub struct PendingQuestion {
 }
 
 /// [`HumanIO`] implementation that forwards questions over a Tokio channel.
+#[derive(Clone)]
 pub struct ChannelHumanIO {
     pending: tokio::sync::mpsc::Sender<PendingQuestion>,
 }

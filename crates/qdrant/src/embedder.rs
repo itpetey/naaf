@@ -24,6 +24,7 @@ pub mod openai {
     }
 
     /// [`Embedder`] implementation backed by the OpenAI embeddings API.
+    #[derive(Clone)]
     pub struct OpenAiEmbedder {
         client: Client,
         api_key: String,
@@ -98,6 +99,11 @@ pub mod openai {
         fn dimension(&self) -> usize {
             self.dimension
         }
+
+        fn clone_embedder(&self) -> Box<dyn Embedder> {
+            let this = (*self).clone();
+            Box::new(this)
+        }
     }
 }
 
@@ -111,4 +117,7 @@ pub trait Embedder {
 
     /// Returns the vector dimension produced by this embedder.
     fn dimension(&self) -> usize;
+
+    /// Clones this embedder into a boxed trait object.
+    fn clone_embedder(&self) -> Box<dyn Embedder>;
 }

@@ -196,6 +196,11 @@ impl<R> QdrantAgent<R> {
         self.embedder.as_ref()
     }
 
+    /// Clones the embedder into a boxed trait object.
+    pub fn clone_embedder(&self) -> Box<dyn Embedder> {
+        self.embedder.clone_embedder()
+    }
+
     /// Ensures the target collection exists with the embedder's vector dimension.
     pub async fn init_collection(&self) -> Result<(), QdrantError> {
         let dimension = self.embedder.dimension();

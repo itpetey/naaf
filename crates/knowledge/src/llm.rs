@@ -238,6 +238,10 @@ mod tests {
         fn dimension(&self) -> usize {
             2
         }
+
+        fn clone_embedder(&self) -> Box<dyn Embedder> {
+            Box::new(StubEmbedder)
+        }
     }
 
     #[test]
