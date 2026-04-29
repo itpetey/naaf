@@ -32,6 +32,7 @@ fn json_task_response_format() -> serde_json::Value {
             "strict": false,
             "schema": {
                 "type": "object",
+                "properties": {},
                 "additionalProperties": true
             }
         }
@@ -124,6 +125,7 @@ mod tests {
                     "strict": false,
                     "schema": {
                         "type": "object",
+                        "properties": {},
                         "additionalProperties": true
                     }
                 }

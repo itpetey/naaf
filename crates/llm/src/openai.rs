@@ -799,7 +799,7 @@ mod tests {
             .with_tools(vec![ToolSpec {
                 name: "add".to_string(),
                 description: "Adds two numbers".to_string(),
-                input_schema: json!({"type": "object"}),
+                input_schema: json!({"type": "object", "properties": {}}),
             }])
             .with_tool_choice(ToolChoice::Required("add".to_string()));
         let body = build_request_body(&request).unwrap();

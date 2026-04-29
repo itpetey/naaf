@@ -111,7 +111,7 @@ impl<R: 'static> Materialiser for QdrantUpsert<R> {
             let mut ids = Vec::with_capacity(payloads.len());
             let mut points = Vec::with_capacity(payloads.len());
 
-            for (payload, vector) in payloads.into_iter().zip(vectors.into_iter()) {
+            for (payload, vector) in payloads.into_iter().zip(vectors) {
                 let id = Uuid::new_v4();
                 points.push(PointData {
                     id,
