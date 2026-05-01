@@ -417,7 +417,12 @@ pub fn resolve_project_path(root: &Path, relative: &str) -> Result<PathBuf, Work
         return Err(WorkspaceError::UnsafePath(relative.to_string()));
     }
 
-    Ok(root.join(path))
+    let resolved = root.join(path);
+    if !resolved.starts_with(root) {
+        return Err(WorkspaceError::UnsafePath(relative.to_string()));
+    }
+
+    Ok(resolved)
 }
 
 pub async fn run_git_command(
