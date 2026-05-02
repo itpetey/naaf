@@ -14,6 +14,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutorConfig {
     max_turns: usize,
+    max_input_tokens: Option<usize>,
 }
 
 /// The completed conversation captured by the executor.
@@ -35,12 +36,30 @@ impl ExecutorConfig {
     /// Creates a config with the given maximum number of model turns.
     pub fn new(max_turns: usize) -> Self {
         assert!(max_turns > 0, "executor must allow at least one turn");
-        Self { max_turns }
+        Self {
+            max_turns,
+            max_input_tokens: None,
+        }
+    }
+
+    /// Sets an optional maximum input token budget for the execution.
+    ///
+    /// When configured, the executor checks the accumulated message token count
+    /// before each turn and returns [`ExecutorError::TokenLimitExceeded`] if
+    /// the budget would be exceeded.
+    pub fn with_max_input_tokens(mut self, max_input_tokens: usize) -> Self {
+        self.max_input_tokens = Some(max_input_tokens);
+        self
     }
 
     /// Returns the maximum number of model turns.
     pub fn max_turns(self) -> usize {
         self.max_turns
+    }
+
+    /// Returns the maximum input token budget, if configured.
+    pub fn max_input_tokens(self) -> Option<usize> {
+        self.max_input_tokens
     }
 }
 
@@ -155,6 +174,13 @@ where
             let tools = self.tools.specs();
 
             for turn in 1..=self.config.max_turns() {
+                if let Some(max_tokens) = self.config.max_input_tokens() {
+                    let token_count = messages.iter().map(|m| m.token_count()).sum::<usize>();
+                    if token_count > max_tokens {
+                        return Err(ExecutorError::TokenLimitExceeded { max_tokens });
+                    }
+                }
+
                 debug!(turn, model = %model, tool_count = tools.len(), "starting LLM turn");
 
                 let response = self

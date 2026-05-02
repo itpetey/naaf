@@ -30,6 +30,12 @@ pub enum ExecutorError<ClientError, ToolError> {
         /// Maximum number of model turns permitted for the execution.
         max_turns: usize,
     },
+    /// The accumulated input exceeded the token budget before a final answer.
+    #[error("LLM execution exceeded the input token limit ({max_tokens})")]
+    TokenLimitExceeded {
+        /// Maximum input tokens permitted for the execution.
+        max_tokens: usize,
+    },
 }
 
 /// Errors raised by the generic `naaf_core` role adapters.

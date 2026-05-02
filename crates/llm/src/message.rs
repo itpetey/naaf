@@ -151,6 +151,38 @@ impl Message {
     pub fn tool(message: ToolResultMessage) -> Self {
         Self::Tool(message)
     }
+
+    /// Returns an approximate token count for this message using the
+    /// `cl100k_base` tokenizer (used by GPT-4, GPT-4o, and most modern models).
+    ///
+    /// The count includes a small per-message overhead to account for role
+    /// tags and formatting.
+    pub fn token_count(&self) -> usize {
+        let bpe =
+            tiktoken::get_encoding("cl100k_base").expect("cl100k_base should always be available");
+
+        const OVERHEAD: usize = 4;
+
+        match self {
+            Message::System { content } => bpe.count(content) + OVERHEAD,
+            Message::User { content } => bpe.count(content) + OVERHEAD,
+            Message::Assistant(am) => {
+                let mut tokens = am.content.as_deref().map_or(0, |c| bpe.count(c));
+                for tc in &am.tool_calls {
+                    tokens += bpe.count(&tc.tool_name);
+                    tokens += bpe.count(&serde_json::to_string(&tc.arguments).unwrap_or_default());
+                    tokens += bpe.count(&tc.call_id);
+                }
+                tokens + OVERHEAD
+            }
+            Message::Tool(tr) => {
+                let mut tokens = bpe.count(&serde_json::to_string(&tr.content).unwrap_or_default());
+                tokens += bpe.count(&tr.tool_name);
+                tokens += bpe.count(&tr.call_id);
+                tokens + OVERHEAD
+            }
+        }
+    }
 }
 
 impl CompletionRequest {
@@ -163,6 +195,11 @@ impl CompletionRequest {
             tool_choice: ToolChoice::Auto,
             metadata: Value::Null,
         }
+    }
+
+    /// Returns an approximate token count for the messages in this request.
+    pub fn token_count(&self) -> usize {
+        self.messages.iter().map(|m| m.token_count()).sum()
     }
 
     /// Replaces the request tools.
