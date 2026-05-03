@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use futures::future::{LocalBoxFuture, try_join};
+use futures::future::LocalBoxFuture;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
@@ -208,61 +208,6 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
         (self.runner)(runtime, StepInput::Resume { input, checkpoint })
     }
 
-    /// Sequences two steps so the left output becomes the right input.
-    pub fn then<Next>(self, next: Step<R, O, Next, F, E>) -> Step<R, I, Next, F, E>
-    where
-        R: 'static,
-        I: 'static,
-        O: 'static,
-        Next: 'static,
-        F: 'static,
-        E: 'static,
-    {
-        let left = self.runner.clone();
-        let right = next.runner.clone();
-
-        Step {
-            runner: Arc::new(move |runtime, step_input| {
-                let left = left.clone();
-                let right = right.clone();
-                Box::pin(async move {
-                    let left_traced = left(runtime, step_input).await?;
-                    let (output, left_report) = left_traced.into_parts();
-                    let right_traced = right(runtime, StepInput::Fresh { input: output }).await?;
-                    let (next_output, right_report) = right_traced.into_parts();
-                    Ok(Traced::new(next_output, left_report.extend(right_report)))
-                })
-            }),
-        }
-    }
-
-    /// Fan-in helper equivalent to [`Step::then`] after a join or zip.
-    pub fn reconcile<Next>(self, step: Step<R, O, Next, F, E>) -> Step<R, I, Next, F, E>
-    where
-        R: 'static,
-        I: 'static,
-        O: 'static,
-        Next: 'static,
-        F: 'static,
-        E: 'static,
-    {
-        self.then(step)
-    }
-
-    /// Wraps a task in a step and uses it as a reconciliation stage.
-    pub fn reconcile_task<T, Next>(self, task: T) -> Step<R, I, Next, F, E>
-    where
-        R: 'static,
-        I: 'static,
-        O: Clone + 'static,
-        Next: Clone + 'static,
-        F: Clone + 'static,
-        E: 'static,
-        T: Task<Runtime = R, Input = O, Output = Next, Error = E> + 'static,
-    {
-        self.reconcile(Step::builder(task).with_findings::<F>().build())
-    }
-
     /// Maps a successful output while preserving trace metadata.
     pub fn map<Next, Map>(self, map: Map) -> Step<R, I, Next, F, E>
     where
@@ -413,87 +358,6 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
                             Err(StepError::System { stage, error })
                         }
                     }
-                })
-            }),
-        }
-    }
-
-    /// Runs two steps in parallel against the same cloned input.
-    pub fn join<Other>(self, other: Step<R, I, Other, F, E>) -> Step<R, I, (O, Other), F, E>
-    where
-        R: 'static,
-        I: Clone + 'static,
-        O: 'static,
-        Other: 'static,
-        F: 'static,
-        E: 'static,
-    {
-        let left = self.runner.clone();
-        let right = other.runner.clone();
-
-        Step {
-            runner: Arc::new(move |runtime, step_input: StepInput<I>| {
-                let left = left.clone();
-                let right = right.clone();
-                Box::pin(async move {
-                    let input = match step_input {
-                        StepInput::Fresh { input } => input,
-                        StepInput::Resume { input, .. } => input,
-                    };
-                    let left_fut = left(
-                        runtime,
-                        StepInput::Fresh {
-                            input: input.clone(),
-                        },
-                    );
-                    let right_fut = right(runtime, StepInput::Fresh { input });
-                    let (left_traced, right_traced) = try_join(left_fut, right_fut).await?;
-                    let (left_output, left_report) = left_traced.into_parts();
-                    let (right_output, right_report) = right_traced.into_parts();
-                    Ok(Traced::new(
-                        (left_output, right_output),
-                        left_report.extend(right_report),
-                    ))
-                })
-            }),
-        }
-    }
-
-    /// Runs two steps in parallel against separate inputs.
-    pub fn zip<OtherInput, OtherOutput>(
-        self,
-        other: Step<R, OtherInput, OtherOutput, F, E>,
-    ) -> Step<R, (I, OtherInput), (O, OtherOutput), F, E>
-    where
-        R: 'static,
-        I: 'static,
-        O: 'static,
-        OtherInput: 'static,
-        OtherOutput: 'static,
-        F: 'static,
-        E: 'static,
-    {
-        let left = self.runner.clone();
-        let right = other.runner.clone();
-
-        Step {
-            runner: Arc::new(move |runtime, step_input: StepInput<(I, OtherInput)>| {
-                let left = left.clone();
-                let right = right.clone();
-                Box::pin(async move {
-                    let (left_input, right_input) = match step_input {
-                        StepInput::Fresh { input } => input,
-                        StepInput::Resume { input, .. } => input,
-                    };
-                    let left_fut = left(runtime, StepInput::Fresh { input: left_input });
-                    let right_fut = right(runtime, StepInput::Fresh { input: right_input });
-                    let (left_traced, right_traced) = try_join(left_fut, right_fut).await?;
-                    let (left_output, left_report) = left_traced.into_parts();
-                    let (right_output, right_report) = right_traced.into_parts();
-                    Ok(Traced::new(
-                        (left_output, right_output),
-                        left_report.extend(right_report),
-                    ))
                 })
             }),
         }
@@ -1708,14 +1572,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn steps_compose_with_then_join_zip_and_reconcile() {
+    async fn steps_map_input_output_and_findings() {
         let add_one = Step::builder(Increment).with_findings::<Finding>().build();
-        let double = Step::builder(Double).with_findings::<Finding>().build();
 
-        let sequenced = add_one.clone().then(double.clone());
-        let joined = add_one.clone().join(double.clone());
-        let reconciled = joined.clone().reconcile_task(SumPair);
-        let zipped = add_one.clone().zip(double.clone());
         let mapped_input = add_one.clone().map_input(|input: String| {
             input
                 .parse::<usize>()
@@ -1732,28 +1591,6 @@ mod tests {
             .map_findings(WorkflowFinding::from);
         let test_runtime = runtime();
 
-        assert_eq!(
-            sequenced
-                .run(&test_runtime, 3)
-                .await
-                .expect("sequence result"),
-            8
-        );
-        assert_eq!(
-            joined.run(&test_runtime, 3).await.expect("join result"),
-            (4, 6)
-        );
-        assert_eq!(
-            reconciled
-                .run(&test_runtime, 3)
-                .await
-                .expect("reconcile result"),
-            13
-        );
-        assert_eq!(
-            zipped.run(&test_runtime, (3, 4)).await.expect("zip result"),
-            (4, 8)
-        );
         assert_eq!(
             mapped_input
                 .run(&test_runtime, "3".to_string())

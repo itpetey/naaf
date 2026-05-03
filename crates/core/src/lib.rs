@@ -1,10 +1,10 @@
 //! `naaf` is a strongly typed orchestration library for building asynchronous
-//! LLM workflows out of local retrying `Step`s.
+//! LLM workflows out of local retrying `Step`s and declarative `Pipeline`s.
 //!
 //! A `Step` owns one task plus its nearby checks, optional materialisation, and
-//! optional repair planning. Workflows are then composed from steps using
-//! combinators such as `.then(...)`, `.join(...)`, `.zip(...)`, and
-//! `.reconcile_task(...)`.
+//! optional repair planning. `Pipeline` composes typed `Phase`s with declared
+//! routes (`Next`, `Switch`, `Parallel`, `Halt`), supporting cycles for
+//! backflow and conditional branching.
 //!
 //! The runtime is threaded explicitly through every trait, which keeps domain
 //! types clean while allowing checks and materialisers to use side effects such
@@ -159,119 +159,22 @@
 //!     });
 //! ```
 //!
-//! # Parallel Fan-Out And Reconciliation
-//!
-//! ```
-//! use futures::future::LocalBoxFuture;
-//! use naaf_core::{Step, Task};
-//!
-//! #[derive(Debug)]
-//! struct Runtime {
-//!     increment: usize,
-//!     multiplier: usize,
-//!     reconcile_bias: usize,
-//! }
-//!
-//! #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//! struct Error;
-//!
-//! impl std::fmt::Display for Error {
-//!     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//!         f.write_str("error")
-//!     }
-//! }
-//!
-//! impl std::error::Error for Error {}
-//!
-//! struct Increment;
-//! struct Double;
-//! struct SumPair;
-//!
-//! impl Task for Increment {
-//!     type Runtime = Runtime;
-//!     type Input = usize;
-//!     type Output = usize;
-//!     type Error = Error;
-//!
-//!     fn run<'a>(
-//!         &'a self,
-//!         runtime: &'a Self::Runtime,
-//!         input: Self::Input,
-//!     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-//!         Box::pin(async move { Ok(input + runtime.increment) })
-//!     }
-//! }
-//!
-//! impl Task for Double {
-//!     type Runtime = Runtime;
-//!     type Input = usize;
-//!     type Output = usize;
-//!     type Error = Error;
-//!
-//!     fn run<'a>(
-//!         &'a self,
-//!         runtime: &'a Self::Runtime,
-//!         input: Self::Input,
-//!     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-//!         Box::pin(async move { Ok(input * runtime.multiplier) })
-//!     }
-//! }
-//!
-//! impl Task for SumPair {
-//!     type Runtime = Runtime;
-//!     type Input = (usize, usize);
-//!     type Output = usize;
-//!     type Error = Error;
-//!
-//!     fn run<'a>(
-//!         &'a self,
-//!         runtime: &'a Self::Runtime,
-//!         input: Self::Input,
-//!     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-//!         Box::pin(async move { Ok(input.0 + input.1 + runtime.reconcile_bias) })
-//!     }
-//! }
-//!
-//! tokio::runtime::Runtime::new()
-//!     .expect("runtime should build")
-//!     .block_on(async {
-//!     let runtime = Runtime {
-//!         increment: 1,
-//!         multiplier: 2,
-//!         reconcile_bias: 3,
-//!     };
-//!
-//!     let workflow = Step::builder(Increment)
-//!         .with_findings::<()>()
-//!         .build()
-//!         .join(Step::builder(Double).with_findings::<()>().build())
-//!         .reconcile_task(SumPair);
-//!
-//!     let result = workflow.run(&runtime, 3).await.expect("workflow should succeed");
-//!     assert_eq!(result, 13);
-//!     });
-//! ```
-
 pub use crate::{
     adaptor::{check_fn, materialiser_fn, repair_fn, repair_last_fn, task_fn},
     check::Check,
     checkpoint::{
-        AttemptCheckpoint, Checkpointer, NodeCheckpoint, NodeCheckpointReport, NodeCheckpointState,
-        ResumeError, RunnerRegistry, StepCheckpoint, StepCheckpointer, WorkflowCheckpoint,
-    },
-    graph::{
-        EdgeSpec, GraphPatch, InputSelectionError, InvalidPatchError, NodeContext,
-        NodeExecutionError, NodeId, NodeInput, NodeOutcome, NodeReport, NodeSpec, NodeSummary,
-        StepNode, Workflow, WorkflowError, WorkflowNode, WorkflowRunId, WorkflowRunReport,
+        CheckpointResult, PipelineCheckpoint, PipelineCheckpointer, StepCheckpoint,
+        StepCheckpointer,
     },
     materialiser::Materialiser,
     observability::{
         CheckExt, MaterialiserExt, ObservedCheck, ObservedMaterialiser, ObservedRepairPlanner,
         ObservedTask, RepairPlannerExt, TaskExt,
     },
-    repair::{
-        Attempt, AttemptReport, NeverFinding, RepairPlanner, RetryPolicy, StepReport, Traced,
+    pipeline::{
+        Phase, PhaseId, Pipeline, PipelineBuilder, PipelineError, PipelineValidationError, Route,
     },
+    repair::{Attempt, AttemptReport, RepairPlanner, RetryPolicy, StepReport, Traced},
     step::{BoundStepBuilder, OpenStepBuilder, Step, StepBuilder, StepError, SystemStage},
     task::Task,
 };
@@ -279,9 +182,9 @@ pub use crate::{
 mod adaptor;
 mod check;
 mod checkpoint;
-mod graph;
 mod materialiser;
 mod observability;
+mod pipeline;
 mod repair;
 pub mod span;
 mod step;

@@ -63,10 +63,6 @@ pub struct Traced<T, F> {
     report: StepReport<F>,
 }
 
-/// Placeholder finding type for steps that do not yet bind a finding type.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NeverFinding {}
-
 impl Default for RetryPolicy {
     fn default() -> Self {
         Self::new(1)

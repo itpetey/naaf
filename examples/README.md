@@ -27,27 +27,27 @@ Run with `cargo run -p materialiser`.
 
 Two design tasks running in parallel against the same input, reconciled into a
 single output. `DesignApi` and `DesignUi` both receive the same `ProjectPlan`;
-their outputs are combined by `MergeReport`. This demonstrates fan-out with `.join()`
-and fan-in with `.reconcile_task()`.
+their outputs are combined by `MergeReport`. This demonstrates fan-out with
+`Route::Parallel` and fan-in via a subsequent phase in a `Pipeline`.
 
 Run with `cargo run -p join-reconcile`.
 
 ## composed-workflow
 
 A full pipeline that sequences a validated planning step with a parallel fan-out.
-`PlanProject` validates and repairs its output, then `.then()` chains into the
+`PlanProject` validates and repairs its output, then the pipeline routes to the
 parallel `DesignApi` / `DesignUi` pair reconciled by `MergeReport`. This shows
-how retry logic and parallel composition compose naturally.
+how retry logic and parallel composition compose naturally inside a `Pipeline`.
 
 Run with `cargo run -p composed-workflow`.
 
 ## dynamic-workflow
 
-Runtime graph construction using `Workflow`, `StepNode`, `NodeSpec`, and
-`GraphPatch`. A root planning node spawns three downstream nodes via
-`spawn_with()` — two parallel design steps and a merge step — with edges
-declared at runtime. The workflow engine schedules execution automatically based
-on the graph topology.
+Runtime pipeline construction using `Pipeline`, `Phase`, and `Route`. A root
+planning phase produces output that a `Route::Switch` uses to select between
+subsequent phases — two parallel design steps and a merge step — with routes
+declared at build time. The pipeline engine schedules execution automatically
+based on the declared routes.
 
 Run with `cargo run -p dynamic-workflow`.
 

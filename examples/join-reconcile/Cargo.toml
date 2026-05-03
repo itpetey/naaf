@@ -7,4 +7,6 @@ license.workspace = true
 
 [dependencies]
 naaf-core = { path = "../../crates/core" }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -10,6 +10,7 @@ pub mod action {
     pub const ATTEMPT_REPAIR_COMPLETE: &str = "attempt.repair.complete";
     pub const INPUT: &str = "input";
     pub const OUTPUT: &str = "output";
+    pub const ROUTE: &str = "route";
 }
 pub mod component {
     pub const STEP: &str = "step";
@@ -17,6 +18,7 @@ pub mod component {
     pub const CHECK: &str = "check";
     pub const MATERIALISER: &str = "materialiser";
     pub const REPAIR: &str = "repair";
+    pub const PIPELINE: &str = "pipeline";
 }
 pub mod name {
     pub const STEP: &str = "step_run";
@@ -24,8 +26,10 @@ pub mod name {
     pub const CHECK: &str = "check_run";
     pub const MATERIALISER: &str = "materialiser_run";
     pub const REPAIR: &str = "repair_run";
+    pub const PIPELINE: &str = "pipeline_run";
 }
 pub mod reason {
     pub const RETRY_LIMIT_REACHED: &str = "retry_limit_reached";
     pub const REPAIR_UNAVAILABLE: &str = "repair_unavailable";
+    pub const MAX_DEPTH_EXCEEDED: &str = "max_depth_exceeded";
 }

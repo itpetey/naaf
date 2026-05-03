@@ -321,10 +321,6 @@ pub use crate::{
         ToolResultMessage, ToolSpec, Usage,
     },
     repository::{GlobPathsTool, ReadFileTool, SearchFilesTool},
-    spawn::{
-        NodeTemplate, SpawnEdge, SpawnNode, SpawnRequest, SpawnResolveError, SpawnStore, SpawnTool,
-        resolve_spawn,
-    },
     task::{LlmCheck, LlmMaterialiser, LlmRepairPlanner, LlmTask},
     tool::{RegisterToolError, Tool, ToolCallError, ToolRegistry},
 };
@@ -339,7 +335,6 @@ mod message;
 mod openai;
 /// Repository-aware tools for reading and searching a workspace from an LLM.
 pub mod repository;
-mod spawn;
 mod task;
 mod tool;
 #[cfg(feature = "web-search")]

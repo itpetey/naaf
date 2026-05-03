@@ -1,16 +1,12 @@
-//! Demonstrates dynamic workflow graph construction using `Workflow`,
-//! `StepNode`, `NodeSpec`, `GraphPatch`, and `EdgeSpec`.
+//! Demonstrates a declarative pipeline using `Pipeline`, `Phase`, and `Route`.
 //!
-//! A root planning step spawns three downstream nodes (two parallel design
-//! steps and a merge step) at runtime via `spawn_with`. The workflow engine
-//! executes the graph, routing outputs through edges.
+//! A root planning phase feeds into two design phases. The pipeline engine
+//! executes the design phases in parallel and returns their joined outputs.
 
 use std::fmt::{Display, Formatter};
 
-use naaf_core::{
-    EdgeSpec, GraphPatch, NodeContext, NodeId, NodeInput, NodeSpec, Step, StepNode, Workflow,
-    task_fn,
-};
+use futures::future::LocalBoxFuture;
+use naaf_core::{Phase, PhaseId, Pipeline, Route};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +45,30 @@ struct UiDesign {
     components: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+enum DesignDraft {
+    Api {
+        plan: ProjectPlan,
+        design: ApiDesign,
+    },
+    Ui {
+        plan: ProjectPlan,
+        design: UiDesign,
+    },
+}
+
+fn plan_from_input(input: PlanningInput) -> ProjectPlan {
+    ProjectPlan {
+        name: input.name,
+        phases: input
+            .goals
+            .iter()
+            .map(|goal| format!("Implement {goal}"))
+            .collect(),
+        estimated_weeks: input.estimated_weeks,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Error;
 
@@ -60,156 +80,154 @@ impl Display for Error {
     }
 }
 
+#[derive(Clone)]
+struct PlanProject;
+impl Phase for PlanProject {
+    type Runtime = PlannerRuntime;
+    type Input = PlanningInput;
+    type Output = ProjectPlan;
+    type Error = Error;
+
+    fn run<'a>(
+        &'a self,
+        _rt: &'a PlannerRuntime,
+        input: PlanningInput,
+    ) -> LocalBoxFuture<'a, Result<ProjectPlan, Error>> {
+        Box::pin(async move { Ok(plan_from_input(input)) })
+    }
+}
+
+#[derive(Clone)]
+struct DesignApi;
+impl Phase for DesignApi {
+    type Runtime = PlannerRuntime;
+    type Input = ProjectPlan;
+    type Output = DesignDraft;
+    type Error = Error;
+
+    fn run<'a>(
+        &'a self,
+        _rt: &'a PlannerRuntime,
+        input: ProjectPlan,
+    ) -> LocalBoxFuture<'a, Result<DesignDraft, Error>> {
+        Box::pin(async move {
+            let endpoints = input
+                .phases
+                .iter()
+                .map(|phase| format!("/api/{phase}"))
+                .collect();
+            Ok(DesignDraft::Api {
+                plan: input.clone(),
+                design: ApiDesign {
+                    plan_name: input.name,
+                    endpoints,
+                },
+            })
+        })
+    }
+}
+
+#[derive(Clone)]
+struct DesignUi;
+impl Phase for DesignUi {
+    type Runtime = PlannerRuntime;
+    type Input = ProjectPlan;
+    type Output = DesignDraft;
+    type Error = Error;
+
+    fn run<'a>(
+        &'a self,
+        _rt: &'a PlannerRuntime,
+        input: ProjectPlan,
+    ) -> LocalBoxFuture<'a, Result<DesignDraft, Error>> {
+        Box::pin(async move {
+            let components = input
+                .phases
+                .iter()
+                .map(|phase| format!("{phase}Panel"))
+                .collect();
+            Ok(DesignDraft::Ui {
+                plan: input.clone(),
+                design: UiDesign {
+                    plan_name: input.name,
+                    components,
+                },
+            })
+        })
+    }
+}
+
+#[derive(Clone)]
+struct MergeReport;
+impl Phase for MergeReport {
+    type Runtime = PlannerRuntime;
+    type Input = Vec<DesignDraft>;
+    type Output = ProjectReport;
+    type Error = Error;
+
+    fn run<'a>(
+        &'a self,
+        _rt: &'a PlannerRuntime,
+        drafts: Vec<DesignDraft>,
+    ) -> LocalBoxFuture<'a, Result<ProjectReport, Error>> {
+        Box::pin(async move {
+            let mut plan = None;
+            let mut api = None;
+            let mut ui = None;
+            for draft in drafts {
+                match draft {
+                    DesignDraft::Api { plan: p, design } => {
+                        plan = Some(p);
+                        api = Some(design);
+                    }
+                    DesignDraft::Ui { plan: p, design } => {
+                        plan.get_or_insert(p);
+                        ui = Some(design);
+                    }
+                }
+            }
+            Ok(ProjectReport {
+                plan: plan.expect("plan should be present"),
+                api: api.expect("api design should be present"),
+                ui: ui.expect("ui design should be present"),
+            })
+        })
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let runtime = PlannerRuntime;
 
-    let root_id = NodeId::new();
-
-    let plan_step = Step::task(|_runtime: &PlannerRuntime, input: PlanningInput| {
-        let phases = input
-            .goals
-            .iter()
-            .map(|goal| format!("Implement {goal}"))
-            .collect();
-        Box::pin(async move {
-            Ok::<_, Error>(ProjectPlan {
-                name: input.name,
-                phases,
-                estimated_weeks: input.estimated_weeks,
-            })
-        })
-    });
-
-    let api_step = Step::task(|_runtime: &PlannerRuntime, input: ProjectPlan| {
-        let endpoints = input
-            .phases
-            .iter()
-            .map(|phase| format!("/api/{phase}"))
-            .collect();
-        Box::pin(async move {
-            Ok::<_, Error>(ApiDesign {
-                plan_name: input.name,
-                endpoints,
-            })
-        })
-    });
-
-    let ui_step = Step::task(|_runtime: &PlannerRuntime, input: ProjectPlan| {
-        let components = input
-            .phases
-            .iter()
-            .map(|phase| format!("{phase}Panel"))
-            .collect();
-        Box::pin(async move {
-            Ok::<_, Error>(UiDesign {
-                plan_name: input.name,
-                components,
-            })
-        })
-    });
-
-    let merge_step = task_fn(|_runtime: &PlannerRuntime, input: (ApiDesign, UiDesign)| {
-        let plan = ProjectPlan {
-            name: input.0.plan_name.clone(),
-            phases: Vec::new(),
-            estimated_weeks: 0,
-        };
-        Box::pin(async move {
-            Ok::<_, Error>(ProjectReport {
-                plan,
-                api: input.0,
-                ui: input.1,
-            })
-        })
-    });
-    let merge_step = Step::builder(merge_step).build();
-
-    let api_step_clone = api_step.clone();
-    let ui_step_clone = ui_step.clone();
-    let merge_step_clone = merge_step.clone();
-
-    let root = NodeSpec::new(
-        "plan_project",
-        StepNode::new(plan_step, |input: &NodeInput| {
-            input.seed_as::<PlanningInput>()
-        })
-        .spawn_with(move |context: &NodeContext, _plan: &ProjectPlan| {
-            let planner_id = context.node_id();
-            let api_id = NodeId::new();
-            let ui_id = NodeId::new();
-            let merge_id = NodeId::new();
-
-            GraphPatch::new()
-                .with_node(
-                    NodeSpec::new(
-                        "design_api",
-                        StepNode::new(api_step_clone.clone(), move |input: &NodeInput| {
-                            input.output_as::<ProjectPlan>(planner_id)
-                        }),
-                    )
-                    .with_id(api_id)
-                    .with_parent(planner_id),
-                )
-                .with_node(
-                    NodeSpec::new(
-                        "design_ui",
-                        StepNode::new(ui_step_clone.clone(), move |input: &NodeInput| {
-                            input.output_as::<ProjectPlan>(planner_id)
-                        }),
-                    )
-                    .with_id(ui_id)
-                    .with_parent(planner_id),
-                )
-                .with_node(
-                    NodeSpec::new(
-                        "merge_report",
-                        StepNode::new(merge_step_clone.clone(), move |input: &NodeInput| {
-                            let api = input.output_as::<ApiDesign>(api_id)?;
-                            let ui = input.output_as::<UiDesign>(ui_id)?;
-                            Ok((api, ui))
-                        }),
-                    )
-                    .with_id(merge_id)
-                    .with_parent(planner_id),
-                )
-                .with_edge(EdgeSpec::new(planner_id, api_id))
-                .with_edge(EdgeSpec::new(planner_id, ui_id))
-                .with_edge(EdgeSpec::new(api_id, merge_id))
-                .with_edge(EdgeSpec::new(ui_id, merge_id))
-        }),
-    )
-    .with_id(root_id)
-    .with_seed(PlanningInput {
+    let input = PlanningInput {
         name: "Event System".to_string(),
         goals: vec!["Event sourcing".to_string(), "Event replay".to_string()],
         estimated_weeks: 4,
-    })
-    .expect("seed should serialise");
+    };
 
-    let report = Workflow::new()
-        .with_max_concurrency(4)
-        .with_patch(GraphPatch::new().with_node(root))
-        .expect("root patch should validate")
-        .run(&runtime)
+    let pipeline = Pipeline::builder()
+        .add_phase(PhaseId::new("plan"), PlanProject)
+        .add_phase(PhaseId::new("design_api"), DesignApi)
+        .add_phase(PhaseId::new("design_ui"), DesignUi)
+        .add_phase(PhaseId::new("merge"), MergeReport)
+        .with_route(
+            PhaseId::new("plan"),
+            Route::parallel(["design_api", "design_ui"]),
+        )
+        .with_route(PhaseId::new("design_api"), Route::Halt)
+        .with_route(PhaseId::new("design_ui"), Route::Halt)
+        .with_route(PhaseId::new("merge"), Route::Halt)
+        .with_parallel_join("plan", "merge")
+        .with_initial(PhaseId::new("plan"))
+        .build()
+        .unwrap();
+
+    let result: ProjectReport = pipeline
+        .run(&runtime, input)
         .await
-        .expect("workflow should succeed");
+        .expect("pipeline should succeed");
 
-    for (id, node) in report.nodes() {
-        println!("Node: {} ({id})", node.name());
-        if let naaf_core::NodeReport::Step(step_report) = node.report() {
-            println!("  Attempts: {}", step_report.attempt_count());
-        }
-    }
-
-    let merge_node = report
-        .nodes()
-        .values()
-        .find(|node| node.name() == "merge_report")
-        .expect("merge node should exist");
-    let merged: ProjectReport =
-        serde_json::from_value(merge_node.output().clone()).expect("output should decode");
-    println!("Merged report plan: {}", merged.plan.name);
-    println!("API endpoints: {:?}", merged.api.endpoints);
-    println!("UI components: {:?}", merged.ui.components);
+    println!("Merged report plan: {}", result.plan.name);
+    println!("API endpoints: {:?}", result.api.endpoints);
+    println!("UI components: {:?}", result.ui.components);
 }
