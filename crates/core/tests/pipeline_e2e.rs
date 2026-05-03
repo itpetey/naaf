@@ -9,6 +9,14 @@ struct Runtime;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Error;
 
+#[derive(Clone)]
+struct Merge;
+
+#[derive(Clone, Default)]
+struct MemoryCheckpointer {
+    checkpoint: Arc<Mutex<Option<PipelineCheckpoint>>>,
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("pipeline test error")
@@ -16,9 +24,6 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
-
-#[derive(Clone)]
-struct Merge;
 
 impl Phase for Merge {
     type Runtime = Runtime;
@@ -33,11 +38,6 @@ impl Phase for Merge {
     ) -> LocalBoxFuture<'a, Result<usize, Error>> {
         Box::pin(async move { Ok(input.into_iter().sum()) })
     }
-}
-
-#[derive(Clone, Default)]
-struct MemoryCheckpointer {
-    checkpoint: Arc<Mutex<Option<PipelineCheckpoint>>>,
 }
 
 impl PipelineCheckpointer for MemoryCheckpointer {
@@ -62,34 +62,6 @@ impl PipelineCheckpointer for MemoryCheckpointer {
         let checkpoint = self.checkpoint.lock().expect("checkpoint lock").clone();
         Box::pin(async move { Ok(checkpoint) })
     }
-}
-
-#[tokio::test]
-async fn pipeline_runs_step_wrapped_parallel_join_phase() {
-    let add_one = Step::task(|_runtime: &Runtime, input: usize| {
-        Box::pin(async move { Ok::<_, Error>(input + 1) })
-    });
-    let double = Step::task(|_runtime: &Runtime, input: usize| {
-        Box::pin(async move { Ok::<_, Error>(input * 2) })
-    });
-
-    let pipeline = Pipeline::builder()
-        .add_step(PhaseId::new("start"), add_one)
-        .add_step(PhaseId::new("a"), double.clone())
-        .add_step(PhaseId::new("b"), double)
-        .add_phase(PhaseId::new("merge"), Merge)
-        .with_route(PhaseId::new("start"), Route::parallel(["a", "b"]))
-        .with_route(PhaseId::new("a"), Route::Halt)
-        .with_route(PhaseId::new("b"), Route::Halt)
-        .with_route(PhaseId::new("merge"), Route::Halt)
-        .with_parallel_join("start", "merge")
-        .with_initial(PhaseId::new("start"))
-        .build()
-        .expect("pipeline should build");
-
-    let output: usize = pipeline.run(&Runtime, 3usize).await.expect("pipeline runs");
-
-    assert_eq!(output, 16);
 }
 
 #[tokio::test]
@@ -125,4 +97,32 @@ async fn pipeline_checkpointer_loads_and_resumes_round_trip() {
 
     let resumed: Option<usize> = pipeline.resume(&Runtime).await.expect("resume succeeds");
     assert_eq!(resumed, Some(10));
+}
+
+#[tokio::test]
+async fn pipeline_runs_step_wrapped_parallel_join_phase() {
+    let add_one = Step::task(|_runtime: &Runtime, input: usize| {
+        Box::pin(async move { Ok::<_, Error>(input + 1) })
+    });
+    let double = Step::task(|_runtime: &Runtime, input: usize| {
+        Box::pin(async move { Ok::<_, Error>(input * 2) })
+    });
+
+    let pipeline = Pipeline::builder()
+        .add_step(PhaseId::new("start"), add_one)
+        .add_step(PhaseId::new("a"), double.clone())
+        .add_step(PhaseId::new("b"), double)
+        .add_phase(PhaseId::new("merge"), Merge)
+        .with_route(PhaseId::new("start"), Route::parallel(["a", "b"]))
+        .with_route(PhaseId::new("a"), Route::Halt)
+        .with_route(PhaseId::new("b"), Route::Halt)
+        .with_route(PhaseId::new("merge"), Route::Halt)
+        .with_parallel_join("start", "merge")
+        .with_initial(PhaseId::new("start"))
+        .build()
+        .expect("pipeline should build");
+
+    let output: usize = pipeline.run(&Runtime, 3usize).await.expect("pipeline runs");
+
+    assert_eq!(output, 16);
 }

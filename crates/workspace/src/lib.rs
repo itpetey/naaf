@@ -8,17 +8,17 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FileDeltaSet {
-    pub summary: String,
-    pub rationale: Vec<String>,
-    pub changes: Vec<FileDelta>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileDelta {
     pub path: String,
     pub action: String,
     pub content: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDeltaSet {
+    pub summary: String,
+    pub rationale: Vec<String>,
+    pub changes: Vec<FileDelta>,
 }
 
 #[derive(Debug, Error)]

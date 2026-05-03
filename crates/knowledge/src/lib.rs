@@ -71,21 +71,21 @@ pub use llm::{
 pub use source::{SourceInfo, SourceType};
 pub use tool::{KnowledgeLintTool, KnowledgeSearchTool};
 
-/// Error and result types for knowledge workflows.
-pub mod error;
-/// Knowledge-group metadata types and persistence traits.
-pub mod group;
-/// Ingestion helpers for files, directories, and in-memory content.
-pub mod ingest;
-/// Core knowledge-domain types such as entries and lint reports.
-pub mod knowledge;
 /// Collection-wide linting helpers.
 pub mod lint;
+/// Core knowledge-domain types such as entries and lint reports.
+pub mod knowledge;
+/// Error and result types for knowledge workflows.
+pub mod error;
+/// Ingestion helpers for files, directories, and in-memory content.
+pub mod ingest;
+/// Knowledge-group metadata types and persistence traits.
+pub mod group;
 /// LLM session helpers that combine prompt augmentation and tool registration.
 pub mod llm;
+/// LLM tools for searching and linting the knowledge base.
+pub mod tool;
 /// Retrieval helpers built on top of Qdrant search.
 pub mod query;
 /// Source description types used during ingestion.
 pub mod source;
-/// LLM tools for searching and linting the knowledge base.
-pub mod tool;

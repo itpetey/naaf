@@ -128,14 +128,6 @@ pub struct ObservedRepairPlanner<P> {
     name: Cow<'static, str>,
 }
 
-impl<T> TaskExt for T where T: Task {}
-
-impl<T> CheckExt for T where T: Check {}
-
-impl<T> MaterialiserExt for T where T: Materialiser {}
-
-impl<T> RepairPlannerExt for T where T: RepairPlanner {}
-
 impl<T> ObservedTask<T> {
     fn new(inner: T, name: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -387,6 +379,14 @@ where
         )
     }
 }
+
+impl<T> TaskExt for T where T: Task {}
+
+impl<T> CheckExt for T where T: Check {}
+
+impl<T> MaterialiserExt for T where T: Materialiser {}
+
+impl<T> RepairPlannerExt for T where T: RepairPlanner {}
 
 #[cfg(test)]
 mod tests {

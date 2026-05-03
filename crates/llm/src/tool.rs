@@ -66,20 +66,6 @@ pub enum ToolCallError<E> {
     },
 }
 
-impl<R, E> Default for ToolRegistry<R, E> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<R, E> Clone for ToolRegistry<R, E> {
-    fn clone(&self) -> Self {
-        Self {
-            tools: self.tools.clone(),
-        }
-    }
-}
-
 impl<R, E> ToolRegistry<R, E> {
     /// Creates an empty tool registry.
     pub fn new() -> Self {
@@ -161,5 +147,19 @@ impl<R, E> ToolRegistry<R, E> {
                 content,
             })
         })
+    }
+}
+
+impl<R, E> Default for ToolRegistry<R, E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<R, E> Clone for ToolRegistry<R, E> {
+    fn clone(&self) -> Self {
+        Self {
+            tools: self.tools.clone(),
+        }
     }
 }

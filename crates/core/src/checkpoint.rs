@@ -5,18 +5,18 @@ use serde_json::Value;
 
 use crate::{PhaseId, RetryPolicy};
 
-type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type CheckpointResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
-
-/// Pluggable persistence backend for saving step retry loop state.
-pub trait StepCheckpointer: Send + Sync + 'static {
-    fn checkpoint(&self, checkpoint: StepCheckpoint) -> BoxFuture<()>;
-}
+type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// Pluggable persistence backend for saving pipeline phase state.
 pub trait PipelineCheckpointer: Send + Sync + 'static {
     fn save_pipeline(&self, checkpoint: PipelineCheckpoint) -> BoxFuture<CheckpointResult<()>>;
     fn load_pipeline(&self) -> BoxFuture<CheckpointResult<Option<PipelineCheckpoint>>>;
+}
+
+/// Pluggable persistence backend for saving step retry loop state.
+pub trait StepCheckpointer: Send + Sync + 'static {
+    fn checkpoint(&self, checkpoint: StepCheckpoint) -> BoxFuture<()>;
 }
 
 /// Checkpoint state for a running pipeline.
@@ -28,6 +28,14 @@ pub struct PipelineCheckpoint {
     pub phase_visits: HashMap<PhaseId, usize>,
 }
 
+/// One repair attempt stored inside a [`StepCheckpoint`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AttemptCheckpoint {
+    pub input: Value,
+    pub output: Value,
+    pub findings: Vec<Value>,
+}
+
 /// Checkpoint state for a running step's retry loop.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StepCheckpoint {
@@ -36,14 +44,6 @@ pub struct StepCheckpoint {
     pub repair_attempts: Vec<AttemptCheckpoint>,
     pub report_attempts: Vec<crate::repair::AttemptReport<Value>>,
     pub retry_policy: RetryPolicy,
-}
-
-/// One repair attempt stored inside a [`StepCheckpoint`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AttemptCheckpoint {
-    pub input: Value,
-    pub output: Value,
-    pub findings: Vec<Value>,
 }
 
 #[cfg(test)]

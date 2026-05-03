@@ -2,21 +2,6 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Metadata describing a source to ingest.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceInfo {
-    /// High-level source classification.
-    pub source_type: SourceType,
-    /// Path to the source on disk, when applicable.
-    pub path: Option<PathBuf>,
-    /// Human-readable source title.
-    pub title: Option<String>,
-    /// Programming or markup language associated with the source.
-    pub language: Option<String>,
-    /// In-memory source content, when not reading from disk.
-    pub content: Option<String>,
-}
-
 /// Type of source material that may be ingested into the knowledge base.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SourceType {
@@ -32,6 +17,21 @@ pub enum SourceType {
     PlainText,
     /// Directory input that should be walked recursively.
     Directory,
+}
+
+/// Metadata describing a source to ingest.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceInfo {
+    /// High-level source classification.
+    pub source_type: SourceType,
+    /// Path to the source on disk, when applicable.
+    pub path: Option<PathBuf>,
+    /// Human-readable source title.
+    pub title: Option<String>,
+    /// Programming or markup language associated with the source.
+    pub language: Option<String>,
+    /// In-memory source content, when not reading from disk.
+    pub content: Option<String>,
 }
 
 impl SourceInfo {

@@ -4,6 +4,25 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Semantic type assigned to a knowledge entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum EntityType {
+    /// A general concept or topic.
+    Concept,
+    /// A concrete entity such as a person, system, or component.
+    Entity,
+    /// A summary distilled from source material.
+    Summary,
+    /// A comparison between multiple entities or concepts.
+    Comparison,
+    /// An analytical conclusion or interpretation.
+    Analysis,
+    /// A question-and-answer style entry.
+    QuestionAnswer,
+    /// Raw source material stored directly.
+    Source,
+}
+
 /// One knowledge entry stored or exchanged by the knowledge layer.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KnowledgeEntry {
@@ -27,47 +46,6 @@ pub struct KnowledgeEntry {
     pub created_at: DateTime<Utc>,
     /// Last update timestamp in UTC.
     pub updated_at: DateTime<Utc>,
-}
-
-/// One issue reported by the collection linter.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LintIssue {
-    /// Category of issue that was detected.
-    pub issue_type: LintIssueType,
-    /// Human-readable explanation of the issue.
-    pub description: String,
-    /// Identifiers of entries involved in the issue.
-    pub entry_ids: Vec<Uuid>,
-    /// Optional remediation suggestion.
-    pub suggestion: Option<String>,
-}
-
-/// Aggregate report returned by collection linting.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LintReport {
-    /// Issues found during linting.
-    pub issues: Vec<LintIssue>,
-    /// Number of entries inspected.
-    pub entries_scanned: usize,
-}
-
-/// Semantic type assigned to a knowledge entry.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum EntityType {
-    /// A general concept or topic.
-    Concept,
-    /// A concrete entity such as a person, system, or component.
-    Entity,
-    /// A summary distilled from source material.
-    Summary,
-    /// A comparison between multiple entities or concepts.
-    Comparison,
-    /// An analytical conclusion or interpretation.
-    Analysis,
-    /// A question-and-answer style entry.
-    QuestionAnswer,
-    /// Raw source material stored directly.
-    Source,
 }
 
 /// Summary of one ingest operation.
@@ -96,6 +74,28 @@ pub enum LintIssueType {
     MissingCrossReference,
     /// Supporting data is incomplete or low quality.
     DataGap,
+}
+
+/// One issue reported by the collection linter.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LintIssue {
+    /// Category of issue that was detected.
+    pub issue_type: LintIssueType,
+    /// Human-readable explanation of the issue.
+    pub description: String,
+    /// Identifiers of entries involved in the issue.
+    pub entry_ids: Vec<Uuid>,
+    /// Optional remediation suggestion.
+    pub suggestion: Option<String>,
+}
+
+/// Aggregate report returned by collection linting.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LintReport {
+    /// Issues found during linting.
+    pub issues: Vec<LintIssue>,
+    /// Number of entries inspected.
+    pub entries_scanned: usize,
 }
 
 impl fmt::Display for EntityType {

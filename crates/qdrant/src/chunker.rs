@@ -9,32 +9,6 @@ pub trait Chunker {
     fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError>;
 }
 
-/// Convenience enum that selects an appropriate chunker for a source.
-pub enum ContentChunker {
-    /// Markdown-oriented chunker.
-    Markdown(MarkdownChunker),
-    /// Source-code chunker.
-    Code(CodeChunker),
-    /// Conversation transcript chunker.
-    Conversation(ConversationChunker),
-    /// PDF chunker.
-    Pdf(PdfChunker),
-}
-
-/// A chunk of source text ready for embedding and storage.
-#[derive(Clone, Debug)]
-pub struct Chunk {
-    /// Chunk text submitted to the embedder.
-    pub text: String,
-    /// Metadata describing the chunk's origin.
-    pub metadata: ChunkMetadata,
-}
-
-/// Extracts PDF text and chunks it using markdown-style splitting.
-pub struct PdfChunker {
-    inner: MarkdownChunker,
-}
-
 /// Metadata attached to one chunk of content.
 #[derive(Clone, Debug)]
 pub struct ChunkMetadata {
@@ -52,6 +26,15 @@ pub struct ChunkMetadata {
     pub language: Option<String>,
     /// Section heading associated with the chunk, when available.
     pub heading: Option<String>,
+}
+
+/// A chunk of source text ready for embedding and storage.
+#[derive(Clone, Debug)]
+pub struct Chunk {
+    /// Chunk text submitted to the embedder.
+    pub text: String,
+    /// Metadata describing the chunk's origin.
+    pub metadata: ChunkMetadata,
 }
 
 /// Minimal information required to chunk and label a source.
@@ -73,6 +56,11 @@ pub struct MarkdownChunker {
     overlap: usize,
 }
 
+/// Extracts PDF text and chunks it using markdown-style splitting.
+pub struct PdfChunker {
+    inner: MarkdownChunker,
+}
+
 struct Section {
     heading: Option<String>,
     content: String,
@@ -88,52 +76,16 @@ pub struct ConversationChunker {
     max_chunk_size: usize,
 }
 
-impl Default for PdfChunker {
-    fn default() -> Self {
-        Self::new(1000, 200)
-    }
-}
-
-impl MarkdownChunker {
-    /// Creates a markdown chunker with the given size and overlap settings.
-    pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
-        Self {
-            max_chunk_size,
-            overlap,
-        }
-    }
-}
-
-impl Default for MarkdownChunker {
-    fn default() -> Self {
-        Self::new(1000, 200)
-    }
-}
-
-impl CodeChunker {
-    /// Creates a code chunker with the given maximum chunk size.
-    pub fn new(max_chunk_size: usize) -> Self {
-        Self { max_chunk_size }
-    }
-}
-
-impl Default for CodeChunker {
-    fn default() -> Self {
-        Self::new(1500)
-    }
-}
-
-impl ConversationChunker {
-    /// Creates a conversation chunker with the given maximum chunk size.
-    pub fn new(max_chunk_size: usize) -> Self {
-        Self { max_chunk_size }
-    }
-}
-
-impl Default for ConversationChunker {
-    fn default() -> Self {
-        Self::new(2000)
-    }
+/// Convenience enum that selects an appropriate chunker for a source.
+pub enum ContentChunker {
+    /// Markdown-oriented chunker.
+    Markdown(MarkdownChunker),
+    /// Source-code chunker.
+    Code(CodeChunker),
+    /// Conversation transcript chunker.
+    Conversation(ConversationChunker),
+    /// PDF chunker.
+    Pdf(PdfChunker),
 }
 
 impl SourceInfo {
@@ -167,6 +119,16 @@ impl SourceInfo {
             path: None,
             language: None,
             title,
+        }
+    }
+}
+
+impl MarkdownChunker {
+    /// Creates a markdown chunker with the given size and overlap settings.
+    pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
+        Self {
+            max_chunk_size,
+            overlap,
         }
     }
 }
@@ -225,6 +187,50 @@ impl Chunker for MarkdownChunker {
         }
 
         Ok(chunks)
+    }
+}
+
+impl Default for MarkdownChunker {
+    fn default() -> Self {
+        Self::new(1000, 200)
+    }
+}
+
+impl PdfChunker {
+    /// Creates a PDF chunker backed by an inner markdown chunker.
+    pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
+        Self {
+            inner: MarkdownChunker::new(max_chunk_size, overlap),
+        }
+    }
+
+    /// Extracts plain text from the given PDF path.
+    pub fn extract_text(&self, path: &Path) -> Result<String, QdrantError> {
+        pdf_extract::extract_text(path)
+            .map_err(|e| QdrantError::PdfExtraction(format!("failed to extract PDF text: {e}")))
+    }
+}
+
+impl Chunker for PdfChunker {
+    fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError> {
+        let pdf_source_info = SourceInfo {
+            source_type: SourceType::Paper,
+            ..source_info.clone()
+        };
+        self.inner.chunk(content, &pdf_source_info)
+    }
+}
+
+impl Default for PdfChunker {
+    fn default() -> Self {
+        Self::new(1000, 200)
+    }
+}
+
+impl CodeChunker {
+    /// Creates a code chunker with the given maximum chunk size.
+    pub fn new(max_chunk_size: usize) -> Self {
+        Self { max_chunk_size }
     }
 }
 
@@ -292,6 +298,19 @@ impl Chunker for CodeChunker {
     }
 }
 
+impl Default for CodeChunker {
+    fn default() -> Self {
+        Self::new(1500)
+    }
+}
+
+impl ConversationChunker {
+    /// Creates a conversation chunker with the given maximum chunk size.
+    pub fn new(max_chunk_size: usize) -> Self {
+        Self { max_chunk_size }
+    }
+}
+
 impl Chunker for ConversationChunker {
     fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError> {
         let messages: Vec<crate::conversation::Message> = serde_json::from_str(content)
@@ -341,28 +360,9 @@ impl Chunker for ConversationChunker {
     }
 }
 
-impl PdfChunker {
-    /// Creates a PDF chunker backed by an inner markdown chunker.
-    pub fn new(max_chunk_size: usize, overlap: usize) -> Self {
-        Self {
-            inner: MarkdownChunker::new(max_chunk_size, overlap),
-        }
-    }
-
-    /// Extracts plain text from the given PDF path.
-    pub fn extract_text(&self, path: &Path) -> Result<String, QdrantError> {
-        pdf_extract::extract_text(path)
-            .map_err(|e| QdrantError::PdfExtraction(format!("failed to extract PDF text: {e}")))
-    }
-}
-
-impl Chunker for PdfChunker {
-    fn chunk(&self, content: &str, source_info: &SourceInfo) -> Result<Vec<Chunk>, QdrantError> {
-        let pdf_source_info = SourceInfo {
-            source_type: SourceType::Paper,
-            ..source_info.clone()
-        };
-        self.inner.chunk(content, &pdf_source_info)
+impl Default for ConversationChunker {
+    fn default() -> Self {
+        Self::new(2000)
     }
 }
 

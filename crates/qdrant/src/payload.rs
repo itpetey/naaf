@@ -4,59 +4,6 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Payload stored in each Qdrant point.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct KnowledgePayload {
-    /// Display title for the entry.
-    pub title: String,
-    /// Main text content used for retrieval.
-    pub content: String,
-    /// Semantic classification of the entry.
-    pub entity_type: EntityType,
-    /// Optional repository scope for multi-repo collections.
-    pub repo: Option<String>,
-    /// Source entries that underpin this entry.
-    pub source_ids: Vec<uuid::Uuid>,
-    /// Related knowledge entries.
-    pub related_ids: Vec<uuid::Uuid>,
-    /// Search and grouping tags.
-    pub tags: Vec<String>,
-    /// Confidence score assigned by the producer.
-    pub confidence: f32,
-    /// Optional metadata about the original source.
-    pub source_metadata: Option<SourceMetadata>,
-    /// Creation timestamp in UTC.
-    pub created_at: DateTime<Utc>,
-    /// Last update timestamp in UTC.
-    pub updated_at: DateTime<Utc>,
-}
-
-/// Metadata describing where a knowledge payload originated.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceMetadata {
-    /// High-level source classification.
-    pub source_type: SourceType,
-    /// Path to the originating file, when known.
-    pub path: Option<PathBuf>,
-    /// Human-readable source title.
-    pub title: Option<String>,
-    /// Programming or markup language associated with the source.
-    pub language: Option<String>,
-    /// Recorded span within the source material.
-    pub line_range: Option<(usize, usize)>,
-}
-
-/// One scored search hit returned from Qdrant.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SearchResult {
-    /// Identifier of the matched point.
-    pub id: uuid::Uuid,
-    /// Similarity score returned by Qdrant.
-    pub score: f32,
-    /// Stored payload for the matched point.
-    pub payload: KnowledgePayload,
-}
-
 /// Semantic type assigned to a stored knowledge entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EntityType {
@@ -89,6 +36,59 @@ pub enum SourceType {
     Paper,
     /// Plain text content without richer structure.
     PlainText,
+}
+
+/// Metadata describing where a knowledge payload originated.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceMetadata {
+    /// High-level source classification.
+    pub source_type: SourceType,
+    /// Path to the originating file, when known.
+    pub path: Option<PathBuf>,
+    /// Human-readable source title.
+    pub title: Option<String>,
+    /// Programming or markup language associated with the source.
+    pub language: Option<String>,
+    /// Recorded span within the source material.
+    pub line_range: Option<(usize, usize)>,
+}
+
+/// Payload stored in each Qdrant point.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KnowledgePayload {
+    /// Display title for the entry.
+    pub title: String,
+    /// Main text content used for retrieval.
+    pub content: String,
+    /// Semantic classification of the entry.
+    pub entity_type: EntityType,
+    /// Optional repository scope for multi-repo collections.
+    pub repo: Option<String>,
+    /// Source entries that underpin this entry.
+    pub source_ids: Vec<uuid::Uuid>,
+    /// Related knowledge entries.
+    pub related_ids: Vec<uuid::Uuid>,
+    /// Search and grouping tags.
+    pub tags: Vec<String>,
+    /// Confidence score assigned by the producer.
+    pub confidence: f32,
+    /// Optional metadata about the original source.
+    pub source_metadata: Option<SourceMetadata>,
+    /// Creation timestamp in UTC.
+    pub created_at: DateTime<Utc>,
+    /// Last update timestamp in UTC.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// One scored search hit returned from Qdrant.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SearchResult {
+    /// Identifier of the matched point.
+    pub id: uuid::Uuid,
+    /// Similarity score returned by Qdrant.
+    pub score: f32,
+    /// Stored payload for the matched point.
+    pub payload: KnowledgePayload,
 }
 
 impl fmt::Display for EntityType {

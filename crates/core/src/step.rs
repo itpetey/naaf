@@ -42,19 +42,6 @@ pub struct Step<R, I, O, F, E> {
     runner: Arc<Runner<R, I, O, F, E>>,
 }
 
-/// Builder for configuring a step's checks, materialisation, and repair loop.
-pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
-    task_name: &'static str,
-    task_label: Option<Cow<'static, str>>,
-    task: Arc<dyn Task<Runtime = R, Input = I, Output = A, Error = E>>,
-    pipeline: ValidationPipeline<R, I, A, S, F, E>,
-    repair:
-        Option<Arc<dyn RepairPlanner<Runtime = R, Input = I, Output = A, Finding = F, Error = E>>>,
-    retry_policy: RetryPolicy,
-    step_checkpointer: Option<Arc<dyn StepCheckpointer>>,
-    marker: BuilderMarker<R, I, A, S, F, E, State>,
-}
-
 enum StepInput<I> {
     Fresh {
         input: I,
@@ -95,6 +82,19 @@ struct ValidationPipeline<R, I, A, S, F, E> {
     run: Arc<PipelineRunner<R, I, A, S, F, E>>,
 }
 
+/// Builder for configuring a step's checks, materialisation, and repair loop.
+pub struct StepBuilder<R, I, A, S, F, E, State = FindingBound> {
+    task_name: &'static str,
+    task_label: Option<Cow<'static, str>>,
+    task: Arc<dyn Task<Runtime = R, Input = I, Output = A, Error = E>>,
+    pipeline: ValidationPipeline<R, I, A, S, F, E>,
+    repair:
+        Option<Arc<dyn RepairPlanner<Runtime = R, Input = I, Output = A, Finding = F, Error = E>>>,
+    retry_policy: RetryPolicy,
+    step_checkpointer: Option<Arc<dyn StepCheckpointer>>,
+    marker: BuilderMarker<R, I, A, S, F, E, State>,
+}
+
 impl Step<(), (), (), (), ()> {
     /// Starts building a step around the given task.
     pub fn builder<T>(task: T) -> BuilderFor<T>
@@ -127,14 +127,6 @@ impl Step<(), (), (), (), ()> {
         F: Fn(&R, I) -> LocalBoxFuture<'_, Result<O, E>> + 'static,
     {
         Step::builder(crate::adaptor::TaskFn::new(f)).build()
-    }
-}
-
-impl<R, I, O, F, E> Clone for Step<R, I, O, F, E> {
-    fn clone(&self) -> Self {
-        Self {
-            runner: self.runner.clone(),
-        }
     }
 }
 
@@ -364,48 +356,200 @@ impl<R, I, O, F, E> Step<R, I, O, F, E> {
     }
 }
 
-impl<R, I, A, S, E> OpenStepBuilder<R, I, A, S, E>
+impl<R, I, O, F, E> Clone for Step<R, I, O, F, E> {
+    fn clone(&self) -> Self {
+        Self {
+            runner: self.runner.clone(),
+        }
+    }
+}
+
+impl Display for SystemStage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Task => f.write_str("task execution"),
+            Self::Validation => f.write_str("validation"),
+            Self::Repair => f.write_str("repair planning"),
+        }
+    }
+}
+
+impl<F, E> Display for StepError<F, E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::System { stage, error } => write!(f, "{stage} failed: {error}"),
+            Self::Rejected(report) => write!(
+                f,
+                "step rejected after {} attempt(s)",
+                report.attempt_count()
+            ),
+        }
+    }
+}
+
+impl<F, E> std::error::Error for StepError<F, E>
+where
+    F: Debug,
+    E: std::error::Error + 'static,
+{
+}
+
+impl<R, I, A, F, E> ValidationPipeline<R, I, A, A, F, E>
+where
+    R: 'static,
+    I: 'static,
+    A: 'static,
+    F: 'static,
+    E: 'static,
+{
+    fn identity() -> Self {
+        Self {
+            run: Arc::new(|_, _, output| Box::pin(async move { Ok((output, Vec::new())) })),
+        }
+    }
+}
+
+impl<R, I, A, S, F, E> ValidationPipeline<R, I, A, S, F, E>
 where
     R: 'static,
     I: 'static,
     A: 'static,
     S: 'static,
+    F: 'static,
     E: 'static,
 {
-    /// Binds the step to a finding type without adding a check yet.
-    pub fn with_findings<F>(self) -> BoundStepBuilder<R, I, A, S, F, E>
+    fn run<'a>(
+        &'a self,
+        runtime: &'a R,
+        input: I,
+        output: A,
+    ) -> LocalBoxFuture<'a, Result<(S, Vec<F>), E>> {
+        (self.run)(runtime, input, output)
+    }
+
+    fn bind_findings<NextFinding>(self) -> ValidationPipeline<R, I, A, S, NextFinding, E>
     where
-        F: 'static,
+        NextFinding: 'static,
     {
-        StepBuilder {
-            task_name: self.task_name,
-            task_label: self.task_label,
-            task: self.task,
-            pipeline: self.pipeline.bind_findings(),
-            repair: None,
-            retry_policy: self.retry_policy,
-            step_checkpointer: self.step_checkpointer,
-            marker: PhantomData,
+        let run = self.run.clone();
+
+        ValidationPipeline {
+            run: Arc::new(move |runtime, input, output| {
+                let run = run.clone();
+                Box::pin(async move {
+                    let (subject, _) = run(runtime, input, output).await?;
+                    Ok((subject, Vec::new()))
+                })
+            }),
         }
     }
 
-    /// Adds the first check and binds the builder's finding type to that check.
-    pub fn validate<C>(self, check: C) -> BoundStepBuilder<R, I, A, S, C::Finding, E>
+    fn validate_first<C>(self, check: C) -> ValidationPipeline<R, I, A, S, C::Finding, E>
     where
         I: Clone + 'static,
         S: Clone + 'static,
         C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
         C::Finding: 'static,
     {
-        StepBuilder {
-            task_name: self.task_name,
-            task_label: self.task_label,
-            task: self.task,
-            pipeline: self.pipeline.validate_first(check),
-            repair: None,
-            retry_policy: self.retry_policy,
-            step_checkpointer: self.step_checkpointer,
-            marker: PhantomData,
+        let run = self.run.clone();
+        let check = Arc::new(check);
+
+        ValidationPipeline {
+            run: Arc::new(move |runtime, input, output| {
+                let run = run.clone();
+                let check = check.clone();
+                Box::pin(async move {
+                    let (subject, _) = run(runtime, input.clone(), output).await?;
+                    let findings = check.check(runtime, input, subject.clone()).await?;
+                    Ok((subject, findings))
+                })
+            }),
+        }
+    }
+
+    fn validate<C>(self, check: C) -> Self
+    where
+        I: Clone + 'static,
+        S: Clone + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Finding = F, Error = E> + 'static,
+    {
+        let run = self.run.clone();
+        let check = Arc::new(check);
+
+        Self {
+            run: Arc::new(move |runtime, input, output| {
+                let run = run.clone();
+                let check = check.clone();
+                Box::pin(async move {
+                    let (subject, mut findings) = run(runtime, input.clone(), output).await?;
+                    findings.extend(check.check(runtime, input, subject.clone()).await?);
+                    Ok((subject, findings))
+                })
+            }),
+        }
+    }
+
+    fn validate_into<C>(self, check: C) -> Self
+    where
+        I: Clone + 'static,
+        S: Clone + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
+        C::Finding: Into<F> + 'static,
+    {
+        let run = self.run.clone();
+        let check = Arc::new(check);
+
+        Self {
+            run: Arc::new(move |runtime, input, output| {
+                let run = run.clone();
+                let check = check.clone();
+                Box::pin(async move {
+                    let (subject, mut findings) = run(runtime, input.clone(), output).await?;
+                    findings.extend(
+                        check
+                            .check(runtime, input, subject.clone())
+                            .await?
+                            .into_iter()
+                            .map(Into::into),
+                    );
+                    Ok((subject, findings))
+                })
+            }),
+        }
+    }
+
+    fn materialise<M, NextSubject>(
+        self,
+        materialiser: M,
+    ) -> ValidationPipeline<R, I, A, NextSubject, F, E>
+    where
+        M: Materialiser<Runtime = R, Input = S, Output = NextSubject, Error = E> + 'static,
+        NextSubject: 'static,
+    {
+        let run = self.run.clone();
+        let materialiser = Arc::new(materialiser);
+
+        ValidationPipeline {
+            run: Arc::new(move |runtime, input, output| {
+                let run = run.clone();
+                let materialiser = materialiser.clone();
+                Box::pin(async move {
+                    let (subject, findings) = run(runtime, input, output).await?;
+                    let next_subject = materialiser.materialise(runtime, subject).await?;
+                    Ok((next_subject, findings))
+                })
+            }),
+        }
+    }
+}
+
+impl<R, I, A, S, F, E> Clone for ValidationPipeline<R, I, A, S, F, E> {
+    fn clone(&self) -> Self {
+        Self {
+            run: self.run.clone(),
         }
     }
 }
@@ -891,6 +1035,52 @@ where
     }
 }
 
+impl<R, I, A, S, E> OpenStepBuilder<R, I, A, S, E>
+where
+    R: 'static,
+    I: 'static,
+    A: 'static,
+    S: 'static,
+    E: 'static,
+{
+    /// Binds the step to a finding type without adding a check yet.
+    pub fn with_findings<F>(self) -> BoundStepBuilder<R, I, A, S, F, E>
+    where
+        F: 'static,
+    {
+        StepBuilder {
+            task_name: self.task_name,
+            task_label: self.task_label,
+            task: self.task,
+            pipeline: self.pipeline.bind_findings(),
+            repair: None,
+            retry_policy: self.retry_policy,
+            step_checkpointer: self.step_checkpointer,
+            marker: PhantomData,
+        }
+    }
+
+    /// Adds the first check and binds the builder's finding type to that check.
+    pub fn validate<C>(self, check: C) -> BoundStepBuilder<R, I, A, S, C::Finding, E>
+    where
+        I: Clone + 'static,
+        S: Clone + 'static,
+        C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
+        C::Finding: 'static,
+    {
+        StepBuilder {
+            task_name: self.task_name,
+            task_label: self.task_label,
+            task: self.task,
+            pipeline: self.pipeline.validate_first(check),
+            repair: None,
+            retry_policy: self.retry_policy,
+            step_checkpointer: self.step_checkpointer,
+            marker: PhantomData,
+        }
+    }
+}
+
 impl<R, I, A, S, F, E> BoundStepBuilder<R, I, A, S, F, E>
 where
     R: 'static,
@@ -953,196 +1143,6 @@ where
             retry_policy: self.retry_policy,
             step_checkpointer: self.step_checkpointer,
             marker: PhantomData,
-        }
-    }
-}
-
-impl<F, E> Display for StepError<F, E>
-where
-    E: Display,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::System { stage, error } => write!(f, "{stage} failed: {error}"),
-            Self::Rejected(report) => write!(
-                f,
-                "step rejected after {} attempt(s)",
-                report.attempt_count()
-            ),
-        }
-    }
-}
-
-impl Display for SystemStage {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Task => f.write_str("task execution"),
-            Self::Validation => f.write_str("validation"),
-            Self::Repair => f.write_str("repair planning"),
-        }
-    }
-}
-
-impl<F, E> std::error::Error for StepError<F, E>
-where
-    F: Debug,
-    E: std::error::Error + 'static,
-{
-}
-
-impl<R, I, A, S, F, E> Clone for ValidationPipeline<R, I, A, S, F, E> {
-    fn clone(&self) -> Self {
-        Self {
-            run: self.run.clone(),
-        }
-    }
-}
-
-impl<R, I, A, F, E> ValidationPipeline<R, I, A, A, F, E>
-where
-    R: 'static,
-    I: 'static,
-    A: 'static,
-    F: 'static,
-    E: 'static,
-{
-    fn identity() -> Self {
-        Self {
-            run: Arc::new(|_, _, output| Box::pin(async move { Ok((output, Vec::new())) })),
-        }
-    }
-}
-
-impl<R, I, A, S, F, E> ValidationPipeline<R, I, A, S, F, E>
-where
-    R: 'static,
-    I: 'static,
-    A: 'static,
-    S: 'static,
-    F: 'static,
-    E: 'static,
-{
-    fn run<'a>(
-        &'a self,
-        runtime: &'a R,
-        input: I,
-        output: A,
-    ) -> LocalBoxFuture<'a, Result<(S, Vec<F>), E>> {
-        (self.run)(runtime, input, output)
-    }
-
-    fn bind_findings<NextFinding>(self) -> ValidationPipeline<R, I, A, S, NextFinding, E>
-    where
-        NextFinding: 'static,
-    {
-        let run = self.run.clone();
-
-        ValidationPipeline {
-            run: Arc::new(move |runtime, input, output| {
-                let run = run.clone();
-                Box::pin(async move {
-                    let (subject, _) = run(runtime, input, output).await?;
-                    Ok((subject, Vec::new()))
-                })
-            }),
-        }
-    }
-
-    fn validate_first<C>(self, check: C) -> ValidationPipeline<R, I, A, S, C::Finding, E>
-    where
-        I: Clone + 'static,
-        S: Clone + 'static,
-        C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
-        C::Finding: 'static,
-    {
-        let run = self.run.clone();
-        let check = Arc::new(check);
-
-        ValidationPipeline {
-            run: Arc::new(move |runtime, input, output| {
-                let run = run.clone();
-                let check = check.clone();
-                Box::pin(async move {
-                    let (subject, _) = run(runtime, input.clone(), output).await?;
-                    let findings = check.check(runtime, input, subject.clone()).await?;
-                    Ok((subject, findings))
-                })
-            }),
-        }
-    }
-
-    fn validate<C>(self, check: C) -> Self
-    where
-        I: Clone + 'static,
-        S: Clone + 'static,
-        C: Check<Runtime = R, Input = I, Output = S, Finding = F, Error = E> + 'static,
-    {
-        let run = self.run.clone();
-        let check = Arc::new(check);
-
-        Self {
-            run: Arc::new(move |runtime, input, output| {
-                let run = run.clone();
-                let check = check.clone();
-                Box::pin(async move {
-                    let (subject, mut findings) = run(runtime, input.clone(), output).await?;
-                    findings.extend(check.check(runtime, input, subject.clone()).await?);
-                    Ok((subject, findings))
-                })
-            }),
-        }
-    }
-
-    fn validate_into<C>(self, check: C) -> Self
-    where
-        I: Clone + 'static,
-        S: Clone + 'static,
-        C: Check<Runtime = R, Input = I, Output = S, Error = E> + 'static,
-        C::Finding: Into<F> + 'static,
-    {
-        let run = self.run.clone();
-        let check = Arc::new(check);
-
-        Self {
-            run: Arc::new(move |runtime, input, output| {
-                let run = run.clone();
-                let check = check.clone();
-                Box::pin(async move {
-                    let (subject, mut findings) = run(runtime, input.clone(), output).await?;
-                    findings.extend(
-                        check
-                            .check(runtime, input, subject.clone())
-                            .await?
-                            .into_iter()
-                            .map(Into::into),
-                    );
-                    Ok((subject, findings))
-                })
-            }),
-        }
-    }
-
-    fn materialise<M, NextSubject>(
-        self,
-        materialiser: M,
-    ) -> ValidationPipeline<R, I, A, NextSubject, F, E>
-    where
-        M: Materialiser<Runtime = R, Input = S, Output = NextSubject, Error = E> + 'static,
-        NextSubject: 'static,
-    {
-        let run = self.run.clone();
-        let materialiser = Arc::new(materialiser);
-
-        ValidationPipeline {
-            run: Arc::new(move |runtime, input, output| {
-                let run = run.clone();
-                let materialiser = materialiser.clone();
-                Box::pin(async move {
-                    let (subject, findings) = run(runtime, input, output).await?;
-                    let next_subject = materialiser.materialise(runtime, subject).await?;
-                    Ok((next_subject, findings))
-                })
-            }),
         }
     }
 }
@@ -1215,8 +1215,6 @@ mod tests {
         repair_increment: usize,
         require_even_revision: bool,
         increment: usize,
-        multiplier: usize,
-        reconcile_bias: usize,
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1402,48 +1400,12 @@ mod tests {
         }
     }
 
-    struct Double;
-
-    impl Task for Double {
-        type Runtime = TestRuntime;
-        type Input = usize;
-        type Output = usize;
-        type Error = TestError;
-
-        fn run<'a>(
-            &'a self,
-            runtime: &'a Self::Runtime,
-            input: Self::Input,
-        ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-            Box::pin(async move { Ok(input * runtime.multiplier) })
-        }
-    }
-
-    struct SumPair;
-
-    impl Task for SumPair {
-        type Runtime = TestRuntime;
-        type Input = (usize, usize);
-        type Output = usize;
-        type Error = TestError;
-
-        fn run<'a>(
-            &'a self,
-            runtime: &'a Self::Runtime,
-            input: Self::Input,
-        ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>> {
-            Box::pin(async move { Ok(input.0 + input.1 + runtime.reconcile_bias) })
-        }
-    }
-
     fn runtime() -> TestRuntime {
         TestRuntime {
             required_revision: 2,
             repair_increment: 1,
             require_even_revision: true,
             increment: 1,
-            multiplier: 2,
-            reconcile_bias: 3,
         }
     }
 

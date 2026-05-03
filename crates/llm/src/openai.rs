@@ -25,70 +25,6 @@ pub trait OpenAiStreamObserver<R>: Send + Sync {
     fn on_response_complete(&self, _runtime: &R, _message: &AssistantMessage) {}
 }
 
-#[derive(Deserialize)]
-struct ApiResponse {
-    choices: Vec<ApiChoice>,
-    usage: Option<ApiUsage>,
-}
-
-#[derive(Deserialize)]
-struct ApiStreamChunk {
-    choices: Vec<ApiStreamChoice>,
-    usage: Option<ApiUsage>,
-}
-
-#[derive(Default)]
-struct StreamState {
-    content: String,
-    reasoning: String,
-    tool_calls: Vec<StreamToolCall>,
-    usage: Option<Usage>,
-}
-
-#[derive(Deserialize)]
-struct ApiChoice {
-    message: ApiMessageResponse,
-}
-
-#[derive(Deserialize)]
-struct ApiMessageResponse {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-    reasoning: Option<String>,
-    tool_calls: Option<Vec<ApiToolCallResponse>>,
-}
-
-#[derive(Deserialize)]
-struct ApiStreamChoice {
-    delta: ApiStreamDelta,
-}
-
-#[derive(Default, Deserialize)]
-struct ApiStreamDelta {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-    reasoning: Option<String>,
-    tool_calls: Option<Vec<ApiToolCallDelta>>,
-}
-
-#[derive(Deserialize)]
-struct ApiToolCallDelta {
-    index: usize,
-    id: Option<String>,
-    function: Option<ApiFunctionDelta>,
-}
-
-#[derive(Deserialize)]
-struct ApiToolCallResponse {
-    id: String,
-    function: ApiFunctionResponse,
-}
-
-#[derive(Deserialize)]
-struct ApiErrorResponse {
-    error: ApiErrorDetail,
-}
-
 /// Configuration for the OpenAI chat completions client.
 #[derive(Clone, Debug)]
 pub struct OpenAiConfig {
@@ -137,10 +73,38 @@ struct StreamToolCall {
     arguments: String,
 }
 
+#[derive(Default)]
+struct StreamState {
+    content: String,
+    reasoning: String,
+    tool_calls: Vec<StreamToolCall>,
+    usage: Option<Usage>,
+}
+
 #[derive(Deserialize)]
 struct ApiFunctionDelta {
     name: Option<String>,
     arguments: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiToolCallDelta {
+    index: usize,
+    id: Option<String>,
+    function: Option<ApiFunctionDelta>,
+}
+
+#[derive(Default, Deserialize)]
+struct ApiStreamDelta {
+    content: Option<String>,
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
+    tool_calls: Option<Vec<ApiToolCallDelta>>,
+}
+
+#[derive(Deserialize)]
+struct ApiStreamChoice {
+    delta: ApiStreamDelta,
 }
 
 #[derive(Deserialize)]
@@ -150,9 +114,40 @@ struct ApiFunctionResponse {
 }
 
 #[derive(Deserialize)]
+struct ApiToolCallResponse {
+    id: String,
+    function: ApiFunctionResponse,
+}
+
+#[derive(Deserialize)]
+struct ApiMessageResponse {
+    content: Option<String>,
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
+    tool_calls: Option<Vec<ApiToolCallResponse>>,
+}
+
+#[derive(Deserialize)]
+struct ApiChoice {
+    message: ApiMessageResponse,
+}
+
+#[derive(Deserialize)]
 struct ApiUsage {
     prompt_tokens: u64,
     completion_tokens: u64,
+}
+
+#[derive(Deserialize)]
+struct ApiResponse {
+    choices: Vec<ApiChoice>,
+    usage: Option<ApiUsage>,
+}
+
+#[derive(Deserialize)]
+struct ApiStreamChunk {
+    choices: Vec<ApiStreamChoice>,
+    usage: Option<ApiUsage>,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +155,11 @@ struct ApiErrorDetail {
     message: String,
     r#type: String,
     code: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiErrorResponse {
+    error: ApiErrorDetail,
 }
 
 impl OpenAiConfig {

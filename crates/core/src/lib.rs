@@ -159,6 +159,7 @@
 //!     });
 //! ```
 //!
+
 pub use crate::{
     adaptor::{check_fn, materialiser_fn, repair_fn, repair_last_fn, task_fn},
     check::Check,
@@ -186,6 +187,6 @@ mod materialiser;
 mod observability;
 mod pipeline;
 mod repair;
-pub mod span;
 mod step;
 mod task;
+pub mod span;

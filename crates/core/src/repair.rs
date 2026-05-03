@@ -63,12 +63,6 @@ pub struct Traced<T, F> {
     report: StepReport<F>,
 }
 
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self::new(1)
-    }
-}
-
 impl<I, O, F> Debug for Attempt<I, O, F>
 where
     I: Debug,
@@ -118,26 +112,9 @@ impl RetryPolicy {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::RetryPolicy;
-
-    #[test]
-    fn finite_retry_policy_exhausts_at_max_attempts() {
-        let policy = RetryPolicy::new(3);
-
-        assert_eq!(policy.max_attempts(), Some(3));
-        assert!(!policy.is_exhausted(2));
-        assert!(policy.is_exhausted(3));
-    }
-
-    #[test]
-    fn unlimited_retry_policy_never_exhausts() {
-        let policy = RetryPolicy::unlimited();
-
-        assert_eq!(policy.max_attempts(), None);
-        assert!(policy.is_unlimited());
-        assert!(!policy.is_exhausted(usize::MAX));
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self::new(1)
     }
 }
 
@@ -248,5 +225,28 @@ where
             .field("output", &self.output)
             .field("report", &self.report)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RetryPolicy;
+
+    #[test]
+    fn finite_retry_policy_exhausts_at_max_attempts() {
+        let policy = RetryPolicy::new(3);
+
+        assert_eq!(policy.max_attempts(), Some(3));
+        assert!(!policy.is_exhausted(2));
+        assert!(policy.is_exhausted(3));
+    }
+
+    #[test]
+    fn unlimited_retry_policy_never_exhausts() {
+        let policy = RetryPolicy::unlimited();
+
+        assert_eq!(policy.max_attempts(), None);
+        assert!(policy.is_unlimited());
+        assert!(!policy.is_exhausted(usize::MAX));
     }
 }

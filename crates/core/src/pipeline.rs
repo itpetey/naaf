@@ -19,41 +19,32 @@ use crate::{
     step::{Step, StepError},
 };
 
-/// Unique identifier for one phase within a pipeline.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-pub struct PhaseId(String);
-
-impl PhaseId {
-    /// Creates a phase identifier from a string.
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    /// Returns the raw string identifier.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for PhaseId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl From<String> for PhaseId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl From<&str> for PhaseId {
-    fn from(value: &str) -> Self {
-        Self(value.to_string())
-    }
-}
+/// Internal type-erased phase runner.
+type PhaseRunner<R, E> = Arc<
+    dyn Fn(
+        &R,
+        Arc<dyn Any + Send + Sync>,
+    ) -> LocalBoxFuture<'_, Result<Arc<dyn Any + Send + Sync>, PipelineError<E>>>,
+>;
+/// Internal type-erased route resolver.
+type RouteResolver = Arc<dyn Fn(&dyn Any) -> Route>;
+type CheckpointRestorer<E> = Arc<
+    dyn Fn(Value, &PhaseId) -> Result<Arc<dyn Any + Send + Sync>, PipelineError<E>> + Send + Sync,
+>;
+type CheckpointSerialiser<E> =
+    Arc<dyn Fn(&dyn Any, &PhaseId) -> Result<Value, PipelineError<E>> + Send + Sync>;
+type ParallelJoiner<E> = Arc<
+    dyn Fn(
+            Vec<Arc<dyn Any + Send + Sync>>,
+            &PhaseId,
+        ) -> Result<Arc<dyn Any + Send + Sync>, PipelineError<E>>
+        + Send
+        + Sync,
+>;
+type PipelineResumeFuture<'a, T, E> =
+    Pin<Box<dyn Future<Output = Result<Option<T>, PipelineError<E>>> + 'a>>;
+type PipelineRunFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, PipelineError<E>>> + 'a>>;
+type SwitchResolver = Arc<dyn Fn(&dyn Any) -> Option<PhaseId> + Send + Sync>;
 
 /// A typed, async unit of work within a pipeline.
 ///
@@ -78,6 +69,20 @@ pub trait Phase {
     ) -> LocalBoxFuture<'a, Result<Self::Output, Self::Error>>;
 }
 
+/// Unique identifier for one phase within a pipeline.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub struct PhaseId(String);
+
+/// A conditional route with declared possible targets.
+#[derive(Clone)]
+pub struct SwitchRoute {
+    output_type: TypeId,
+    targets: Vec<PhaseId>,
+    resolver: SwitchResolver,
+}
+
 /// Declares where control flows after a phase completes.
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
@@ -90,69 +95,6 @@ pub enum Route {
     Parallel(Vec<PhaseId>),
     /// Stop execution.
     Halt,
-}
-
-/// A conditional route with declared possible targets.
-#[derive(Clone)]
-pub struct SwitchRoute {
-    output_type: TypeId,
-    targets: Vec<PhaseId>,
-    resolver: SwitchResolver,
-}
-
-type SwitchResolver = Arc<dyn Fn(&dyn Any) -> Option<PhaseId> + Send + Sync>;
-
-impl Debug for Route {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Next(id) => write!(f, "Next({id})"),
-            Self::Switch(route) => write!(f, "Switch({:?})", route.targets),
-            Self::Parallel(ids) => {
-                write!(f, "Parallel([")?;
-                for (i, id) in ids.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{id}")?;
-                }
-                write!(f, "])")
-            }
-            Self::Halt => f.write_str("Halt"),
-        }
-    }
-}
-
-impl Route {
-    /// Routes to a single next phase.
-    pub fn next(phase_id: impl Into<PhaseId>) -> Self {
-        Self::Next(phase_id.into())
-    }
-
-    /// Routes conditionally using a typed closure.
-    ///
-    /// The closure receives a reference to the phase output and must return
-    /// the identifier of the phase to run next.
-    pub fn switch<O, F>(targets: impl IntoIterator<Item = impl Into<PhaseId>>, f: F) -> Self
-    where
-        O: 'static,
-        F: Fn(&O) -> PhaseId + Send + Sync + 'static,
-    {
-        Self::Switch(SwitchRoute {
-            output_type: TypeId::of::<O>(),
-            targets: targets.into_iter().map(Into::into).collect(),
-            resolver: Arc::new(move |any| any.downcast_ref::<O>().map(&f)),
-        })
-    }
-
-    /// Runs multiple phases in parallel.
-    pub fn parallel(phase_ids: impl IntoIterator<Item = impl Into<PhaseId>>) -> Self {
-        Self::Parallel(phase_ids.into_iter().map(Into::into).collect())
-    }
-
-    /// Halts pipeline execution.
-    pub fn halt() -> Self {
-        Self::Halt
-    }
 }
 
 /// Errors that can occur while running a pipeline.
@@ -208,33 +150,6 @@ pub enum PipelineError<E> {
     StepRejected { phase_id: PhaseId },
 }
 
-/// Internal type-erased phase runner.
-type PhaseRunner<R, E> = Arc<
-    dyn Fn(
-        &R,
-        Arc<dyn Any + Send + Sync>,
-    ) -> LocalBoxFuture<'_, Result<Arc<dyn Any + Send + Sync>, PipelineError<E>>>,
->;
-
-/// Internal type-erased route resolver.
-type RouteResolver = Arc<dyn Fn(&dyn Any) -> Route>;
-type CheckpointSerialiser<E> =
-    Arc<dyn Fn(&dyn Any, &PhaseId) -> Result<Value, PipelineError<E>> + Send + Sync>;
-type CheckpointRestorer<E> = Arc<
-    dyn Fn(Value, &PhaseId) -> Result<Arc<dyn Any + Send + Sync>, PipelineError<E>> + Send + Sync,
->;
-type ParallelJoiner<E> = Arc<
-    dyn Fn(
-            Vec<Arc<dyn Any + Send + Sync>>,
-            &PhaseId,
-        ) -> Result<Arc<dyn Any + Send + Sync>, PipelineError<E>>
-        + Send
-        + Sync,
->;
-type PipelineRunFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, PipelineError<E>>> + 'a>>;
-type PipelineResumeFuture<'a, T, E> =
-    Pin<Box<dyn Future<Output = Result<Option<T>, PipelineError<E>>> + 'a>>;
-
 /// Metadata stored for each registered phase.
 struct PhaseEntry<R, E> {
     runner: PhaseRunner<R, E>,
@@ -245,21 +160,6 @@ struct PhaseEntry<R, E> {
     input_type: TypeId,
     output_type: TypeId,
     joined_output_type: TypeId,
-}
-
-impl<R, E> Clone for PhaseEntry<R, E> {
-    fn clone(&self) -> Self {
-        Self {
-            runner: self.runner.clone(),
-            resolve_route: self.resolve_route.clone(),
-            serialise_checkpoint: self.serialise_checkpoint.clone(),
-            restore_checkpoint: self.restore_checkpoint.clone(),
-            join_parallel_outputs: self.join_parallel_outputs.clone(),
-            input_type: self.input_type,
-            output_type: self.output_type,
-            joined_output_type: self.joined_output_type,
-        }
-    }
 }
 
 /// A state-machine orchestrator that composes typed phases with declared routes.
@@ -320,9 +220,476 @@ pub struct PipelineBuilder<R, E> {
     checkpointer: Option<Arc<dyn PipelineCheckpointer>>,
 }
 
-impl<R, E> Default for PipelineBuilder<R, E> {
-    fn default() -> Self {
-        Self::new()
+/// Errors discovered while validating a pipeline at construction time.
+#[derive(Debug, Error, PartialEq)]
+pub enum PipelineValidationError {
+    #[error("no initial phase configured")]
+    MissingInitialPhase,
+    #[error("initial phase '{0}' not found")]
+    InitialPhaseNotFound(PhaseId),
+    #[error("phase '{0}' not found")]
+    PhaseNotFound(PhaseId),
+    #[error("route from '{from}' targets unknown phase '{to}'")]
+    UnknownRouteTarget { from: PhaseId, to: PhaseId },
+    #[error("type mismatch passing output from '{from}' to '{to}'")]
+    TypeMismatch { from: PhaseId, to: PhaseId },
+}
+
+impl PhaseId {
+    /// Creates a phase identifier from a string.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    /// Returns the raw string identifier.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for PhaseId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<String> for PhaseId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for PhaseId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl Route {
+    /// Routes to a single next phase.
+    pub fn next(phase_id: impl Into<PhaseId>) -> Self {
+        Self::Next(phase_id.into())
+    }
+
+    /// Routes conditionally using a typed closure.
+    ///
+    /// The closure receives a reference to the phase output and must return
+    /// the identifier of the phase to run next.
+    pub fn switch<O, F>(targets: impl IntoIterator<Item = impl Into<PhaseId>>, f: F) -> Self
+    where
+        O: 'static,
+        F: Fn(&O) -> PhaseId + Send + Sync + 'static,
+    {
+        Self::Switch(SwitchRoute {
+            output_type: TypeId::of::<O>(),
+            targets: targets.into_iter().map(Into::into).collect(),
+            resolver: Arc::new(move |any| any.downcast_ref::<O>().map(&f)),
+        })
+    }
+
+    /// Runs multiple phases in parallel.
+    pub fn parallel(phase_ids: impl IntoIterator<Item = impl Into<PhaseId>>) -> Self {
+        Self::Parallel(phase_ids.into_iter().map(Into::into).collect())
+    }
+
+    /// Halts pipeline execution.
+    pub fn halt() -> Self {
+        Self::Halt
+    }
+}
+
+impl Debug for Route {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Next(id) => write!(f, "Next({id})"),
+            Self::Switch(route) => write!(f, "Switch({:?})", route.targets),
+            Self::Parallel(ids) => {
+                write!(f, "Parallel([")?;
+                for (i, id) in ids.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{id}")?;
+                }
+                write!(f, "])")
+            }
+            Self::Halt => f.write_str("Halt"),
+        }
+    }
+}
+
+impl<R, E> Clone for PhaseEntry<R, E> {
+    fn clone(&self) -> Self {
+        Self {
+            runner: self.runner.clone(),
+            resolve_route: self.resolve_route.clone(),
+            serialise_checkpoint: self.serialise_checkpoint.clone(),
+            restore_checkpoint: self.restore_checkpoint.clone(),
+            join_parallel_outputs: self.join_parallel_outputs.clone(),
+            input_type: self.input_type,
+            output_type: self.output_type,
+            joined_output_type: self.joined_output_type,
+        }
+    }
+}
+
+impl<R, E> Pipeline<R, E> {
+    /// Creates a new pipeline builder.
+    pub fn builder() -> PipelineBuilder<R, E> {
+        PipelineBuilder::new()
+    }
+
+    /// Runs the pipeline from the initial phase with the given input.
+    ///
+    /// The input type `I` must match the initial phase's declared input type.
+    /// The output type `O` must match the type of the final phase that halts.
+    pub fn run<'a, I, O>(&'a self, runtime: &'a R, input: I) -> PipelineRunFuture<'a, O, E>
+    where
+        I: Clone + Send + Sync + 'static,
+        O: Clone + Send + Sync + 'static,
+    {
+        let input = Arc::new(input) as Arc<dyn Any + Send + Sync>;
+        self.run_inner(
+            runtime,
+            self.initial_phase.clone(),
+            input,
+            None,
+            HashMap::new(),
+            0,
+        )
+    }
+
+    /// Resumes pipeline execution from a checkpoint saved after a phase completed.
+    pub fn resume<'a, O>(&'a self, runtime: &'a R) -> PipelineResumeFuture<'a, O, E>
+    where
+        O: Clone + Send + Sync + 'static,
+    {
+        Box::pin(async move {
+            let Some(checkpointer) = &self.checkpointer else {
+                return Ok(None);
+            };
+            let checkpoint = checkpointer
+                .load_pipeline()
+                .await
+                .map_err(PipelineError::CheckpointPersistence)?;
+            let Some(checkpoint) = checkpoint else {
+                return Ok(None);
+            };
+            self.run_from_checkpoint(runtime, checkpoint)
+                .await
+                .map(Some)
+        })
+    }
+
+    /// Resumes pipeline execution from a checkpoint value saved after a phase completed.
+    pub fn run_from_checkpoint<'a, O>(
+        &'a self,
+        runtime: &'a R,
+        checkpoint: PipelineCheckpoint,
+    ) -> PipelineRunFuture<'a, O, E>
+    where
+        O: Clone + Send + Sync + 'static,
+    {
+        Box::pin(async move {
+            let entry = self
+                .phases
+                .get(&checkpoint.current_phase)
+                .ok_or_else(|| PipelineError::PhaseNotFound(checkpoint.current_phase.clone()))?;
+            let output =
+                (entry.restore_checkpoint)(checkpoint.phase_output, &checkpoint.current_phase)?;
+            self.run_inner(
+                runtime,
+                checkpoint.current_phase,
+                Arc::clone(&output),
+                Some(output),
+                checkpoint.phase_visits,
+                checkpoint.completed_phases,
+            )
+            .await
+        })
+    }
+
+    fn run_inner<'a, O>(
+        &'a self,
+        runtime: &'a R,
+        start_phase: PhaseId,
+        input: Arc<dyn Any + Send + Sync>,
+        resume_output: Option<Arc<dyn Any + Send + Sync>>,
+        mut phase_visits: HashMap<PhaseId, usize>,
+        mut completed_phases: usize,
+    ) -> PipelineRunFuture<'a, O, E>
+    where
+        O: Clone + Send + Sync + 'static,
+    {
+        Box::pin(async move {
+            let mut current_phase = start_phase;
+            let mut current_input = input;
+            let mut resume_output = resume_output;
+
+            let pipeline_span = info_span!(
+                name::PIPELINE,
+                component = component::PIPELINE,
+                initial_phase = %current_phase,
+                max_cycle_depth = self.max_cycle_depth,
+            );
+
+            async move {
+                info!(action = action::RUN_START, "pipeline started");
+
+                loop {
+                    let entry = self
+                        .phases
+                        .get(&current_phase)
+                        .ok_or_else(|| PipelineError::PhaseNotFound(current_phase.clone()))?;
+
+                    let output = if let Some(output) = resume_output.take() {
+                        output
+                    } else {
+                        let visits = phase_visits.entry(current_phase.clone()).or_insert(0);
+                        *visits += 1;
+                        if *visits > self.max_cycle_depth {
+                            warn!(
+                                action = action::RUN_REJECTED,
+                                phase = %current_phase,
+                                depth = *visits,
+                                reason = reason::MAX_DEPTH_EXCEEDED,
+                                "pipeline max cycle depth exceeded"
+                            );
+                            return Err(PipelineError::MaxDepthExceeded(current_phase));
+                        }
+
+                        trace!(
+                            action = action::ATTEMPT_START,
+                            phase = %current_phase,
+                            depth = *visits,
+                            "phase started"
+                        );
+
+                        let output = (entry.runner)(runtime, current_input).await.map_err(|e| {
+                            if let PipelineError::Phase { error, .. } = e {
+                                PipelineError::Phase {
+                                    phase_id: current_phase.clone(),
+                                    error,
+                                }
+                            } else if let PipelineError::StepRejected { .. } = e {
+                                PipelineError::StepRejected {
+                                    phase_id: current_phase.clone(),
+                                }
+                            } else {
+                                e
+                            }
+                        })?;
+                        completed_phases += 1;
+                        self.save_checkpoint(
+                            entry,
+                            &current_phase,
+                            Arc::clone(&output),
+                            completed_phases,
+                            &phase_visits,
+                        )
+                        .await?;
+                        output
+                    };
+
+                    trace!(
+                        action = action::ATTEMPT_OUTPUT,
+                        phase = %current_phase,
+                        "phase completed"
+                    );
+
+                    let route = (entry.resolve_route)(output.as_ref());
+
+                    debug!(
+                        action = action::ROUTE,
+                        phase = %current_phase,
+                        route = ?route,
+                        "route selected"
+                    );
+
+                    match route {
+                        Route::Halt => {
+                            info!(
+                                action = action::RUN_COMPLETE,
+                                phase = %current_phase,
+                                "pipeline halted"
+                            );
+                            let final_output = Arc::downcast::<O>(output).map_err(|_| {
+                                PipelineError::TypeMismatch {
+                                    from: current_phase.clone(),
+                                    to: PhaseId::new("halt"),
+                                }
+                            })?;
+                            return Ok((*final_output).clone());
+                        }
+                        Route::Next(next_id) => {
+                            let next_entry = self.phases.get(&next_id).ok_or_else(|| {
+                                PipelineError::UnknownRouteTarget {
+                                    from: current_phase.clone(),
+                                    to: next_id.clone(),
+                                }
+                            })?;
+
+                            if entry.output_type != next_entry.input_type {
+                                return Err(PipelineError::TypeMismatch {
+                                    from: current_phase.clone(),
+                                    to: next_id.clone(),
+                                });
+                            }
+
+                            current_phase = next_id;
+                            current_input = output;
+                        }
+                        Route::Switch(switch) => {
+                            let Some(next_id) = (switch.resolver)(output.as_ref()) else {
+                                return Err(PipelineError::TypeMismatch {
+                                    from: current_phase.clone(),
+                                    to: PhaseId::new("switch"),
+                                });
+                            };
+                            if !switch.targets.contains(&next_id) {
+                                return Err(PipelineError::SwitchUnknownTarget {
+                                    from: current_phase.clone(),
+                                    to: next_id,
+                                });
+                            }
+                            let next_entry = self.phases.get(&next_id).ok_or_else(|| {
+                                PipelineError::SwitchUnknownTarget {
+                                    from: current_phase.clone(),
+                                    to: next_id.clone(),
+                                }
+                            })?;
+
+                            if entry.output_type != next_entry.input_type {
+                                return Err(PipelineError::TypeMismatch {
+                                    from: current_phase.clone(),
+                                    to: next_id.clone(),
+                                });
+                            }
+
+                            current_phase = next_id;
+                            current_input = output;
+                        }
+                        Route::Parallel(phase_ids) => {
+                            let Some(first_phase) = phase_ids.first() else {
+                                return Err(PipelineError::PhaseNotFound(current_phase.clone()));
+                            };
+                            let first_entry = self
+                                .phases
+                                .get(first_phase)
+                                .ok_or_else(|| PipelineError::PhaseNotFound(first_phase.clone()))?;
+
+                            let mut futures = Vec::with_capacity(phase_ids.len());
+                            for pid in &phase_ids {
+                                let entry = self
+                                    .phases
+                                    .get(pid)
+                                    .cloned()
+                                    .ok_or_else(|| PipelineError::PhaseNotFound(pid.clone()))?;
+                                let pid = pid.clone();
+                                let output = Arc::clone(&output);
+                                let runtime = runtime;
+                                let checkpointer = self.checkpointer.clone();
+                                futures.push(async move {
+                                    let branch_output =
+                                        (entry.runner)(runtime, output).await.map_err(|e| {
+                                            if let PipelineError::Phase { error, .. } = e {
+                                                PipelineError::Phase {
+                                                    phase_id: pid.clone(),
+                                                    error,
+                                                }
+                                            } else if let PipelineError::StepRejected { .. } = e {
+                                                PipelineError::StepRejected {
+                                                    phase_id: pid.clone(),
+                                                }
+                                            } else {
+                                                e
+                                            }
+                                        })?;
+
+                                    let route = (entry.resolve_route)(branch_output.as_ref());
+                                    if !matches!(route, Route::Halt) {
+                                        return Err(PipelineError::ParallelBranchNotHalted {
+                                            phase_id: pid.clone(),
+                                            route,
+                                        });
+                                    }
+
+                                    if let Some(checkpointer) = checkpointer {
+                                        let phase_output = (entry.serialise_checkpoint)(
+                                            branch_output.as_ref(),
+                                            &pid,
+                                        )?;
+                                        checkpointer
+                                            .save_pipeline(PipelineCheckpoint {
+                                                current_phase: pid.clone(),
+                                                phase_output,
+                                                completed_phases: 1,
+                                                phase_visits: HashMap::from([(pid.clone(), 1)]),
+                                            })
+                                            .await
+                                            .map_err(PipelineError::CheckpointPersistence)?;
+                                    }
+
+                                    Ok::<_, PipelineError<E>>(branch_output)
+                                });
+                            }
+
+                            let results = try_join_all(futures).await?;
+                            let joined =
+                                (first_entry.join_parallel_outputs)(results, &current_phase)?;
+
+                            info!(
+                                action = action::RUN_COMPLETE,
+                                phase = %current_phase,
+                                parallel_branches = phase_ids.len(),
+                                "parallel branches joined"
+                            );
+
+                            if let Some(join_phase) =
+                                self.parallel_join_routes.get(&current_phase).cloned()
+                            {
+                                current_phase = join_phase;
+                                current_input = joined;
+                            } else {
+                                let final_output = Arc::downcast::<O>(joined).map_err(|_| {
+                                    PipelineError::TypeMismatch {
+                                        from: current_phase.clone(),
+                                        to: PhaseId::new("halt"),
+                                    }
+                                })?;
+                                return Ok((*final_output).clone());
+                            }
+                        }
+                    }
+                }
+            }
+            .instrument(pipeline_span)
+            .await
+        })
+    }
+
+    async fn save_checkpoint(
+        &self,
+        entry: &PhaseEntry<R, E>,
+        phase_id: &PhaseId,
+        output: Arc<dyn Any + Send + Sync>,
+        completed_phases: usize,
+        phase_visits: &HashMap<PhaseId, usize>,
+    ) -> Result<(), PipelineError<E>> {
+        let Some(checkpointer) = &self.checkpointer else {
+            return Ok(());
+        };
+        let phase_output = (entry.serialise_checkpoint)(output.as_ref(), phase_id)?;
+        checkpointer
+            .save_pipeline(PipelineCheckpoint {
+                current_phase: phase_id.clone(),
+                phase_output,
+                completed_phases,
+                phase_visits: phase_visits.clone(),
+            })
+            .await
+            .map_err(PipelineError::CheckpointPersistence)?;
+        Ok(())
     }
 }
 
@@ -686,378 +1053,9 @@ impl<R, E> PipelineBuilder<R, E> {
     }
 }
 
-/// Errors discovered while validating a pipeline at construction time.
-#[derive(Debug, Error, PartialEq)]
-pub enum PipelineValidationError {
-    #[error("no initial phase configured")]
-    MissingInitialPhase,
-    #[error("initial phase '{0}' not found")]
-    InitialPhaseNotFound(PhaseId),
-    #[error("phase '{0}' not found")]
-    PhaseNotFound(PhaseId),
-    #[error("route from '{from}' targets unknown phase '{to}'")]
-    UnknownRouteTarget { from: PhaseId, to: PhaseId },
-    #[error("type mismatch passing output from '{from}' to '{to}'")]
-    TypeMismatch { from: PhaseId, to: PhaseId },
-}
-
-impl<R, E> Pipeline<R, E> {
-    /// Creates a new pipeline builder.
-    pub fn builder() -> PipelineBuilder<R, E> {
-        PipelineBuilder::new()
-    }
-
-    /// Runs the pipeline from the initial phase with the given input.
-    ///
-    /// The input type `I` must match the initial phase's declared input type.
-    /// The output type `O` must match the type of the final phase that halts.
-    pub fn run<'a, I, O>(&'a self, runtime: &'a R, input: I) -> PipelineRunFuture<'a, O, E>
-    where
-        I: Clone + Send + Sync + 'static,
-        O: Clone + Send + Sync + 'static,
-    {
-        let input = Arc::new(input) as Arc<dyn Any + Send + Sync>;
-        self.run_inner(
-            runtime,
-            self.initial_phase.clone(),
-            input,
-            None,
-            HashMap::new(),
-            0,
-        )
-    }
-
-    /// Resumes pipeline execution from a checkpoint saved after a phase completed.
-    pub fn resume<'a, O>(&'a self, runtime: &'a R) -> PipelineResumeFuture<'a, O, E>
-    where
-        O: Clone + Send + Sync + 'static,
-    {
-        Box::pin(async move {
-            let Some(checkpointer) = &self.checkpointer else {
-                return Ok(None);
-            };
-            let checkpoint = checkpointer
-                .load_pipeline()
-                .await
-                .map_err(PipelineError::CheckpointPersistence)?;
-            let Some(checkpoint) = checkpoint else {
-                return Ok(None);
-            };
-            self.run_from_checkpoint(runtime, checkpoint)
-                .await
-                .map(Some)
-        })
-    }
-
-    /// Resumes pipeline execution from a checkpoint value saved after a phase completed.
-    pub fn run_from_checkpoint<'a, O>(
-        &'a self,
-        runtime: &'a R,
-        checkpoint: PipelineCheckpoint,
-    ) -> PipelineRunFuture<'a, O, E>
-    where
-        O: Clone + Send + Sync + 'static,
-    {
-        Box::pin(async move {
-            let entry = self
-                .phases
-                .get(&checkpoint.current_phase)
-                .ok_or_else(|| PipelineError::PhaseNotFound(checkpoint.current_phase.clone()))?;
-            let output =
-                (entry.restore_checkpoint)(checkpoint.phase_output, &checkpoint.current_phase)?;
-            self.run_inner(
-                runtime,
-                checkpoint.current_phase,
-                Arc::clone(&output),
-                Some(output),
-                checkpoint.phase_visits,
-                checkpoint.completed_phases,
-            )
-            .await
-        })
-    }
-
-    fn run_inner<'a, O>(
-        &'a self,
-        runtime: &'a R,
-        start_phase: PhaseId,
-        input: Arc<dyn Any + Send + Sync>,
-        resume_output: Option<Arc<dyn Any + Send + Sync>>,
-        mut phase_visits: HashMap<PhaseId, usize>,
-        mut completed_phases: usize,
-    ) -> PipelineRunFuture<'a, O, E>
-    where
-        O: Clone + Send + Sync + 'static,
-    {
-        Box::pin(async move {
-            let mut current_phase = start_phase;
-            let mut current_input = input;
-            let mut resume_output = resume_output;
-
-            let pipeline_span = info_span!(
-                name::PIPELINE,
-                component = component::PIPELINE,
-                initial_phase = %current_phase,
-                max_cycle_depth = self.max_cycle_depth,
-            );
-
-            async move {
-                info!(action = action::RUN_START, "pipeline started");
-
-                loop {
-                    let entry = self
-                        .phases
-                        .get(&current_phase)
-                        .ok_or_else(|| PipelineError::PhaseNotFound(current_phase.clone()))?;
-
-                    let output = if let Some(output) = resume_output.take() {
-                        output
-                    } else {
-                        let visits = phase_visits.entry(current_phase.clone()).or_insert(0);
-                        *visits += 1;
-                        if *visits > self.max_cycle_depth {
-                            warn!(
-                                action = action::RUN_REJECTED,
-                                phase = %current_phase,
-                                depth = *visits,
-                                reason = reason::MAX_DEPTH_EXCEEDED,
-                                "pipeline max cycle depth exceeded"
-                            );
-                            return Err(PipelineError::MaxDepthExceeded(current_phase));
-                        }
-
-                        trace!(
-                            action = action::ATTEMPT_START,
-                            phase = %current_phase,
-                            depth = *visits,
-                            "phase started"
-                        );
-
-                        let output = (entry.runner)(runtime, current_input).await.map_err(|e| {
-                            if let PipelineError::Phase { error, .. } = e {
-                                PipelineError::Phase {
-                                    phase_id: current_phase.clone(),
-                                    error,
-                                }
-                            } else if let PipelineError::StepRejected { .. } = e {
-                                PipelineError::StepRejected {
-                                    phase_id: current_phase.clone(),
-                                }
-                            } else {
-                                e
-                            }
-                        })?;
-                        completed_phases += 1;
-                        self.save_checkpoint(
-                            entry,
-                            &current_phase,
-                            Arc::clone(&output),
-                            completed_phases,
-                            &phase_visits,
-                        )
-                        .await?;
-                        output
-                    };
-
-                    trace!(
-                        action = action::ATTEMPT_OUTPUT,
-                        phase = %current_phase,
-                        "phase completed"
-                    );
-
-                    let route = (entry.resolve_route)(output.as_ref());
-
-                    debug!(
-                        action = action::ROUTE,
-                        phase = %current_phase,
-                        route = ?route,
-                        "route selected"
-                    );
-
-                    match route {
-                        Route::Halt => {
-                            info!(
-                                action = action::RUN_COMPLETE,
-                                phase = %current_phase,
-                                "pipeline halted"
-                            );
-                            let final_output = Arc::downcast::<O>(output).map_err(|_| {
-                                PipelineError::TypeMismatch {
-                                    from: current_phase.clone(),
-                                    to: PhaseId::new("halt"),
-                                }
-                            })?;
-                            return Ok((*final_output).clone());
-                        }
-                        Route::Next(next_id) => {
-                            let next_entry = self.phases.get(&next_id).ok_or_else(|| {
-                                PipelineError::UnknownRouteTarget {
-                                    from: current_phase.clone(),
-                                    to: next_id.clone(),
-                                }
-                            })?;
-
-                            if entry.output_type != next_entry.input_type {
-                                return Err(PipelineError::TypeMismatch {
-                                    from: current_phase.clone(),
-                                    to: next_id.clone(),
-                                });
-                            }
-
-                            current_phase = next_id;
-                            current_input = output;
-                        }
-                        Route::Switch(switch) => {
-                            let Some(next_id) = (switch.resolver)(output.as_ref()) else {
-                                return Err(PipelineError::TypeMismatch {
-                                    from: current_phase.clone(),
-                                    to: PhaseId::new("switch"),
-                                });
-                            };
-                            if !switch.targets.contains(&next_id) {
-                                return Err(PipelineError::SwitchUnknownTarget {
-                                    from: current_phase.clone(),
-                                    to: next_id,
-                                });
-                            }
-                            let next_entry = self.phases.get(&next_id).ok_or_else(|| {
-                                PipelineError::SwitchUnknownTarget {
-                                    from: current_phase.clone(),
-                                    to: next_id.clone(),
-                                }
-                            })?;
-
-                            if entry.output_type != next_entry.input_type {
-                                return Err(PipelineError::TypeMismatch {
-                                    from: current_phase.clone(),
-                                    to: next_id.clone(),
-                                });
-                            }
-
-                            current_phase = next_id;
-                            current_input = output;
-                        }
-                        Route::Parallel(phase_ids) => {
-                            let Some(first_phase) = phase_ids.first() else {
-                                return Err(PipelineError::PhaseNotFound(current_phase.clone()));
-                            };
-                            let first_entry = self
-                                .phases
-                                .get(first_phase)
-                                .ok_or_else(|| PipelineError::PhaseNotFound(first_phase.clone()))?;
-
-                            let mut futures = Vec::with_capacity(phase_ids.len());
-                            for pid in &phase_ids {
-                                let entry = self
-                                    .phases
-                                    .get(pid)
-                                    .cloned()
-                                    .ok_or_else(|| PipelineError::PhaseNotFound(pid.clone()))?;
-                                let pid = pid.clone();
-                                let output = Arc::clone(&output);
-                                let runtime = runtime;
-                                let checkpointer = self.checkpointer.clone();
-                                futures.push(async move {
-                                    let branch_output =
-                                        (entry.runner)(runtime, output).await.map_err(|e| {
-                                            if let PipelineError::Phase { error, .. } = e {
-                                                PipelineError::Phase {
-                                                    phase_id: pid.clone(),
-                                                    error,
-                                                }
-                                            } else if let PipelineError::StepRejected { .. } = e {
-                                                PipelineError::StepRejected {
-                                                    phase_id: pid.clone(),
-                                                }
-                                            } else {
-                                                e
-                                            }
-                                        })?;
-
-                                    let route = (entry.resolve_route)(branch_output.as_ref());
-                                    if !matches!(route, Route::Halt) {
-                                        return Err(PipelineError::ParallelBranchNotHalted {
-                                            phase_id: pid.clone(),
-                                            route,
-                                        });
-                                    }
-
-                                    if let Some(checkpointer) = checkpointer {
-                                        let phase_output = (entry.serialise_checkpoint)(
-                                            branch_output.as_ref(),
-                                            &pid,
-                                        )?;
-                                        checkpointer
-                                            .save_pipeline(PipelineCheckpoint {
-                                                current_phase: pid.clone(),
-                                                phase_output,
-                                                completed_phases: 1,
-                                                phase_visits: HashMap::from([(pid.clone(), 1)]),
-                                            })
-                                            .await
-                                            .map_err(PipelineError::CheckpointPersistence)?;
-                                    }
-
-                                    Ok::<_, PipelineError<E>>(branch_output)
-                                });
-                            }
-
-                            let results = try_join_all(futures).await?;
-                            let joined =
-                                (first_entry.join_parallel_outputs)(results, &current_phase)?;
-
-                            info!(
-                                action = action::RUN_COMPLETE,
-                                phase = %current_phase,
-                                parallel_branches = phase_ids.len(),
-                                "parallel branches joined"
-                            );
-
-                            if let Some(join_phase) =
-                                self.parallel_join_routes.get(&current_phase).cloned()
-                            {
-                                current_phase = join_phase;
-                                current_input = joined;
-                            } else {
-                                let final_output = Arc::downcast::<O>(joined).map_err(|_| {
-                                    PipelineError::TypeMismatch {
-                                        from: current_phase.clone(),
-                                        to: PhaseId::new("halt"),
-                                    }
-                                })?;
-                                return Ok((*final_output).clone());
-                            }
-                        }
-                    }
-                }
-            }
-            .instrument(pipeline_span)
-            .await
-        })
-    }
-
-    async fn save_checkpoint(
-        &self,
-        entry: &PhaseEntry<R, E>,
-        phase_id: &PhaseId,
-        output: Arc<dyn Any + Send + Sync>,
-        completed_phases: usize,
-        phase_visits: &HashMap<PhaseId, usize>,
-    ) -> Result<(), PipelineError<E>> {
-        let Some(checkpointer) = &self.checkpointer else {
-            return Ok(());
-        };
-        let phase_output = (entry.serialise_checkpoint)(output.as_ref(), phase_id)?;
-        checkpointer
-            .save_pipeline(PipelineCheckpoint {
-                current_phase: phase_id.clone(),
-                phase_output,
-                completed_phases,
-                phase_visits: phase_visits.clone(),
-            })
-            .await
-            .map_err(PipelineError::CheckpointPersistence)?;
-        Ok(())
+impl<R, E> Default for PipelineBuilder<R, E> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

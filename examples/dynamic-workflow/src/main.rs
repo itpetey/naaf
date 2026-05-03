@@ -9,13 +9,6 @@ use futures::future::LocalBoxFuture;
 use naaf_core::{Phase, PhaseId, Pipeline, Route};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct ProjectReport {
-    plan: ProjectPlan,
-    api: ApiDesign,
-    ui: UiDesign,
-}
-
 #[derive(Debug)]
 struct PlannerRuntime;
 
@@ -46,6 +39,13 @@ struct UiDesign {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct ProjectReport {
+    plan: ProjectPlan,
+    api: ApiDesign,
+    ui: UiDesign,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum DesignDraft {
     Api {
         plan: ProjectPlan,
@@ -57,20 +57,20 @@ enum DesignDraft {
     },
 }
 
-fn plan_from_input(input: PlanningInput) -> ProjectPlan {
-    ProjectPlan {
-        name: input.name,
-        phases: input
-            .goals
-            .iter()
-            .map(|goal| format!("Implement {goal}"))
-            .collect(),
-        estimated_weeks: input.estimated_weeks,
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Error;
+
+#[derive(Clone)]
+struct PlanProject;
+
+#[derive(Clone)]
+struct DesignApi;
+
+#[derive(Clone)]
+struct DesignUi;
+
+#[derive(Clone)]
+struct MergeReport;
 
 impl std::error::Error for Error {}
 
@@ -80,8 +80,6 @@ impl Display for Error {
     }
 }
 
-#[derive(Clone)]
-struct PlanProject;
 impl Phase for PlanProject {
     type Runtime = PlannerRuntime;
     type Input = PlanningInput;
@@ -97,8 +95,6 @@ impl Phase for PlanProject {
     }
 }
 
-#[derive(Clone)]
-struct DesignApi;
 impl Phase for DesignApi {
     type Runtime = PlannerRuntime;
     type Input = ProjectPlan;
@@ -127,8 +123,6 @@ impl Phase for DesignApi {
     }
 }
 
-#[derive(Clone)]
-struct DesignUi;
 impl Phase for DesignUi {
     type Runtime = PlannerRuntime;
     type Input = ProjectPlan;
@@ -157,8 +151,6 @@ impl Phase for DesignUi {
     }
 }
 
-#[derive(Clone)]
-struct MergeReport;
 impl Phase for MergeReport {
     type Runtime = PlannerRuntime;
     type Input = Vec<DesignDraft>;
@@ -230,4 +222,16 @@ async fn main() {
     println!("Merged report plan: {}", result.plan.name);
     println!("API endpoints: {:?}", result.api.endpoints);
     println!("UI components: {:?}", result.ui.components);
+}
+
+fn plan_from_input(input: PlanningInput) -> ProjectPlan {
+    ProjectPlan {
+        name: input.name,
+        phases: input
+            .goals
+            .iter()
+            .map(|goal| format!("Implement {goal}"))
+            .collect(),
+        estimated_weeks: input.estimated_weeks,
+    }
 }

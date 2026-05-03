@@ -22,20 +22,6 @@ pub trait HumanIO {
     ) -> LocalBoxFuture<'a, Result<HumanAnswer, Self::Error>>;
 }
 
-/// Question sent through [`ChannelHumanIO`] and awaiting a reply.
-pub struct PendingQuestion {
-    /// Question presented to the receiver side of the channel.
-    pub question: HumanQuestion,
-    /// One-shot sender used to deliver the answer back to the caller.
-    pub reply: tokio::sync::oneshot::Sender<HumanAnswer>,
-}
-
-/// [`HumanIO`] implementation that forwards questions over a Tokio channel.
-#[derive(Clone)]
-pub struct ChannelHumanIO {
-    pending: tokio::sync::mpsc::Sender<PendingQuestion>,
-}
-
 /// Question to present to a human operator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HumanQuestion {
@@ -51,6 +37,20 @@ pub struct HumanQuestion {
 pub struct HumanAnswer {
     /// Free-form answer content.
     pub content: String,
+}
+
+/// Question sent through [`ChannelHumanIO`] and awaiting a reply.
+pub struct PendingQuestion {
+    /// Question presented to the receiver side of the channel.
+    pub question: HumanQuestion,
+    /// One-shot sender used to deliver the answer back to the caller.
+    pub reply: tokio::sync::oneshot::Sender<HumanAnswer>,
+}
+
+/// [`HumanIO`] implementation that forwards questions over a Tokio channel.
+#[derive(Clone)]
+pub struct ChannelHumanIO {
+    pending: tokio::sync::mpsc::Sender<PendingQuestion>,
 }
 
 /// Errors returned by [`StdinHumanIO`].
@@ -74,18 +74,42 @@ pub struct QuestionTool<R> {
     _marker: PhantomData<R>,
 }
 
+impl ChannelHumanIO {
+    /// Creates a channel-backed human IO pair and its receiving end.
+    pub fn new(buffer: usize) -> (Self, tokio::sync::mpsc::Receiver<PendingQuestion>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(buffer);
+        (Self { pending: tx }, rx)
+    }
+}
+
+impl HumanIO for ChannelHumanIO {
+    type Error = Infallible;
+
+    fn ask<'a>(
+        &'a self,
+        question: HumanQuestion,
+    ) -> LocalBoxFuture<'a, Result<HumanAnswer, Self::Error>> {
+        Box::pin(async move {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let pending = PendingQuestion {
+                question,
+                reply: reply_tx,
+            };
+            self.pending
+                .send(pending)
+                .await
+                .expect("receiver held open by caller");
+            Ok(reply_rx.await.expect("reply channel not dropped"))
+        })
+    }
+}
+
 impl StdinHumanIO {
     /// Creates a standard-input backed human IO implementation.
     pub fn new() -> Self {
         Self {
             reader: Arc::new(Mutex::new(BufReader::new(tokio::io::stdin()))),
         }
-    }
-}
-
-impl Default for StdinHumanIO {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -132,33 +156,9 @@ impl HumanIO for StdinHumanIO {
     }
 }
 
-impl ChannelHumanIO {
-    /// Creates a channel-backed human IO pair and its receiving end.
-    pub fn new(buffer: usize) -> (Self, tokio::sync::mpsc::Receiver<PendingQuestion>) {
-        let (tx, rx) = tokio::sync::mpsc::channel(buffer);
-        (Self { pending: tx }, rx)
-    }
-}
-
-impl HumanIO for ChannelHumanIO {
-    type Error = Infallible;
-
-    fn ask<'a>(
-        &'a self,
-        question: HumanQuestion,
-    ) -> LocalBoxFuture<'a, Result<HumanAnswer, Self::Error>> {
-        Box::pin(async move {
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            let pending = PendingQuestion {
-                question,
-                reply: reply_tx,
-            };
-            self.pending
-                .send(pending)
-                .await
-                .expect("receiver held open by caller");
-            Ok(reply_rx.await.expect("reply channel not dropped"))
-        })
+impl Default for StdinHumanIO {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -168,12 +168,6 @@ impl<R> QuestionTool<R> {
         Self {
             _marker: PhantomData,
         }
-    }
-}
-
-impl<R> Default for QuestionTool<R> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -227,6 +221,12 @@ where
                 "answer": answer.content,
             }))
         })
+    }
+}
+
+impl<R> Default for QuestionTool<R> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

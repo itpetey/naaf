@@ -9,13 +9,6 @@ use futures::future::LocalBoxFuture;
 use naaf_core::{Phase, PhaseId, Pipeline, Route};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct ProjectReport {
-    plan: ProjectPlan,
-    api: ApiDesign,
-    ui: UiDesign,
-}
-
 #[derive(Debug)]
 struct PlannerRuntime;
 
@@ -39,6 +32,13 @@ struct UiDesign {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct ProjectReport {
+    plan: ProjectPlan,
+    api: ApiDesign,
+    ui: UiDesign,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum DesignDraft {
     Api {
         plan: ProjectPlan,
@@ -53,6 +53,18 @@ enum DesignDraft {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Error;
 
+#[derive(Clone)]
+struct SeedPlan;
+
+#[derive(Clone)]
+struct DesignApi;
+
+#[derive(Clone)]
+struct DesignUi;
+
+#[derive(Clone)]
+struct MergeReport;
+
 impl std::error::Error for Error {}
 
 impl Display for Error {
@@ -61,8 +73,6 @@ impl Display for Error {
     }
 }
 
-#[derive(Clone)]
-struct SeedPlan;
 impl Phase for SeedPlan {
     type Runtime = PlannerRuntime;
     type Input = ProjectPlan;
@@ -78,8 +88,6 @@ impl Phase for SeedPlan {
     }
 }
 
-#[derive(Clone)]
-struct DesignApi;
 impl Phase for DesignApi {
     type Runtime = PlannerRuntime;
     type Input = ProjectPlan;
@@ -108,8 +116,6 @@ impl Phase for DesignApi {
     }
 }
 
-#[derive(Clone)]
-struct DesignUi;
 impl Phase for DesignUi {
     type Runtime = PlannerRuntime;
     type Input = ProjectPlan;
@@ -138,8 +144,6 @@ impl Phase for DesignUi {
     }
 }
 
-#[derive(Clone)]
-struct MergeReport;
 impl Phase for MergeReport {
     type Runtime = PlannerRuntime;
     type Input = Vec<DesignDraft>;

@@ -24,6 +24,7 @@ use std::{
 
 use naaf_knowledge::{KnowledgeGroup, KnowledgeGroupStore, KnowledgeGroupStoreFuture};
 use serde::Serialize;
+
 /// Generic filesystem artifact store for typed JSON artifacts.
 ///
 /// Creates a directory at `run_root` and writes serialisable values

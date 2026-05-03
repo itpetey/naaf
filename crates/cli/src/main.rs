@@ -4,20 +4,6 @@ use tracing::info;
 
 mod config;
 
-#[derive(Parser)]
-#[command(name = "naaf", about = "Knowledge base management CLI")]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Knowledge base commands
-    #[command(subcommand)]
-    Kb(KbCommands),
-}
-
 #[derive(Subcommand)]
 enum KbCommands {
     /// Initialise the knowledge base (create Qdrant collection)
@@ -46,6 +32,20 @@ enum KbCommands {
         #[arg(short, long, default_value = "20")]
         limit: usize,
     },
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Knowledge base commands
+    #[command(subcommand)]
+    Kb(KbCommands),
+}
+
+#[derive(Parser)]
+#[command(name = "naaf", about = "Knowledge base management CLI")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 }
 
 #[tokio::main]

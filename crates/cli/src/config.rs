@@ -3,18 +3,6 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-pub struct Config {
-    pub qdrant: QdrantConfig,
-    pub embedder: EmbedderConfig,
-    #[serde(default)]
-    pub llm: LlmConfig,
-    #[serde(default)]
-    pub ingest: IngestConfig,
-    #[serde(default)]
-    pub query: QueryConfig,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct QdrantConfig {
     pub url: String,
     #[serde(default = "default_collection")]
@@ -67,6 +55,24 @@ pub struct QueryConfig {
     pub re_ingest_answers: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Config {
+    pub qdrant: QdrantConfig,
+    pub embedder: EmbedderConfig,
+    #[serde(default)]
+    pub llm: LlmConfig,
+    #[serde(default)]
+    pub ingest: IngestConfig,
+    #[serde(default)]
+    pub query: QueryConfig,
+}
+
+impl EmbedderConfig {
+    pub fn lm_studio_default_base_url() -> &'static str {
+        "http://127.0.0.1:1234/v1"
+    }
+}
+
 impl Default for EmbedderConfig {
     fn default() -> Self {
         Self {
@@ -74,12 +80,6 @@ impl Default for EmbedderConfig {
             model: default_embedder_model(),
             base_url: None,
         }
-    }
-}
-
-impl EmbedderConfig {
-    pub fn lm_studio_default_base_url() -> &'static str {
-        "http://127.0.0.1:1234/v1"
     }
 }
 

@@ -75,28 +75,6 @@ impl<R> KnowledgeSearchTool<R> {
     }
 }
 
-impl<R> KnowledgeLintTool<R> {
-    /// Creates an empty lint tool.
-    pub fn new() -> Self {
-        Self {
-            targets: Vec::new(),
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    /// Adds one lintable knowledge group together with its Qdrant client.
-    pub fn with_group(mut self, group: KnowledgeGroup, client: QdrantClient) -> Self {
-        self.targets.push(KnowledgeTarget { group, client });
-        self
-    }
-}
-
-impl<R> Default for KnowledgeLintTool<R> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<R: 'static> Tool for KnowledgeSearchTool<R> {
     type Runtime = R;
     type Error = KnowledgeError;
@@ -206,6 +184,22 @@ impl<R: 'static> Tool for KnowledgeSearchTool<R> {
     }
 }
 
+impl<R> KnowledgeLintTool<R> {
+    /// Creates an empty lint tool.
+    pub fn new() -> Self {
+        Self {
+            targets: Vec::new(),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Adds one lintable knowledge group together with its Qdrant client.
+    pub fn with_group(mut self, group: KnowledgeGroup, client: QdrantClient) -> Self {
+        self.targets.push(KnowledgeTarget { group, client });
+        self
+    }
+}
+
 impl<R: 'static> Tool for KnowledgeLintTool<R> {
     type Runtime = R;
     type Error = KnowledgeError;
@@ -260,6 +254,12 @@ impl<R: 'static> Tool for KnowledgeLintTool<R> {
                 "collections": collections,
             }))
         })
+    }
+}
+
+impl<R> Default for KnowledgeLintTool<R> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
