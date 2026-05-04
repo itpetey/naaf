@@ -316,6 +316,7 @@ pub use crate::{
         AssistantMessage, CompletionRequest, CompletionResponse, Message, ToolCall, ToolChoice,
         ToolResultMessage, ToolSpec, Usage,
     },
+    message_source::MessageSource,
     repository::{GlobPathsTool, ReadFileTool, SearchFilesTool},
     task::{LlmCheck, LlmMaterialiser, LlmRepairPlanner, LlmTask},
     tool::{RegisterToolError, Tool, ToolCallError, ToolRegistry},
@@ -331,6 +332,7 @@ mod error;
 mod executor;
 mod human;
 mod message;
+mod message_source;
 #[cfg(feature = "openai")]
 mod openai;
 /// Repository-aware tools for reading and searching a workspace from an LLM.

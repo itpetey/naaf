@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 
 use futures::future::LocalBoxFuture;
 use tracing::{debug, trace};
@@ -7,6 +7,7 @@ use crate::{
     client::LlmClient,
     error::ExecutorError,
     message::{AssistantMessage, CompletionRequest, CompletionResponse, Message},
+    message_source::MessageSource,
     tool::ToolRegistry,
 };
 
@@ -30,6 +31,7 @@ pub struct Executor<C, R, E = Infallible> {
     client: C,
     tools: ToolRegistry<R, E>,
     config: ExecutorConfig,
+    message_source: Option<Arc<dyn MessageSource>>,
 }
 
 impl ExecutorConfig {
@@ -114,6 +116,7 @@ impl<C, R> Executor<C, R, Infallible> {
             client,
             tools: ToolRegistry::new(),
             config: ExecutorConfig::default(),
+            message_source: None,
         }
     }
 }
@@ -125,12 +128,21 @@ impl<C, R, E> Executor<C, R, E> {
             client,
             tools,
             config: ExecutorConfig::default(),
+            message_source: None,
         }
     }
 
     /// Replaces the executor config.
     pub fn with_config(mut self, config: ExecutorConfig) -> Self {
         self.config = config;
+        self
+    }
+
+    /// Sets a message source that the executor will drain after each batch of
+    /// tool calls, injecting queued user messages into the conversation before
+    /// the next turn.
+    pub fn with_message_source(mut self, source: Arc<dyn MessageSource>) -> Self {
+        self.message_source = Some(source);
         self
     }
 
@@ -147,6 +159,11 @@ impl<C, R, E> Executor<C, R, E> {
     /// Returns the inner client.
     pub fn client(&self) -> &C {
         &self.client
+    }
+
+    /// Returns the message source, if configured.
+    pub fn message_source(&self) -> Option<&Arc<dyn MessageSource>> {
+        self.message_source.as_ref()
     }
 }
 
@@ -217,6 +234,14 @@ where
                         .await
                         .map_err(ExecutorError::Tool)?;
                     messages.push(Message::tool(result));
+                }
+
+                if let Some(ref source) = self.message_source {
+                    let queued = source.drain_messages();
+                    for msg in queued {
+                        trace!(turn, "injecting queued user message");
+                        messages.push(Message::user(msg));
+                    }
                 }
             }
 

@@ -8,6 +8,7 @@ use crate::{
     ExecutionOutcome,
     executor::Executor,
     message::{CompletionRequest, Message},
+    message_source::MessageSource,
     task::{LlmCheck, LlmMaterialiser, LlmRepairPlanner, LlmTask},
 };
 
@@ -35,6 +36,33 @@ impl<C, R: 'static, E> LlmAgent<C, R, E> {
     /// Returns the underlying executor.
     pub fn executor(&self) -> &Executor<C, R, E> {
         self.executor.as_ref()
+    }
+
+    /// Returns the message source configured on the underlying executor, if any.
+    pub fn message_source(&self) -> Option<&Arc<dyn MessageSource>> {
+        self.executor.message_source()
+    }
+
+    /// Returns a new agent with the given message source attached to its
+    /// executor. The source is used by the executor to drain queued user
+    /// messages between LLM turns.
+    pub fn with_message_source(self, source: Arc<dyn MessageSource>) -> Self
+    where
+        C: Clone,
+        E: Clone,
+    {
+        let mut executor = Arc::try_unwrap(self.executor).unwrap_or_else(|arc| {
+            let matched = Arc::into_inner(arc);
+            debug_assert!(
+                matched.is_some(),
+                "LlmAgent with_message_source called while executor is shared"
+            );
+            matched.unwrap()
+        });
+        executor = executor.with_message_source(source);
+        Self {
+            executor: Arc::new(executor),
+        }
     }
 
     /// Projects this agent into a `naaf_core::Task`.
