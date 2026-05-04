@@ -2,8 +2,9 @@
 //! subject type before checking it.
 //!
 //! The plan task produces a `ProjectPlan`, which a check validates. Then a
-//! materialiser converts it into a `String` for further checks. The repair
-//! planner revises the input when findings are reported.
+//! materialiser converts it into a `String` artifact that becomes the accepted
+//! step output. The repair planner still receives the original `ProjectPlan`
+//! attempts when findings are reported.
 
 use std::fmt::{Display, Formatter};
 
@@ -146,9 +147,7 @@ async fn main() {
         .await
         .expect("plan should succeed with repair");
 
-    println!("Plan: {}", traced.output().name);
-    println!("Phases: {:?}", traced.output().phases);
-    println!("Estimated weeks: {}", traced.output().estimated_weeks);
+    println!("Materialised plan:\n{}", traced.output());
     println!("Attempts: {}", traced.report().attempt_count());
     for (i, attempt) in traced.report().attempts().iter().enumerate() {
         println!(

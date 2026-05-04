@@ -603,10 +603,15 @@ where
     }
 
     /// Finishes the builder and produces a runnable step without checkpointing.
-    pub fn build(self) -> Step<R, I, A, F, E>
+    ///
+    /// The step output is the final validation subject. If the pipeline includes
+    /// materialisation, this is the materialised artifact rather than the raw task
+    /// output.
+    pub fn build(self) -> Step<R, I, S, F, E>
     where
         I: Clone + 'static,
         A: Clone + 'static,
+        S: 'static,
         F: Clone + 'static,
     {
         let task = self.task;
@@ -628,7 +633,7 @@ where
                         task = task_name,
                         label = task_label.as_ref(),
                         input_type = %type_name::<I>(),
-                        output_type = %type_name::<A>(),
+                        output_type = %type_name::<S>(),
                         finding_type = %type_name::<F>(),
                         max_attempts = ?retry_policy.max_attempts()
                     )
@@ -638,7 +643,7 @@ where
                         component = component::STEP,
                         task = task_name,
                         input_type = %type_name::<I>(),
-                        output_type = %type_name::<A>(),
+                        output_type = %type_name::<S>(),
                         finding_type = %type_name::<F>(),
                         max_attempts = ?retry_policy.max_attempts()
                     )
@@ -688,7 +693,7 @@ where
                                 attempt, "task produced output"
                             );
 
-                            let (_, findings): (_, Vec<F>) = pipeline
+                            let (subject, findings): (S, Vec<F>) = pipeline
                                 .run(runtime, input.clone(), output.clone())
                                 .await
                                 .map_err(|error| {
@@ -722,7 +727,7 @@ where
                                     attempts = report_attempts.len(),
                                     "step completed"
                                 );
-                                return Ok(Traced::new(output, StepReport::new(report_attempts)));
+                                return Ok(Traced::new(subject, StepReport::new(report_attempts)));
                             }
 
                             repair_attempts.push(Attempt {
@@ -791,10 +796,11 @@ where
     /// Finishes the builder and produces a step that supports checkpointing and
     /// resume. The input, output, and finding types must be serialisable and
     /// deserialisable so their values can be persisted between sessions.
-    pub fn build_persistent(self) -> Step<R, I, A, F, E>
+    pub fn build_persistent(self) -> Step<R, I, S, F, E>
     where
         I: Clone + Serialize + DeserializeOwned + 'static,
         A: Clone + Serialize + DeserializeOwned + 'static,
+        S: Clone + Serialize + DeserializeOwned + 'static,
         F: Clone + Serialize + DeserializeOwned + 'static,
     {
         let task = self.task;
@@ -818,7 +824,7 @@ where
                         task = task_name,
                         label = task_label.as_ref(),
                         input_type = %type_name::<I>(),
-                        output_type = %type_name::<A>(),
+                        output_type = %type_name::<S>(),
                         finding_type = %type_name::<F>(),
                         max_attempts = ?retry_policy.max_attempts()
                     )
@@ -828,7 +834,7 @@ where
                         component = component::STEP,
                         task = task_name,
                         input_type = %type_name::<I>(),
-                        output_type = %type_name::<A>(),
+                        output_type = %type_name::<S>(),
                         finding_type = %type_name::<F>(),
                         max_attempts = ?retry_policy.max_attempts()
                     )
@@ -923,7 +929,7 @@ where
                                 attempt, "task produced output"
                             );
 
-                            let (_, findings): (_, Vec<F>) = pipeline
+                            let (subject, findings): (S, Vec<F>) = pipeline
                                 .run(runtime, input.clone(), output.clone())
                                 .await
                                 .map_err(|error| {
@@ -968,7 +974,7 @@ where
                                     attempts = report_attempts.len(),
                                     "step completed"
                                 );
-                                return Ok(Traced::new(output, StepReport::new(report_attempts)));
+                                return Ok(Traced::new(subject, StepReport::new(report_attempts)));
                             }
 
                             repair_attempts.push(Attempt {
@@ -1433,9 +1439,12 @@ mod tests {
 
         assert_eq!(
             result,
-            Patch {
-                revision: 2,
-                passes_tests: true,
+            TestWorktree {
+                patch: Patch {
+                    revision: 2,
+                    passes_tests: true,
+                },
+                required_revision: 2,
             }
         );
     }
@@ -1462,7 +1471,7 @@ mod tests {
             .await
             .expect("step should recover");
 
-        assert_eq!(traced.output().revision, 2);
+        assert_eq!(traced.output().patch.revision, 2);
         assert_eq!(traced.report().attempt_count(), 3);
         assert!(!traced.report().attempts()[0].accepted());
         assert!(!traced.report().attempts()[1].accepted());
@@ -1495,7 +1504,7 @@ mod tests {
             .await
             .expect("unlimited retry policy should keep repairing");
 
-        assert_eq!(traced.output().revision, 5);
+        assert_eq!(traced.output().patch.revision, 5);
         assert_eq!(traced.report().attempt_count(), 6);
         assert!(traced.report().attempts()[5].accepted());
     }

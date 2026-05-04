@@ -16,7 +16,7 @@
 //!                                         │                        │
 //!                                         │           (if non-empty)
 //!                                         │                        ▼
-//!                                     (accepted)          RepairPatch ──► FeatureRequest
+//!                                (accepted output)        RepairPatch ──► FeatureRequest
 //!                                                             (loops back to GeneratePatch)
 //! ```
 
@@ -134,8 +134,7 @@ async fn main() {
         .await
         .expect("build step should succeed after repair");
 
-    println!("Final patch revision: {}", traced.output().revision);
-    println!("Files: {:?}", traced.output().files);
+    println!("Final workspace revision: {}", traced.output().revision);
     println!("Attempts: {}", traced.report().attempt_count());
     for (i, attempt) in traced.report().attempts().iter().enumerate() {
         match &attempt.findings[..] {

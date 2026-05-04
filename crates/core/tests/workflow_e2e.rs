@@ -174,7 +174,7 @@ async fn step_build_test_loop_retries_through_public_api() {
         .await
         .expect("step should repair itself");
 
-    assert_eq!(traced.output(), &Patch { revision: 2 });
+    assert_eq!(traced.output(), &Workspace { revision: 2 });
     assert_eq!(traced.report().attempt_count(), 3);
     assert_eq!(
         traced
