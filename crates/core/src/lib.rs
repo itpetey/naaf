@@ -187,6 +187,6 @@ mod materialiser;
 mod observability;
 mod pipeline;
 mod repair;
+pub mod span;
 mod step;
 mod task;
-pub mod span;

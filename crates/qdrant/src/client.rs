@@ -1,10 +1,11 @@
-use qdrant_client::qdrant::Filter;
-use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, Distance, PointId, PointStruct, QueryPointsBuilder,
-    RetrievedPoint, ScoredPoint, ScrollPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
-    point_id::PointIdOptions,
+use qdrant_client::{
+    Payload, Qdrant,
+    qdrant::{
+        Condition, CreateCollectionBuilder, Distance, Filter, PointId, PointStruct,
+        QueryPointsBuilder, RetrievedPoint, ScoredPoint, ScrollPointsBuilder, UpsertPointsBuilder,
+        VectorParamsBuilder, point_id::PointIdOptions,
+    },
 };
-use qdrant_client::{Payload, Qdrant};
 use uuid::Uuid;
 
 use crate::chunker::SourceInfo;

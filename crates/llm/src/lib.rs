@@ -301,10 +301,6 @@
 //! assert!(traced.report().attempts()[0].accepted());
 //! ```
 
-#[cfg(feature = "openai")]
-pub use crate::openai::{OpenAiClient, OpenAiConfig, OpenAiError, OpenAiStreamObserver};
-#[cfg(feature = "web-search")]
-pub use crate::web_search::{WebSearchError, WebSearchParams, WebSearchTool};
 pub use crate::{
     agent::LlmAgent,
     client::LlmClient,
@@ -324,18 +320,22 @@ pub use crate::{
     task::{LlmCheck, LlmMaterialiser, LlmRepairPlanner, LlmTask},
     tool::{RegisterToolError, Tool, ToolCallError, ToolRegistry},
 };
-
 #[cfg(feature = "openai")]
-mod openai;
+pub use crate::openai::{OpenAiClient, OpenAiConfig, OpenAiError, OpenAiStreamObserver};
 #[cfg(feature = "web-search")]
-mod web_search;
-/// Repository-aware tools for reading and searching a workspace from an LLM.
-pub mod repository;
+pub use crate::web_search::{WebSearchError, WebSearchParams, WebSearchTool};
+
 mod agent;
 mod client;
 mod error;
 mod executor;
 mod human;
 mod message;
+#[cfg(feature = "openai")]
+mod openai;
+/// Repository-aware tools for reading and searching a workspace from an LLM.
+pub mod repository;
 mod task;
 mod tool;
+#[cfg(feature = "web-search")]
+mod web_search;

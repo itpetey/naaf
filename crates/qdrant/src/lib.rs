@@ -32,14 +32,14 @@
 //!
 //! `ContentChunker` auto-detects the right chunker from a file path.
 
-#[cfg(feature = "openai")]
-pub use embedder::openai::OpenAiEmbedder;
 pub use chunker::{
     Chunk, ChunkMetadata, Chunker, CodeChunker, ContentChunker, ConversationChunker,
     MarkdownChunker, PdfChunker, SourceInfo,
 };
 pub use client::{PointData, QdrantAgent, QdrantClient};
 pub use embedder::Embedder;
+#[cfg(feature = "openai")]
+pub use embedder::openai::OpenAiEmbedder;
 pub use error::{QdrantError, Result};
 pub use payload::{EntityType, KnowledgePayload, SearchResult, SourceMetadata, SourceType};
 pub use task::{QdrantSearch, QdrantSimilarityCheck, QdrantUpsert};
@@ -47,17 +47,17 @@ pub use tool::QdrantSearchTool;
 
 /// Content chunking primitives used before embedding and upsert.
 pub mod chunker;
+/// Low-level Qdrant client wrappers and the high-level shared agent.
+pub mod client;
 /// Conversation transcript types consumed by the conversation chunker.
 pub mod conversation;
 /// Embedding abstractions and provider implementations.
 pub mod embedder;
 /// Error and result types for this crate.
 pub mod error;
-/// LLM tool adapters backed by Qdrant search.
-pub mod tool;
-/// Low-level Qdrant client wrappers and the high-level shared agent.
-pub mod client;
 /// Search payload and metadata types stored in Qdrant.
 pub mod payload;
 /// `naaf-core` task, materialiser, and check adapters built on Qdrant.
 pub mod task;
+/// LLM tool adapters backed by Qdrant search.
+pub mod tool;

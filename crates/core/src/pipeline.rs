@@ -19,15 +19,6 @@ use crate::{
     step::{Step, StepError},
 };
 
-/// Internal type-erased phase runner.
-type PhaseRunner<R, E> = Arc<
-    dyn Fn(
-        &R,
-        Arc<dyn Any + Send + Sync>,
-    ) -> LocalBoxFuture<'_, Result<Arc<dyn Any + Send + Sync>, PipelineError<E>>>,
->;
-/// Internal type-erased route resolver.
-type RouteResolver = Arc<dyn Fn(&dyn Any) -> Route>;
 type CheckpointRestorer<E> = Arc<
     dyn Fn(Value, &PhaseId) -> Result<Arc<dyn Any + Send + Sync>, PipelineError<E>> + Send + Sync,
 >;
@@ -41,9 +32,18 @@ type ParallelJoiner<E> = Arc<
         + Send
         + Sync,
 >;
+/// Internal type-erased phase runner.
+type PhaseRunner<R, E> = Arc<
+    dyn Fn(
+        &R,
+        Arc<dyn Any + Send + Sync>,
+    ) -> LocalBoxFuture<'_, Result<Arc<dyn Any + Send + Sync>, PipelineError<E>>>,
+>;
 type PipelineResumeFuture<'a, T, E> =
     Pin<Box<dyn Future<Output = Result<Option<T>, PipelineError<E>>> + 'a>>;
 type PipelineRunFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, PipelineError<E>>> + 'a>>;
+/// Internal type-erased route resolver.
+type RouteResolver = Arc<dyn Fn(&dyn Any) -> Route>;
 type SwitchResolver = Arc<dyn Fn(&dyn Any) -> Option<PhaseId> + Send + Sync>;
 
 /// A typed, async unit of work within a pipeline.

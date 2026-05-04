@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use crate::{PhaseId, RetryPolicy};
 
-pub type CheckpointResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+pub type CheckpointResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 /// Pluggable persistence backend for saving pipeline phase state.
 pub trait PipelineCheckpointer: Send + Sync + 'static {

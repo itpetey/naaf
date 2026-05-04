@@ -22,8 +22,6 @@ use crate::{
 
 /// Builder alias used after the step's public finding type has been selected.
 pub type BoundStepBuilder<R, I, A, S, F, E> = StepBuilder<R, I, A, S, F, E, FindingBound>;
-/// Builder alias used before the step's public finding type has been selected.
-pub type OpenStepBuilder<R, I, A, S, E> = StepBuilder<R, I, A, S, (), E, FindingOpen>;
 type BuilderFor<T> = OpenStepBuilder<
     <T as Task>::Runtime,
     <T as Task>::Input,
@@ -32,6 +30,8 @@ type BuilderFor<T> = OpenStepBuilder<
     <T as Task>::Error,
 >;
 type BuilderMarker<R, I, A, S, F, E, State> = PhantomData<fn() -> (R, I, A, S, F, E, State)>;
+/// Builder alias used before the step's public finding type has been selected.
+pub type OpenStepBuilder<R, I, A, S, E> = StepBuilder<R, I, A, S, (), E, FindingOpen>;
 type PipelineRunner<R, I, A, S, F, E> =
     dyn for<'a> Fn(&'a R, I, A) -> LocalBoxFuture<'a, Result<(S, Vec<F>), E>> + 'static;
 type Runner<R, I, O, F, E> = dyn for<'a> Fn(&'a R, StepInput<I>) -> LocalBoxFuture<'a, Result<Traced<O, F>, StepError<F, E>>>
