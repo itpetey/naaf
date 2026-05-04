@@ -3,6 +3,7 @@ use std::{
     fs,
     marker::PhantomData,
     path::{Component, Path, PathBuf},
+    process::Command,
 };
 
 use futures::future::LocalBoxFuture;
@@ -340,70 +341,75 @@ fn resolve_workspace_path(root: &Path, relative: &str) -> Result<PathBuf, String
 }
 
 fn search_files(root: &Path, params: SearchFilesParams) -> Value {
-    let include_pattern = match params.include.as_ref() {
-        Some(pattern) => match Pattern::new(pattern) {
-            Ok(pattern) => Some(pattern),
-            Err(error) => return error_value(format!("invalid include pattern: {error}")),
-        },
-        None => None,
+    let mut command = Command::new("rg");
+    command
+        .arg("--json")
+        .arg("-F")
+        .arg("-n")
+        .current_dir(root)
+        .arg(&params.query);
+
+    if !params.case_sensitive {
+        command.arg("-i");
+    }
+
+    if let Some(ref include) = params.include {
+        command.arg("-g").arg(include);
+    }
+
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => return error_value(format!("ripgrep failed to start: {error}")),
     };
 
-    let needle = if params.case_sensitive {
-        params.query.clone()
-    } else {
-        params.query.to_lowercase()
-    };
+    // ripgrep exits with code 1 when no matches are found, which is not an error.
+    if !output.status.success() && output.status.code() != Some(1) {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return error_value(format!("ripgrep error: {stderr}"));
+    }
 
     let mut matches = Vec::new();
     let mut truncated = false;
 
-    for path in walk_workspace(root) {
-        if !path.is_file() {
-            continue;
-        }
-
-        let Ok(relative_path) = path.strip_prefix(root) else {
-            continue;
-        };
-        let relative = relative_path_string(relative_path);
-
-        if include_pattern
-            .as_ref()
-            .is_some_and(|pattern| !pattern.matches(&relative))
-        {
-            continue;
-        }
-
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let value: Value = match serde_json::from_str(line) {
+            Ok(value) => value,
+            Err(_) => continue,
         };
 
-        for (index, line) in content.lines().enumerate() {
-            let haystack = if params.case_sensitive {
-                line.to_string()
-            } else {
-                line.to_lowercase()
-            };
-
-            if !haystack.contains(&needle) {
-                continue;
-            }
-
-            if matches.len() >= params.max_results {
-                truncated = true;
-                break;
-            }
-
-            matches.push(serde_json::json!({
-                "path": relative,
-                "line_number": index + 1,
-                "line": line,
-            }));
+        if value.get("type") != Some(&Value::String("match".to_string())) {
+            continue;
         }
 
-        if truncated {
+        let Some(data) = value.get("data") else {
+            continue;
+        };
+        let Some(path_value) = data.get("path") else {
+            continue;
+        };
+        let Some(path_text) = path_value.get("text").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(lines_value) = data.get("lines") else {
+            continue;
+        };
+        let Some(line_text) = lines_value.get("text").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(line_number) = data.get("line_number").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+
+        if matches.len() >= params.max_results {
+            truncated = true;
             break;
         }
+
+        matches.push(serde_json::json!({
+            "path": path_text,
+            "line_number": line_number,
+            "line": line_text.trim_end_matches('\n'),
+        }));
     }
 
     serde_json::json!({
